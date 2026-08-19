@@ -10,6 +10,7 @@ import {
   VibeProxyUsageService,
   layer,
   normalizeVibeProxyAuthFiles,
+  resolveVibeProxyAuthFilesUrl,
 } from "./VibeProxyUsageService.ts";
 
 const upstreamAccount = (remainingPercent: number) => ({
@@ -97,6 +98,23 @@ it("normalizes only display-safe Vibe-Proxy auth-file fields", () => {
   assert.notInclude(serialized, "/root/.cli-proxy-api");
   assert.notInclude(serialized, "private-routing-index");
   assert.notInclude(serialized, "private-account-id");
+});
+
+it("accepts a Vibe-Proxy origin, management URL, or full auth-files endpoint", () => {
+  assert.equal(
+    resolveVibeProxyAuthFilesUrl("http://vibe-proxy.local:8954"),
+    "http://vibe-proxy.local:8954/api/v0/management/auth-files",
+  );
+  assert.equal(
+    resolveVibeProxyAuthFilesUrl("http://vibe-proxy.local:8954/api/v0/management/"),
+    "http://vibe-proxy.local:8954/api/v0/management/auth-files",
+  );
+  assert.equal(
+    resolveVibeProxyAuthFilesUrl(
+      "http://vibe-proxy.local:8954/api/v0/management/auth-files?ignored=true",
+    ),
+    "http://vibe-proxy.local:8954/api/v0/management/auth-files",
+  );
 });
 
 it.layer(NodeServices.layer)("VibeProxyUsageService", (it) => {
