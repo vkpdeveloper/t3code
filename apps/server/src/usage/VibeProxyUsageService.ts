@@ -32,7 +32,6 @@ import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 
 const AUTH_FILES_PATH = "/api/v0/management/auth-files";
-const MANAGEMENT_PATH = "/api/v0/management";
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_ACCOUNTS = 1_000;
 const MAX_RECENT_REQUEST_BUCKETS = 100;
@@ -185,17 +184,12 @@ export const normalizeVibeProxyAuthFiles = (
   };
 };
 
-export const resolveVibeProxyAuthFilesUrl = (baseUrl: string): string | null => {
+const resolveAuthFilesUrl = (baseUrl: string): string | null => {
   try {
     const url = new URL(baseUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     if (url.username || url.password) return null;
-    const pathname = url.pathname.replace(/\/+$/u, "");
-    url.pathname = pathname.endsWith(AUTH_FILES_PATH)
-      ? pathname
-      : pathname.endsWith(MANAGEMENT_PATH)
-        ? `${pathname}/auth-files`
-        : `${pathname}${AUTH_FILES_PATH}`;
+    url.pathname = `${url.pathname.replace(/\/+$/u, "")}${AUTH_FILES_PATH}`;
     url.search = "";
     url.hash = "";
     return url.toString();
@@ -290,7 +284,7 @@ export const make = Effect.gen(function* () {
       return result({ status: current.status, snapshot: current.snapshot });
     }
 
-    const requestUrl = resolveVibeProxyAuthFilesUrl(current.settings.vibeProxy.baseUrl);
+    const requestUrl = resolveAuthFilesUrl(current.settings.vibeProxy.baseUrl);
     if (!requestUrl) {
       return result({
         status: "ready",
