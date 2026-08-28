@@ -138,7 +138,6 @@ interface GrokSessionContext {
   modelSelectionRevision: number;
   currentContextWindow: number | undefined;
   readonly contextWindowByModelId: ReadonlyMap<string, number>;
-  readonly supportsImageInput: boolean;
   stopped: boolean;
 }
 
@@ -924,8 +923,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             modelSelectionRevision: 0,
             currentContextWindow: setupModelSelection.totalContextTokens,
             contextWindowByModelId,
-            supportsImageInput:
-              started.initializeResult.agentCapabilities?.promptCapabilities?.image === true,
             stopped: false,
           };
           if (
@@ -1190,13 +1187,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 ? resolveGrokAcpBaseModelId(turnModelSelection.model)
                 : undefined;
               const text = input.input?.trim();
-              if ((input.attachments?.length ?? 0) > 0 && !ctx.supportsImageInput) {
-                return yield* new ProviderAdapterValidationError({
-                  provider: PROVIDER,
-                  operation: "sendTurn",
-                  issue: "Grok Agent does not advertise ACP image prompt support.",
-                });
-              }
               const imagePromptParts = yield* Effect.forEach(
                 input.attachments ?? [],
                 (attachment) =>

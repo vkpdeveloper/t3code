@@ -770,84 +770,43 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
-  it.effect("rejects images when Grok does not advertise ACP image support", () =>
+  it.effect("sends images when Grok advertises ACP image support as false", () =>
     Effect.gen(function* () {
-      const threadId = ThreadId.make("grok-unsupported-image");
+      const threadId = ThreadId.make("grok-false-image-capability");
       const requestLogDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-rejected-image-log-")),
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-image-log-")),
       );
       const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
       const wrapperPath = yield* Effect.promise(() =>
         makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
       );
       const adapter = yield* makeTestAdapter(wrapperPath);
-      const instanceId = ProviderInstanceId.make("grok");
-
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make("grok"),
-        cwd: process.cwd(),
-        runtimeMode: "full-access",
-      });
-
-      const error = yield* Effect.flip(
-        adapter.sendTurn({
-          threadId,
-          input: "inspect this image",
-          attachments: [
-            {
-              type: "image",
-              id: "grok-unsupported-image-12345678-1234-1234-1234-123456789abc",
-              name: "diagram.png",
-              mimeType: "image/png",
-              sizeBytes: 4,
-            },
-          ],
-          modelSelection: {
-            instanceId,
-            model: "grok-mock-alt",
-            options: [{ id: "reasoningEffort", value: "high" }],
-          },
-        }),
-      );
-
-      assert.equal(error._tag, "ProviderAdapterValidationError");
-      assert.include(error.message, "does not advertise ACP image prompt support");
-      const setModelRequests = (yield* Effect.promise(() => readJsonLines(requestLogPath))).filter(
-        (request) => request.method === "session/set_model",
-      );
-      assert.deepEqual(setModelRequests, []);
-      yield* adapter.stopSession(threadId);
-    }),
-  );
-
-  it.effect("sends images when Grok advertises ACP image support", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("grok-supported-image");
-      const requestLogDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-image-log-")),
-      );
-      const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockGrokWrapper({
-          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
-          T3_ACP_SUPPORTS_IMAGES: "1",
-        }),
-      );
-      const adapter = yield* makeTestAdapter(wrapperPath);
       const { attachmentsDir } = yield* ServerConfig;
-      const attachment = {
+      const pngAttachment = {
         type: "image" as const,
-        id: "grok-supported-image-12345678-1234-1234-1234-123456789abc",
+        id: "grok-false-image-png-12345678-1234-1234-1234-123456789abc",
         name: "diagram.png",
-        mimeType: "image/png",
+        mimeType: "image/png" as const,
         sizeBytes: 4,
       };
-      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
-      yield* Effect.promise(() =>
-        NodeFSP.mkdir(NodePath.dirname(attachmentPath), { recursive: true }),
-      );
-      yield* Effect.promise(() => NodeFSP.writeFile(attachmentPath, Uint8Array.from([1, 2, 3, 4])));
+      const jpegAttachment = {
+        type: "image" as const,
+        id: "grok-false-image-jpeg-12345678-1234-1234-1234-123456789abc",
+        name: "photo.jpg",
+        mimeType: "image/jpeg" as const,
+        sizeBytes: 3,
+      };
+      const attachments = [pngAttachment, jpegAttachment];
+      for (const [attachment, bytes] of [
+        [pngAttachment, Uint8Array.from([1, 2, 3, 4])],
+        [jpegAttachment, Uint8Array.from([5, 6, 7])],
+      ] as const) {
+        const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+        yield* Effect.promise(() =>
+          NodeFSP.mkdir(NodePath.dirname(attachmentPath), { recursive: true }),
+        );
+        yield* Effect.promise(() => NodeFSP.writeFile(attachmentPath, bytes));
+      }
 
       yield* adapter.startSession({
         threadId,
@@ -855,10 +814,11 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
         cwd: process.cwd(),
         runtimeMode: "full-access",
       });
+
       yield* adapter.sendTurn({
         threadId,
-        input: "inspect this image",
-        attachments: [attachment],
+        input: "inspect these images",
+        attachments,
       });
 
       const promptRequest = (yield* Effect.promise(() => readJsonLines(requestLogPath))).find(
@@ -866,8 +826,9 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       );
       const prompt = (promptRequest?.params as { readonly prompt?: unknown } | undefined)?.prompt;
       assert.deepEqual(prompt, [
-        { type: "text", text: "inspect this image" },
+        { type: "text", text: "inspect these images" },
         { type: "image", data: "AQIDBA==", mimeType: "image/png" },
+        { type: "image", data: "BQYH", mimeType: "image/jpeg" },
       ]);
 
       yield* adapter.stopSession(threadId);

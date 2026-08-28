@@ -46,5 +46,5 @@ When Grok Build reports them, T3 Code can replace the default placeholder title 
 context-window usage, per-turn token totals, model usage, and trustworthy cost. Grok Build marks
 incomplete or partial billing; T3 Code does not present those costs as final.
 
-Image attachments are enabled only when the installed Grok Build agent advertises ACP image input.
-Otherwise T3 Code rejects the attachment before sending the prompt.
+T3 Code sends image attachments to Grok Build even when the installed version reports image input
+as unsupported. If Grok rejects an attachment, T3 Code shows its error.

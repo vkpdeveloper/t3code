@@ -15,6 +15,9 @@ import { describe, expect } from "vite-plus/test";
 
 import { makeGrokAcpRuntime } from "./GrokAcpSupport.ts";
 
+const probePngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAK0lEQVR4nO3OIQEAAAwEoetfeovxBoGnq1tKQEBAQEBAQEBAQEBAQEBgHXhUDfhqRFDd3gAAAABJRU5ErkJggg==";
+
 const makeProbeRuntime = Effect.gen(function* () {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* makeGrokAcpRuntime({
@@ -65,6 +68,22 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === "1")("Grok ACP CLI probe", () =
       // No-op switch — selecting the model the session already runs on must
       // succeed against every Grok build that implements `session/set_model`.
       yield* runtime.setSessionModel(currentModelId);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("accepts a PNG despite advertising image input as unsupported", () =>
+    Effect.gen(function* () {
+      const runtime = yield* makeProbeRuntime;
+      const started = yield* runtime.start();
+
+      expect(started.initializeResult.agentCapabilities?.promptCapabilities?.image).toBe(false);
+      const result = yield* runtime.prompt({
+        prompt: [
+          { type: "text", text: "Briefly describe the solid color in this image." },
+          { type: "image", data: probePngBase64, mimeType: "image/png" },
+        ],
+      });
+      expect(result.stopReason).toBeDefined();
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
