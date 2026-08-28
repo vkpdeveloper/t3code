@@ -2,7 +2,7 @@
 
 T3 Code can notify you when an agent finishes, fails, needs approval, or is waiting for your reply in chat. Choose the events and sound under **Settings → Notifications**.
 
-When a notify event lands while you are looking elsewhere, the matching thread also flashes briefly in the sidebar so you can find it even if Do Not Disturb hid the banner.
+Banners, the alert chime, and the sidebar flash only fire while T3 Code is not focused. If Do Not Disturb hid the banner, the flash is still there when you come back so you can find the thread.
 
 ## Web Push
 

@@ -38,8 +38,8 @@ export interface ReconcileThreadNotificationsInput {
   /** scoped project key -> title. A miss only costs the project name in the body. */
   readonly projectTitles: ReadonlyMap<string, string>;
   readonly settings: ThreadNotificationSettings;
+  /** Banners, chime, and splash only fire while T3 Code itself is unfocused. */
   readonly windowFocused: boolean;
-  readonly activeThreadRef: ScopedThreadRef | null;
   /**
    * The agent's latest assistant text for a thread, when it is already in
    * memory. Optional and allowed to return null: resolving it must never
@@ -107,10 +107,6 @@ function isNotificationKindEnabled(
     case "input-needed":
       return settings.inputNeeded;
   }
-}
-
-function sameThread(left: ScopedThreadRef, right: ScopedThreadRef): boolean {
-  return left.environmentId === right.environmentId && left.threadId === right.threadId;
 }
 
 /**
@@ -197,14 +193,9 @@ export function reconcileThreadNotifications(
       continue;
     }
 
-    // The user is already watching this exact thread, so the banner would tell
-    // them something they can see. Any other case (another thread, settings,
-    // another app entirely) still notifies.
-    const watchingThisThread =
-      input.windowFocused &&
-      input.activeThreadRef !== null &&
-      sameThread(input.activeThreadRef, threadRef);
-    if (watchingThisThread) {
+    // While T3 Code has focus the user can already see the sidebar and the
+    // active thread, so banners stay quiet. Alerts are for looking elsewhere.
+    if (input.windowFocused) {
       continue;
     }
 
@@ -226,7 +217,7 @@ export function reconcileThreadNotifications(
     });
   }
 
-  // The chime is the one signal Do Not Disturb cannot swallow, so it is tied
-  // to the window being unfocused rather than to the banner being shown.
-  return { notifications, playAlertSound: notifications.length > 0 && !input.windowFocused, next };
+  // Banners already require an unfocused window; the chime follows the same
+  // gate so DND cannot mute the only signal that still reaches the user.
+  return { notifications, playAlertSound: notifications.length > 0, next };
 }

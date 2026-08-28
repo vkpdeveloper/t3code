@@ -93,7 +93,6 @@ function reconcile(
   overrides: Partial<{
     settings: ThreadNotificationSettings;
     windowFocused: boolean;
-    activeThreadRef: { environmentId: EnvironmentId; threadId: ThreadId } | null;
     readResponseText: () => string | null;
   }> = {},
 ) {
@@ -103,7 +102,6 @@ function reconcile(
     projectTitles: PROJECT_TITLES,
     settings: overrides.settings ?? ALL_ENABLED,
     windowFocused: overrides.windowFocused ?? false,
-    activeThreadRef: overrides.activeThreadRef ?? null,
     ...(overrides.readResponseText ? { readResponseText: overrides.readResponseText } : {}),
   });
 }
@@ -217,9 +215,7 @@ describe("reconcileThreadNotifications", () => {
       const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
       const result = reconcile(seeded, [makeThread("completed")], { windowFocused: true });
 
-      // Still notified (a different thread is on screen), but the chime is for
-      // reaching someone who is looking elsewhere.
-      expect(result.notifications).toHaveLength(1);
+      expect(result.notifications).toEqual([]);
       expect(result.playAlertSound).toBe(false);
     });
 
@@ -322,36 +318,34 @@ describe("reconcileThreadNotifications", () => {
     expect(result.notifications).toEqual([]);
   });
 
-  it("suppresses the banner while the user watches that thread, but still advances", () => {
+  it("suppresses banners while T3 Code is focused, but still advances", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: true,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID },
     });
 
     expect(result.notifications).toEqual([]);
     expect(result.next.get(KEY)).toBe("completed");
 
-    // Navigating away later must not replay the suppressed transition.
-    const afterNavigation = reconcile(result.next, [makeThread("completed")]);
-    expect(afterNavigation.notifications).toEqual([]);
+    // Unfocusing later must not replay the suppressed transition.
+    const afterBlur = reconcile(result.next, [makeThread("completed")]);
+    expect(afterBlur.notifications).toEqual([]);
   });
 
-  it("still notifies when focused on a different thread", () => {
+  it("still suppresses when focused on a different thread", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: true,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: "thread-2" as ThreadId },
     });
 
-    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications).toEqual([]);
+    expect(result.next.get(KEY)).toBe("completed");
   });
 
-  it("still notifies when that thread is open but the window is not focused", () => {
+  it("notifies when the window is not focused", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: false,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID },
     });
 
     expect(result.notifications).toHaveLength(1);

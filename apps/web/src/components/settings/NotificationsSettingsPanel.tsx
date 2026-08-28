@@ -114,7 +114,7 @@ export function NotificationsSettingsPanel() {
             webPushError ??
             (!isElectron && !webPushAvailable
               ? "Sign in to T3 Connect to enable Web Push."
-              : "Notify when an agent needs you. Suppressed while you are looking at that thread.")
+              : "Notify when an agent needs you. Suppressed while T3 Code is focused.")
           }
           resetAction={
             notificationsEnabled !== DEFAULT_CLIENT_SETTINGS[enabledKey] ? (

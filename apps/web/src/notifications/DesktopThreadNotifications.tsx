@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
@@ -96,10 +96,6 @@ function threadAlertKindForNotification(kind: DesktopNotificationKind): ThreadAl
 function DesktopThreadNotifications() {
   const navigate = useNavigate();
   const activeThreadRef = useActiveThreadRefFromRoute();
-  // Mirrored into a ref so the atom subscription below can read the current
-  // route without re-subscribing on every navigation.
-  const activeThreadRefMirror = useRef(activeThreadRef);
-  activeThreadRefMirror.current = activeThreadRef;
 
   useEffect(() => {
     // Resolved per batch, not once: the sound and the sidebar highlights work
@@ -116,7 +112,6 @@ function DesktopThreadNotifications() {
         projectTitles: buildProjectTitleMap(readProjects()),
         settings: selectThreadNotificationSettings(settings),
         windowFocused,
-        activeThreadRef: activeThreadRefMirror.current,
         readResponseText: readLoadedResponseText,
       });
       phases = next;
