@@ -343,7 +343,7 @@ const program = Effect.gen(function* () {
         protocolVersion: 1,
         agentCapabilities: {
           loadSession: true,
-          ...(supportsImages ? { promptCapabilities: { image: true } } : {}),
+          promptCapabilities: { image: supportsImages },
         },
       };
     }),
