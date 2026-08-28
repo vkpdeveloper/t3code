@@ -21,6 +21,7 @@ const ALL_ENABLED: ThreadNotificationSettings = {
   taskCompleted: true,
   taskFailed: true,
   approvalNeeded: true,
+  inputNeeded: true,
 };
 
 type ThreadPhaseFixture = "running" | "completed" | "failed" | "approval" | "input" | "unknown";
@@ -114,11 +115,13 @@ describe("notifiableKind", () => {
     expect(notifiableKind("running", "completed")).toBe("task-completed");
     expect(notifiableKind("running", "failed")).toBe("task-failed");
     expect(notifiableKind("running", "waiting_for_approval")).toBe("approval-needed");
+    expect(notifiableKind("running", "waiting_for_input")).toBe("input-needed");
     expect(notifiableKind("starting", "completed")).toBe("task-completed");
   });
 
   it("stays quiet when the thread was not previously active", () => {
     expect(notifiableKind("completed", "waiting_for_approval")).toBeNull();
+    expect(notifiableKind("completed", "waiting_for_input")).toBeNull();
     expect(notifiableKind("stale", "completed")).toBeNull();
     expect(notifiableKind(null, "completed")).toBeNull();
     expect(notifiableKind("running", null)).toBeNull();
@@ -126,6 +129,7 @@ describe("notifiableKind", () => {
 
   it("does not treat an approval-to-approval or non-terminal move as news", () => {
     expect(notifiableKind("waiting_for_approval", "waiting_for_approval")).toBeNull();
+    expect(notifiableKind("waiting_for_input", "waiting_for_input")).toBeNull();
     expect(notifiableKind("running", "running")).toBeNull();
     expect(notifiableKind("starting", "running")).toBeNull();
   });
@@ -188,6 +192,9 @@ describe("reconcileThreadNotifications", () => {
     );
     expect(reconcile(seeded, [makeThread("approval")]).notifications[0]?.title).toBe(
       "Approval Required - t3code",
+    );
+    expect(reconcile(seeded, [makeThread("input")]).notifications[0]?.title).toBe(
+      "Input Required - t3code",
     );
   });
 
@@ -286,6 +293,23 @@ describe("reconcileThreadNotifications", () => {
     const result = reconcile(seeded, [makeThread("approval")]);
 
     expect(result.notifications[0]?.kind).toBe("approval-needed");
+  });
+
+  it("reports a chat input request", () => {
+    const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
+    const result = reconcile(seeded, [makeThread("input")]);
+
+    expect(result.notifications[0]?.kind).toBe("input-needed");
+  });
+
+  it("honors the input-needed settings toggle", () => {
+    const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
+    const result = reconcile(seeded, [makeThread("input")], {
+      settings: { ...ALL_ENABLED, inputNeeded: false },
+    });
+
+    expect(result.notifications).toEqual([]);
+    expect(result.next.get(KEY)).toBe("waiting_for_input");
   });
 
   it("does not re-fire when a phase disappears and comes back", () => {

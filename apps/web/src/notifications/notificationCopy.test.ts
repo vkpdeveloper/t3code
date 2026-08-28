@@ -12,12 +12,14 @@ describe("notificationTitle", () => {
     expect(notificationTitle("task-completed")).toBe("Completed");
     expect(notificationTitle("task-failed")).toBe("Failed");
     expect(notificationTitle("approval-needed")).toBe("Approval Required");
+    expect(notificationTitle("input-needed")).toBe("Input Required");
   });
 
   it("appends the project so several running agents stay distinguishable", () => {
     expect(notificationTitle("task-completed", "t3code")).toBe("Completed - t3code");
     expect(notificationTitle("task-failed", "api")).toBe("Failed - api");
     expect(notificationTitle("approval-needed", "web")).toBe("Approval Required - web");
+    expect(notificationTitle("input-needed", "mobile")).toBe("Input Required - mobile");
   });
 
   it("omits an absent or blank project rather than leaving a dangling separator", () => {

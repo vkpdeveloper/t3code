@@ -25,6 +25,7 @@ type NotificationToggleKey = Extract<
   | "desktopNotifyTaskCompleted"
   | "desktopNotifyTaskFailed"
   | "desktopNotifyApprovalNeeded"
+  | "desktopNotifyInputNeeded"
   | "desktopNotificationSound"
 >;
 
@@ -51,6 +52,12 @@ const NOTIFICATION_TOGGLES: ReadonlyArray<{
     searchId: "notification-approval-needed",
     description: "The agent is blocked until you approve an action.",
     resetLabel: "approval notifications",
+  },
+  {
+    key: "desktopNotifyInputNeeded",
+    searchId: "notification-input-needed",
+    description: "The agent is waiting for your reply in chat.",
+    resetLabel: "input notifications",
   },
   {
     key: "desktopNotificationSound",

@@ -1,6 +1,8 @@
 # Notifications
 
-T3 Code can notify you when an agent finishes, fails, or needs approval. Choose the events and sound under **Settings → Notifications**.
+T3 Code can notify you when an agent finishes, fails, needs approval, or is waiting for your reply in chat. Choose the events and sound under **Settings → Notifications**.
+
+When a notify event lands while you are looking elsewhere, the matching thread also flashes briefly in the sidebar so you can find it even if Do Not Disturb hid the banner.
 
 ## Web Push
 

@@ -25,6 +25,7 @@ const clientSettings: ClientSettings = {
   webPushNotificationsEnabled: false,
   desktopNotificationSound: true,
   desktopNotifyApprovalNeeded: true,
+  desktopNotifyInputNeeded: true,
   desktopNotifyTaskCompleted: true,
   desktopNotifyTaskFailed: true,
   dismissedProviderUpdateNotificationKeys: [],

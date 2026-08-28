@@ -235,6 +235,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/notifications",
   },
   {
+    id: "notification-input-needed",
+    title: "Notify when input is needed",
+    to: "/settings/notifications",
+  },
+  {
     id: "notification-sound",
     title: "Notification sound",
     to: "/settings/notifications",

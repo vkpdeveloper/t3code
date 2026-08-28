@@ -3,7 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
 import type { ClientSettings } from "@t3tools/contracts/settings";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { DesktopNotificationKind, ScopedThreadRef } from "@t3tools/contracts";
 import type {
   EnvironmentThread,
   EnvironmentThreadShell,
@@ -32,6 +32,7 @@ import {
   subscribeThreadAlerts,
   THREAD_ALERT_FOCUSED_TTL_MS,
   THREAD_ALERT_MAX_TTL_MS,
+  type ThreadAlertKind,
 } from "./threadAlertStore";
 import { reconcileWebPushRegistration } from "./webPush";
 
@@ -75,7 +76,21 @@ export function selectThreadNotificationSettings(
     taskCompleted: settings.desktopNotifyTaskCompleted,
     taskFailed: settings.desktopNotifyTaskFailed,
     approvalNeeded: settings.desktopNotifyApprovalNeeded,
+    inputNeeded: settings.desktopNotifyInputNeeded,
   };
+}
+
+function threadAlertKindForNotification(kind: DesktopNotificationKind): ThreadAlertKind {
+  switch (kind) {
+    case "task-completed":
+      return "completed";
+    case "task-failed":
+      return "failed";
+    case "approval-needed":
+      return "approval-needed";
+    case "input-needed":
+      return "input-needed";
+  }
 }
 
 function DesktopThreadNotifications() {
@@ -111,13 +126,10 @@ function DesktopThreadNotifications() {
       for (const notification of notifications) {
         // Mark the row before the banner: the highlight is what survives Do
         // Not Disturb, so it must not depend on the banner succeeding.
-        if (notification.kind === "task-completed" || notification.kind === "task-failed") {
-          markThreadAlert(
-            notification.threadRef,
-            notification.kind === "task-failed" ? "failed" : "completed",
-            { nowMs, windowFocused },
-          );
-        }
+        markThreadAlert(notification.threadRef, threadAlertKindForNotification(notification.kind), {
+          nowMs,
+          windowFocused,
+        });
 
         if (typeof showNotification === "function") {
           void showNotification({
@@ -258,6 +270,7 @@ function WebPushRegistrationHost() {
     relaySession?.accountId,
     settings.desktopNotificationSound,
     settings.desktopNotifyApprovalNeeded,
+    settings.desktopNotifyInputNeeded,
     settings.desktopNotifyTaskCompleted,
     settings.desktopNotifyTaskFailed,
     settings.webPushNotificationsEnabled,

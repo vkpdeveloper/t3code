@@ -3,11 +3,11 @@
  *
  * Do Not Disturb can swallow the notification banner entirely, and Electron
  * exposes no way to know whether that happened. So the alert has to survive
- * being missed: when a thread completes or fails without the user watching it,
- * its sidebar row is marked, and the mark stays until they actually open the
- * thread. Coming back from another app, another Space, or a Focus mode, the
- * sidebar itself says what happened and where — even if nothing was ever
- * shown or heard.
+ * being missed: when a thread finishes, fails, or needs the user without them
+ * watching it, its sidebar row is marked, and the mark stays until they
+ * actually open the thread. Coming back from another app, another Space, or a
+ * Focus mode, the sidebar itself says what happened and where — even if
+ * nothing was ever shown or heard.
  *
  * State is deliberately in-memory. A highlight answers "what happened while I
  * was away just now"; restoring week-old marks on launch would be noise.
@@ -19,8 +19,15 @@ import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 
-/** Green for a finished task, red for a failed one. */
-export type ThreadAlertKind = "completed" | "failed";
+/** Green finished, red failed, amber approval, indigo/info input. */
+export type ThreadAlertKind = "completed" | "failed" | "approval-needed" | "input-needed";
+
+const THREAD_ALERT_PRIORITY: Readonly<Record<ThreadAlertKind, number>> = {
+  failed: 3,
+  "approval-needed": 2,
+  "input-needed": 2,
+  completed: 1,
+};
 
 /**
  * How long a highlight survives once the user is actually looking at the app.
@@ -72,9 +79,12 @@ export function markThreadAlert(
   const key = scopedThreadKey(ref);
   const current = appAtomRegistry.get(threadAlertsAtom);
   const existing = current[key];
-  // A failure outranks a completion for the same thread: if both land before
-  // the user looks, the failure is the one they need to see.
-  if (existing !== undefined && existing.kind === "failed" && kind === "completed") {
+  // Keep the highest-urgency mark when several land before the user looks.
+  // Failure beats attention; attention beats a quiet completion.
+  if (
+    existing !== undefined &&
+    THREAD_ALERT_PRIORITY[existing.kind] > THREAD_ALERT_PRIORITY[kind]
+  ) {
     return;
   }
   appAtomRegistry.set(threadAlertsAtom, {

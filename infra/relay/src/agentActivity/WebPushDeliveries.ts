@@ -50,6 +50,9 @@ function kindEnabled(
       return preferences.notifyOnFailure;
     case "approval-needed":
       return preferences.notifyOnApproval;
+    case "input-needed":
+      // Older subscriptions may lack the field until the client re-registers.
+      return preferences.notifyOnInput ?? true;
   }
 }
 

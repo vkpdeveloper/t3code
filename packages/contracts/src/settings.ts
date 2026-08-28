@@ -263,6 +263,7 @@ export const ClientSettingsSchema = Schema.Struct({
   desktopNotifyApprovalNeeded: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  desktopNotifyInputNeeded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   desktopNotificationSound: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
@@ -1035,6 +1036,7 @@ export const ClientSettingsPatch = Schema.Struct({
   desktopNotifyTaskCompleted: Schema.optionalKey(Schema.Boolean),
   desktopNotifyTaskFailed: Schema.optionalKey(Schema.Boolean),
   desktopNotifyApprovalNeeded: Schema.optionalKey(Schema.Boolean),
+  desktopNotifyInputNeeded: Schema.optionalKey(Schema.Boolean),
   desktopNotificationSound: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),

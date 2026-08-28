@@ -13,6 +13,7 @@ export interface ThreadNotificationSettings {
   readonly taskCompleted: boolean;
   readonly taskFailed: boolean;
   readonly approvalNeeded: boolean;
+  readonly inputNeeded: boolean;
 }
 
 /**
@@ -103,6 +104,8 @@ function isNotificationKindEnabled(
       return settings.taskFailed;
     case "approval-needed":
       return settings.approvalNeeded;
+    case "input-needed":
+      return settings.inputNeeded;
   }
 }
 
