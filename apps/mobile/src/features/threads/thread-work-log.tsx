@@ -135,6 +135,7 @@ export function ThreadWorkLog(props: {
   readonly expandedRows: Readonly<Record<string, boolean>>;
   readonly iconSubtleColor: import("react-native").ColorValue;
   readonly onCopyRow: (rowId: string, value: string) => void;
+  readonly onPressImage: (uri: string) => void;
   readonly onToggleRow: (rowId: string) => void;
 }) {
   const pressedBackground = useThemeColor("--color-subtle");
@@ -262,6 +263,7 @@ export function ThreadWorkLog(props: {
                   environmentId={props.environmentId}
                   imageId={row.generatedImage.imageId}
                   filename={row.generatedImage.filename}
+                  onPress={props.onPressImage}
                 />
               ) : null}
 
@@ -295,6 +297,7 @@ function WorkLogGeneratedImage(props: {
   readonly environmentId: EnvironmentId;
   readonly imageId: string;
   readonly filename: string;
+  readonly onPress: (uri: string) => void;
 }) {
   const url = useAssetUrl(props.environmentId, {
     _tag: "generated-image",
@@ -303,12 +306,14 @@ function WorkLogGeneratedImage(props: {
   return (
     <View className="ml-7 mb-1 h-40 overflow-hidden rounded-lg border border-neutral-300/60 dark:border-white/[0.12]">
       {url ? (
-        <Image
-          accessibilityLabel={props.filename}
-          source={{ uri: url }}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Preview ${props.filename}`}
           className="h-40 w-full"
-          resizeMode="contain"
-        />
+          onPress={() => props.onPress(url)}
+        >
+          <Image source={{ uri: url }} className="h-40 w-full" resizeMode="contain" />
+        </Pressable>
       ) : null}
     </View>
   );

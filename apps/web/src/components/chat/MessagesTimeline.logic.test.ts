@@ -554,6 +554,92 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
+  it("keeps generated images visible when settled work is collapsed", () => {
+    const turnId = "turn-image" as never;
+    const timelineEntries = [
+      {
+        id: "assistant-first-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        message: {
+          id: "assistant-first" as never,
+          role: "assistant" as const,
+          text: "Generating the image.",
+          turnId,
+          createdAt: "2026-01-01T00:00:01Z",
+          updatedAt: "2026-01-01T00:00:02Z",
+          streaming: false,
+        },
+      },
+      {
+        id: "work-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        entry: {
+          id: "work",
+          createdAt: "2026-01-01T00:00:03Z",
+          turnId,
+          label: "Used a tool",
+          tone: "tool" as const,
+        },
+      },
+      {
+        id: "generated-image-entry",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:04Z",
+        entry: {
+          id: "generated-image",
+          createdAt: "2026-01-01T00:00:04Z",
+          turnId,
+          label: "Generated image",
+          tone: "tool" as const,
+          generatedImage: {
+            imageId: "11111111-1111-1111-1111-111111111111.png",
+            filename: "11111111-1111-1111-1111-111111111111.png",
+            mimeType: "image/png",
+          },
+        },
+      },
+      {
+        id: "assistant-final-entry",
+        kind: "message" as const,
+        createdAt: "2026-01-01T00:00:05Z",
+        message: {
+          id: "assistant-final" as never,
+          role: "assistant" as const,
+          text: "Done.",
+          turnId,
+          createdAt: "2026-01-01T00:00:05Z",
+          updatedAt: "2026-01-01T00:00:06Z",
+          streaming: false,
+        },
+      },
+    ];
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "assistant-first-entry",
+      `turn-fold:${turnId}`,
+      "generated-image-entry",
+      "assistant-final-entry",
+    ]);
+    expect(rows[2]).toMatchObject({
+      kind: "work",
+      groupedEntries: [
+        {
+          generatedImage: { imageId: "11111111-1111-1111-1111-111111111111.png" },
+        },
+      ],
+    });
+  });
+
   it("folds assistant messages between the first and terminal messages", () => {
     const timelineEntries = [
       {

@@ -602,10 +602,12 @@ function deriveTurnFolds(input: {
       if (entry.id === firstAssistantEntry?.id || entry.id === group.terminalEntry?.id) {
         continue;
       }
-      // Agent-spawn CTA rows never fold: workflows outlive their launching
-      // turn (dynamic spawns, background execution), and folding the CTA
-      // when the turn settles makes a still-running fleet invisible.
-      if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
+      // Agent-spawn CTAs and generated images remain useful after the turn
+      // settles, so keep them visible outside the collapsed work log.
+      if (
+        entry.kind === "work" &&
+        (entry.entry.agentSpawn !== undefined || entry.entry.generatedImage !== undefined)
+      ) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
@@ -821,6 +823,18 @@ export function deriveMessagesTimelineRows(input: {
       });
     }
 
+    if (timelineEntry.kind === "work" && timelineEntry.entry.generatedImage !== undefined) {
+      nextRows.push({
+        kind: "work",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        groupedEntries: [timelineEntry.entry],
+        isExpandedToolGroupEntry: false,
+        isLastExpandedToolGroupEntry: false,
+      });
+      continue;
+    }
+
     if (collapsedEntryIds.has(timelineEntry.id)) {
       continue;
     }
@@ -837,6 +851,7 @@ export function deriveMessagesTimelineRows(input: {
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
+          nextEntry.entry.generatedImage !== undefined ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           foldsByAnchorEntryId.has(nextEntry.id)

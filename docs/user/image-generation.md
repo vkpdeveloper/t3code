@@ -18,6 +18,8 @@ If the selected backend is missing or signed out, the tool reports that instead 
 
 Generated files are stored in T3 Code's image library on the environment, under userdata `images`. They are not written into your project unless the agent copies them there. Ask it to copy a file into the repo when you want that asset committed.
 
+Generated images also appear inline in the thread. Select the preview to open the full image.
+
 ## Quality and size
 
 The tool defaults aspect ratio to auto. You can ask for `1k` or `2k` resolution and `low`, `medium`, or `high` quality. Both backends pass those as instructions to their built-in image tools.

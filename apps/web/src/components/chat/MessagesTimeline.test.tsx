@@ -126,6 +126,13 @@ vi.mock("@pierre/diffs/react", () => {
   return { FileDiff: MockFileDiff };
 });
 
+vi.mock("~/assets/assetUrls", () => ({
+  useAssetUrlState: () => ({
+    _tag: "Success",
+    url: "https://example.test/generated-image.png",
+  }),
+}));
+
 function matchMedia() {
   return {
     matches: false,
@@ -237,6 +244,36 @@ function buildAssistantTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("renders a generated image as an inline preview", () => {
+    const filename = "11111111-1111-1111-1111-111111111111.png";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "generated-image-entry",
+            kind: "work",
+            createdAt: MESSAGE_CREATED_AT,
+            entry: {
+              id: "generated-image",
+              createdAt: MESSAGE_CREATED_AT,
+              label: "Generated image",
+              tone: "tool",
+              generatedImage: {
+                imageId: filename,
+                filename,
+                mimeType: "image/png",
+              },
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain(`aria-label="Preview ${filename}"`);
+    expect(markup).toContain('src="https://example.test/generated-image.png"');
+  });
+
   it("renders a feedback command and its pending response as normal thread messages", () => {
     const submission = {
       id: MessageId.make("feedback-command"),

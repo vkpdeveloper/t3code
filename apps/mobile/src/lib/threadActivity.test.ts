@@ -565,6 +565,96 @@ describe("buildThreadFeed", () => {
     ]);
   });
 
+  it("keeps generated images visible when settled work is collapsed", () => {
+    const turnId = TurnId.make("turn-image");
+    const thread = makeThread({
+      id: ThreadId.make("thread-image"),
+      projectId: ProjectId.make("project-1"),
+      title: "Generated image",
+      latestTurn: {
+        turnId,
+        state: "completed",
+        requestedAt: "2026-04-01T00:00:00.000Z",
+        startedAt: "2026-04-01T00:00:01.000Z",
+        completedAt: "2026-04-01T00:00:06.000Z",
+        assistantMessageId: MessageId.make("assistant-final"),
+      },
+      messages: [
+        {
+          id: MessageId.make("assistant-first"),
+          role: "assistant",
+          text: "Generating the image.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:01.000Z",
+          updatedAt: "2026-04-01T00:00:02.000Z",
+        },
+        {
+          id: MessageId.make("assistant-final"),
+          role: "assistant",
+          text: "Done.",
+          turnId,
+          streaming: false,
+          createdAt: "2026-04-01T00:00:05.000Z",
+          updatedAt: "2026-04-01T00:00:06.000Z",
+        },
+      ],
+      activities: [
+        makeActivity({
+          id: EventId.make("tool-completed"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Read files",
+          createdAt: "2026-04-01T00:00:03.000Z",
+          turnId,
+          payload: {
+            title: "Read files",
+            itemType: "file_read",
+            status: "completed",
+          },
+        }),
+        makeActivity({
+          id: EventId.make("image-completed"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Generate image",
+          createdAt: "2026-04-01T00:00:04.000Z",
+          turnId,
+          payload: {
+            title: "Generate image",
+            itemType: "mcp_tool_call",
+            status: "completed",
+            data: {
+              generatedImage: {
+                imageId: "11111111-1111-1111-1111-111111111111.png",
+                filename: "11111111-1111-1111-1111-111111111111.png",
+                mimeType: "image/png",
+              },
+            },
+          },
+        }),
+      ],
+    });
+
+    const feed = buildThreadFeed(thread);
+    const collapsed = deriveThreadFeedPresentation(feed, thread.latestTurn, new Set());
+
+    expect(collapsed.map((entry) => entry.id)).toEqual([
+      "assistant-first",
+      "turn-fold:turn-image",
+      "image-completed",
+      "assistant-final",
+    ]);
+    expect(collapsed[2]).toMatchObject({
+      type: "activity-group",
+      activities: [
+        {
+          generatedImage: { imageId: "11111111-1111-1111-1111-111111111111.png" },
+        },
+      ],
+    });
+  });
+
   it("folds assistant messages between the first and terminal messages", () => {
     const turnId = TurnId.make("turn-1");
     const thread = makeThread({

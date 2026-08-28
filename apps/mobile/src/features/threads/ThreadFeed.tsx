@@ -1181,6 +1181,7 @@ function renderFeedEntry(
       expandedRows={props.expandedWorkRows}
       iconSubtleColor={iconSubtleColor}
       onCopyRow={props.onCopyWorkRow}
+      onPressImage={props.onPressImage}
       onToggleRow={props.onToggleWorkRow}
     />
   );
