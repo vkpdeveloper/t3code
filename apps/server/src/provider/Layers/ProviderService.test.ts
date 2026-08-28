@@ -80,9 +80,11 @@ const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
 const codexInstanceId = ProviderInstanceId.make("codex");
 const claudeAgentInstanceId = ProviderInstanceId.make("claudeAgent");
+const grokInstanceId = ProviderInstanceId.make("grok");
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
+const GROK_DRIVER = ProviderDriverKind.make("grok");
 
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
@@ -324,10 +326,12 @@ function makeProviderServiceLayer() {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter(CLAUDE_AGENT_DRIVER);
   const cursor = makeFakeCodexAdapter(CURSOR_DRIVER);
+  const grok = makeFakeCodexAdapter(GROK_DRIVER);
   const registry = makeAdapterRegistryMock({
     [ProviderDriverKind.make("codex")]: codex.adapter,
     [ProviderDriverKind.make("claudeAgent")]: claude.adapter,
     [ProviderDriverKind.make("cursor")]: cursor.adapter,
+    [ProviderDriverKind.make("grok")]: grok.adapter,
   });
   const analyticsRecord = vi.fn(
     (_event: string, _properties?: Readonly<Record<string, unknown>>): Effect.Effect<void> =>
@@ -376,6 +380,7 @@ function makeProviderServiceLayer() {
     codex,
     claude,
     cursor,
+    grok,
     analyticsRecord,
     layer,
   };
@@ -1193,6 +1198,48 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       const imageOnlyInput = routing.codex.sendTurn.mock.calls[0]?.[0] as ProviderSendTurnInput;
       assert.equal(imageOnlyInput.input?.startsWith('[Attached image "screenshot.png"'), true);
+
+      yield* provider.stopSession({ threadId: session.threadId });
+    }),
+  );
+
+  it.effect("keeps T3 host attachment paths out of Grok image prompts", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-grok-attach");
+      const session = yield* provider.startSession(threadId, {
+        provider: GROK_DRIVER,
+        providerInstanceId: grokInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      const attachment = {
+        type: "image" as const,
+        id: "thread-grok-attach-12345678-1234-1234-1234-123456789abc",
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 123,
+      };
+
+      routing.grok.sendTurn.mockClear();
+      yield* provider.sendTurn({
+        threadId,
+        input: "what app is this?",
+        attachments: [attachment],
+      });
+      assert.deepStrictEqual(routing.grok.sendTurn.mock.calls[0]?.[0], {
+        threadId,
+        input: "what app is this?",
+        attachments: [attachment],
+      });
+
+      routing.grok.sendTurn.mockClear();
+      yield* provider.sendTurn({ threadId, attachments: [attachment] });
+      assert.deepStrictEqual(routing.grok.sendTurn.mock.calls[0]?.[0], {
+        threadId,
+        attachments: [attachment],
+      });
 
       yield* provider.stopSession({ threadId: session.threadId });
     }),
