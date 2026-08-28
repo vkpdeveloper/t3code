@@ -20,6 +20,20 @@ reasoning level reported by Grok Build.
 keeps the CLI's current model instead of forcing a model named `grok-build`. Refresh provider status
 after updating or signing in to Grok Build to load the current catalog and reasoning choices.
 
+## Where Grok Skills Are Loaded
+
+T3 Code looks for Grok skills in this order:
+
+1. Grok home `bundled/skills`
+2. `~/.agents/skills`
+3. Grok home `skills` (`~/.grok/skills` by default, or `$GROK_HOME/skills`)
+4. `<workspace>/.agents/skills`
+5. `<workspace>/.claude/skills`
+6. `<workspace>/.grok/skills`
+
+If the same skill name exists in more than one folder, T3 Code keeps a single entry. Matching is
+case-insensitive, and the later folder wins.
+
 ## Permissions
 
 T3 Code still answers each ACP permission request according to the thread's permission setting. In
