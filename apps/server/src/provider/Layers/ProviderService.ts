@@ -23,7 +23,7 @@ import {
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   type ProviderInstanceId,
-  type ProviderDriverKind,
+  ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput as ProviderSendTurnInputType,
   type ProviderSession,
@@ -80,6 +80,7 @@ import {
   retryableProviderServiceFailure,
 } from "../ProviderTurnRetryPolicy.ts";
 const isModelSelection = Schema.is(ModelSelection);
+const GROK_DRIVER = ProviderDriverKind.make("grok");
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -701,6 +702,39 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
     });
 
+  const prepareAdapterTurnInput = (
+    input: ProviderSendTurnInputType,
+    provider: ProviderDriverKind,
+  ): ProviderSendTurnInputType => {
+    const attachments = input.attachments ?? [];
+    if (provider === GROK_DRIVER || attachments.length === 0) {
+      return input;
+    }
+
+    // Adapters inline attachment pixels into the model prompt, but the model's
+    // tools cannot dereference pixels. Appending the on-disk path lets other
+    // providers copy the original file when a task needs it. Grok persists ACP
+    // image blocks into its own session assets and adds its own path hint, so a
+    // second T3 host path only encourages the model to read the image by tool.
+    const attachmentPathLines = attachments.flatMap((attachment) => {
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      return attachmentPath === null
+        ? []
+        : [`[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath}]`];
+    });
+    if (attachmentPathLines.length === 0) {
+      return input;
+    }
+
+    const inputWithAttachmentPaths = [input.input, attachmentPathLines.join("\n")]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join("\n\n");
+    return { ...input, input: inputWithAttachmentPaths };
+  };
+
   const rewriteRuntimeEventTurnId = (
     context: ProviderTurnRetryContext,
     source: {
@@ -770,7 +804,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     // credential is minted once at session start and cannot be rotated into
     // an already-spawned agent process, so keep the existing token valid.
     yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
-    const turn = yield* routed.adapter.sendTurn(input);
+    const turn = yield* routed.adapter.sendTurn(
+      prepareAdapterTurnInput(input, routed.adapter.provider),
+    );
 
     if (turnRetryContexts.get(context.threadId) === context) {
       context.logicalTurnId ??= turn.turnId;
@@ -1389,34 +1425,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     }
 
-    // Adapters inline attachment pixels into the model prompt, but the model's
-    // tools cannot dereference pixels. Appending the on-disk path is what lets
-    // a turn like "include this screenshot in the PR" copy the actual file.
-    // This runs after schema decode, so the appended lines are exempt from the
-    // PROVIDER_SEND_TURN_MAX_INPUT_CHARS check; attachment count is capped, so
-    // the overhead is bounded. Unresolvable ids are skipped here and surface
-    // as adapter errors when the file is read for inlining.
-    const attachmentPathLines = attachments.flatMap((attachment) => {
-      const attachmentPath = resolveAttachmentPath({
-        attachmentsDir: serverConfig.attachmentsDir,
-        attachment,
-      });
-      return attachmentPath === null
-        ? []
-        : [`[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath}]`];
-    });
-    const inputTextWithAttachmentPaths =
-      attachmentPathLines.length === 0
-        ? parsed.input
-        : [parsed.input, attachmentPathLines.join("\n")]
-            .filter((part): part is string => typeof part === "string" && part.length > 0)
-            .join("\n\n");
-
     const input = {
       ...parsed,
-      ...(inputTextWithAttachmentPaths !== undefined
-        ? { input: inputTextWithAttachmentPaths }
-        : {}),
       attachments,
     };
     yield* Effect.annotateCurrentSpan({

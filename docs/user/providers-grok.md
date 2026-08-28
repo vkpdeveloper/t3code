@@ -47,4 +47,7 @@ context-window usage, per-turn token totals, model usage, and trustworthy cost. 
 incomplete or partial billing; T3 Code does not present those costs as final.
 
 T3 Code sends image attachments to Grok Build even when the installed version reports image input
-as unsupported. If Grok rejects an attachment, T3 Code shows its error.
+as unsupported. Grok Build saves each image in its own session directory and may inspect that copy
+with `read_file`; T3 Code does not add a second machine-local path to the prompt. This works the
+same way whether the turn came from web, desktop, or mobile. If Grok rejects an attachment, T3 Code
+shows its error.
