@@ -46,6 +46,7 @@ async function subscriptionId(endpoint: string): Promise<string> {
 function webPushPreferences(settings: ClientSettings): RelayWebPushPreferences {
   return {
     notifyOnApproval: settings.desktopNotifyApprovalNeeded,
+    notifyOnInput: settings.desktopNotifyInputNeeded,
     notifyOnCompletion: settings.desktopNotifyTaskCompleted,
     notifyOnFailure: settings.desktopNotifyTaskFailed,
     soundEnabled: settings.desktopNotificationSound,

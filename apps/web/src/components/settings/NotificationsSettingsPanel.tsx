@@ -25,6 +25,7 @@ type NotificationToggleKey = Extract<
   | "desktopNotifyTaskCompleted"
   | "desktopNotifyTaskFailed"
   | "desktopNotifyApprovalNeeded"
+  | "desktopNotifyInputNeeded"
   | "desktopNotificationSound"
 >;
 
@@ -51,6 +52,12 @@ const NOTIFICATION_TOGGLES: ReadonlyArray<{
     searchId: "notification-approval-needed",
     description: "The agent is blocked until you approve an action.",
     resetLabel: "approval notifications",
+  },
+  {
+    key: "desktopNotifyInputNeeded",
+    searchId: "notification-input-needed",
+    description: "The agent is waiting for your reply in chat.",
+    resetLabel: "input notifications",
   },
   {
     key: "desktopNotificationSound",
@@ -107,7 +114,7 @@ export function NotificationsSettingsPanel() {
             webPushError ??
             (!isElectron && !webPushAvailable
               ? "Sign in to T3 Connect to enable Web Push."
-              : "Notify when an agent needs you. Suppressed while you are looking at that thread.")
+              : "Notify when an agent needs you. Suppressed while T3 Code is focused.")
           }
           resetAction={
             notificationsEnabled !== DEFAULT_CLIENT_SETTINGS[enabledKey] ? (

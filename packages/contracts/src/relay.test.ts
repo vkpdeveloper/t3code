@@ -28,6 +28,7 @@ describe("RelayWebPushRegistrationRequest", () => {
     },
     preferences: {
       notifyOnApproval: true,
+      notifyOnInput: true,
       notifyOnCompletion: true,
       notifyOnFailure: true,
       soundEnabled: true,
@@ -36,6 +37,16 @@ describe("RelayWebPushRegistrationRequest", () => {
 
   it("accepts secure standards-based push endpoints", () => {
     expect(decode(registration)).toEqual(registration);
+  });
+
+  it("defaults notifyOnInput for subscriptions registered before input alerts", () => {
+    const { notifyOnInput: _ignored, ...legacyPreferences } = registration.preferences;
+    expect(
+      decode({
+        ...registration,
+        preferences: legacyPreferences,
+      }).preferences.notifyOnInput,
+    ).toBe(true);
   });
 
   it("rejects insecure or malformed push endpoints", () => {

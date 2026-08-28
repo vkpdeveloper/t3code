@@ -15,6 +15,12 @@ const PRE_APPROVAL_PHASES: ReadonlySet<AgentAwarenessPhase> = new Set([
   "waiting_for_input",
 ]);
 
+const PRE_INPUT_PHASES: ReadonlySet<AgentAwarenessPhase> = new Set([
+  "starting",
+  "running",
+  "waiting_for_approval",
+]);
+
 export function agentNotificationKind(
   previousPhase: AgentAwarenessPhase | null,
   nextPhase: AgentAwarenessPhase | null,
@@ -31,6 +37,9 @@ export function agentNotificationKind(
   if (nextPhase === "waiting_for_approval" && PRE_APPROVAL_PHASES.has(previousPhase)) {
     return "approval-needed";
   }
+  if (nextPhase === "waiting_for_input" && PRE_INPUT_PHASES.has(previousPhase)) {
+    return "input-needed";
+  }
   return null;
 }
 
@@ -38,6 +47,7 @@ const NOTIFICATION_TITLES: Readonly<Record<DesktopNotificationKind, string>> = {
   "task-completed": "Completed",
   "task-failed": "Failed",
   "approval-needed": "Approval Required",
+  "input-needed": "Input Required",
 };
 
 const MAX_TITLE_PROJECT_LENGTH = 28;

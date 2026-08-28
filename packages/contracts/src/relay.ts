@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiEndpoint from "effect/unstable/httpapi/HttpApiEndpoint";
@@ -94,6 +95,9 @@ export type RelayDeviceUnregistrationParams = typeof RelayDeviceUnregistrationPa
 
 export const RelayWebPushPreferences = Schema.Struct({
   notifyOnApproval: Schema.Boolean,
+  // Default true so subscriptions registered before input alerts existed still
+  // receive them once the client re-publishes preferences.
+  notifyOnInput: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   notifyOnCompletion: Schema.Boolean,
   notifyOnFailure: Schema.Boolean,
   soundEnabled: Schema.Boolean,

@@ -1452,7 +1452,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               aria-hidden
               className={cn(
                 "pointer-events-none absolute inset-y-0 left-0 z-0 w-1 rounded-r-sm motion-safe:animate-thread-alert-splash",
-                threadAlert === "failed" ? "bg-error" : "bg-success",
+                threadAlert === "failed"
+                  ? "bg-error"
+                  : threadAlert === "approval-needed"
+                    ? "bg-warning"
+                    : threadAlert === "input-needed"
+                      ? "bg-info"
+                      : "bg-success",
               )}
             />
           )}

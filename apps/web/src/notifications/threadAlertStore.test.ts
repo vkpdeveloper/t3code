@@ -71,6 +71,24 @@ describe("threadAlertStore", () => {
     expect(readThreadAlert(THREAD_A)).toBe("failed");
   });
 
+  it("lets attention outrank a completion, and failure outrank attention", () => {
+    markThreadAlert(THREAD_A, "completed", UNFOCUSED);
+    markThreadAlert(THREAD_A, "input-needed", UNFOCUSED);
+    expect(readThreadAlert(THREAD_A)).toBe("input-needed");
+
+    markThreadAlert(THREAD_A, "completed", UNFOCUSED);
+    expect(readThreadAlert(THREAD_A)).toBe("input-needed");
+
+    markThreadAlert(THREAD_A, "approval-needed", UNFOCUSED);
+    expect(readThreadAlert(THREAD_A)).toBe("approval-needed");
+
+    markThreadAlert(THREAD_A, "failed", UNFOCUSED);
+    expect(readThreadAlert(THREAD_A)).toBe("failed");
+
+    markThreadAlert(THREAD_A, "approval-needed", UNFOCUSED);
+    expect(readThreadAlert(THREAD_A)).toBe("failed");
+  });
+
   it("re-marks after the user has seen and cleared it", () => {
     markThreadAlert(THREAD_A, "failed", UNFOCUSED);
     clearThreadAlert(THREAD_A);

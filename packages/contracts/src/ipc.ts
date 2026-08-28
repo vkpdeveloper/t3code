@@ -181,6 +181,7 @@ export const DesktopNotificationKindSchema = Schema.Literals([
   "task-completed",
   "task-failed",
   "approval-needed",
+  "input-needed",
 ]);
 export type DesktopNotificationKind = typeof DesktopNotificationKindSchema.Type;
 

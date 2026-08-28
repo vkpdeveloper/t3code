@@ -21,6 +21,7 @@ const ALL_ENABLED: ThreadNotificationSettings = {
   taskCompleted: true,
   taskFailed: true,
   approvalNeeded: true,
+  inputNeeded: true,
 };
 
 type ThreadPhaseFixture = "running" | "completed" | "failed" | "approval" | "input" | "unknown";
@@ -92,7 +93,6 @@ function reconcile(
   overrides: Partial<{
     settings: ThreadNotificationSettings;
     windowFocused: boolean;
-    activeThreadRef: { environmentId: EnvironmentId; threadId: ThreadId } | null;
     readResponseText: () => string | null;
   }> = {},
 ) {
@@ -102,7 +102,6 @@ function reconcile(
     projectTitles: PROJECT_TITLES,
     settings: overrides.settings ?? ALL_ENABLED,
     windowFocused: overrides.windowFocused ?? false,
-    activeThreadRef: overrides.activeThreadRef ?? null,
     ...(overrides.readResponseText ? { readResponseText: overrides.readResponseText } : {}),
   });
 }
@@ -114,11 +113,13 @@ describe("notifiableKind", () => {
     expect(notifiableKind("running", "completed")).toBe("task-completed");
     expect(notifiableKind("running", "failed")).toBe("task-failed");
     expect(notifiableKind("running", "waiting_for_approval")).toBe("approval-needed");
+    expect(notifiableKind("running", "waiting_for_input")).toBe("input-needed");
     expect(notifiableKind("starting", "completed")).toBe("task-completed");
   });
 
   it("stays quiet when the thread was not previously active", () => {
     expect(notifiableKind("completed", "waiting_for_approval")).toBeNull();
+    expect(notifiableKind("completed", "waiting_for_input")).toBeNull();
     expect(notifiableKind("stale", "completed")).toBeNull();
     expect(notifiableKind(null, "completed")).toBeNull();
     expect(notifiableKind("running", null)).toBeNull();
@@ -126,6 +127,7 @@ describe("notifiableKind", () => {
 
   it("does not treat an approval-to-approval or non-terminal move as news", () => {
     expect(notifiableKind("waiting_for_approval", "waiting_for_approval")).toBeNull();
+    expect(notifiableKind("waiting_for_input", "waiting_for_input")).toBeNull();
     expect(notifiableKind("running", "running")).toBeNull();
     expect(notifiableKind("starting", "running")).toBeNull();
   });
@@ -189,6 +191,9 @@ describe("reconcileThreadNotifications", () => {
     expect(reconcile(seeded, [makeThread("approval")]).notifications[0]?.title).toBe(
       "Approval Required - t3code",
     );
+    expect(reconcile(seeded, [makeThread("input")]).notifications[0]?.title).toBe(
+      "Input Required - t3code",
+    );
   });
 
   describe("alert sound", () => {
@@ -210,9 +215,7 @@ describe("reconcileThreadNotifications", () => {
       const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
       const result = reconcile(seeded, [makeThread("completed")], { windowFocused: true });
 
-      // Still notified (a different thread is on screen), but the chime is for
-      // reaching someone who is looking elsewhere.
-      expect(result.notifications).toHaveLength(1);
+      expect(result.notifications).toEqual([]);
       expect(result.playAlertSound).toBe(false);
     });
 
@@ -288,6 +291,23 @@ describe("reconcileThreadNotifications", () => {
     expect(result.notifications[0]?.kind).toBe("approval-needed");
   });
 
+  it("reports a chat input request", () => {
+    const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
+    const result = reconcile(seeded, [makeThread("input")]);
+
+    expect(result.notifications[0]?.kind).toBe("input-needed");
+  });
+
+  it("honors the input-needed settings toggle", () => {
+    const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
+    const result = reconcile(seeded, [makeThread("input")], {
+      settings: { ...ALL_ENABLED, inputNeeded: false },
+    });
+
+    expect(result.notifications).toEqual([]);
+    expect(result.next.get(KEY)).toBe("waiting_for_input");
+  });
+
   it("does not re-fire when a phase disappears and comes back", () => {
     let phases = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     phases = reconcile(phases, [makeThread("completed")]).next;
@@ -298,36 +318,34 @@ describe("reconcileThreadNotifications", () => {
     expect(result.notifications).toEqual([]);
   });
 
-  it("suppresses the banner while the user watches that thread, but still advances", () => {
+  it("suppresses banners while T3 Code is focused, but still advances", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: true,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID },
     });
 
     expect(result.notifications).toEqual([]);
     expect(result.next.get(KEY)).toBe("completed");
 
-    // Navigating away later must not replay the suppressed transition.
-    const afterNavigation = reconcile(result.next, [makeThread("completed")]);
-    expect(afterNavigation.notifications).toEqual([]);
+    // Unfocusing later must not replay the suppressed transition.
+    const afterBlur = reconcile(result.next, [makeThread("completed")]);
+    expect(afterBlur.notifications).toEqual([]);
   });
 
-  it("still notifies when focused on a different thread", () => {
+  it("still suppresses when focused on a different thread", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: true,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: "thread-2" as ThreadId },
     });
 
-    expect(result.notifications).toHaveLength(1);
+    expect(result.notifications).toEqual([]);
+    expect(result.next.get(KEY)).toBe("completed");
   });
 
-  it("still notifies when that thread is open but the window is not focused", () => {
+  it("notifies when the window is not focused", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
     const result = reconcile(seeded, [makeThread("completed")], {
       windowFocused: false,
-      activeThreadRef: { environmentId: ENVIRONMENT_ID, threadId: THREAD_ID },
     });
 
     expect(result.notifications).toHaveLength(1);

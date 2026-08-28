@@ -30,6 +30,7 @@ const target: WebPushSubscriptions.WebPushTarget = {
   auth: "auth",
   preferences: {
     notifyOnApproval: true,
+    notifyOnInput: true,
     notifyOnCompletion: true,
     notifyOnFailure: true,
     soundEnabled: true,
@@ -95,6 +96,36 @@ describe("makeWebPushNotification", () => {
       title: "Approval Required - T3 Code",
       silent: true,
     });
+  });
+
+  it("notifies when the agent is waiting for chat input", () => {
+    expect(
+      makeWebPushNotification({
+        previousState: runningState,
+        nextState: {
+          ...runningState,
+          phase: "waiting_for_input",
+          headline: "Waiting for input",
+          detail: "Which package manager should I use?",
+          updatedAt: "2026-08-12T09:02:00.000Z",
+        },
+        target,
+      }),
+    ).toMatchObject({
+      title: "Input Required - T3 Code",
+      body: "Which package manager should I use?",
+    });
+
+    expect(
+      makeWebPushNotification({
+        previousState: runningState,
+        nextState: { ...runningState, phase: "waiting_for_input" },
+        target: {
+          ...target,
+          preferences: { ...target.preferences, notifyOnInput: false },
+        },
+      }),
+    ).toBeNull();
   });
 });
 
