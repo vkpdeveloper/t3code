@@ -123,7 +123,7 @@ function grokModelsFromSettings(
   return providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES);
 }
 
-function buildGrokModelCapabilities(model: EffectAcpSchema.ModelInfo): ModelCapabilities {
+export function buildGrokModelCapabilities(model: EffectAcpSchema.ModelInfo): ModelCapabilities {
   const meta = parseGrokAcpModelMetadata(model._meta);
   if (meta.supportsReasoningEffort === false || meta.reasoningEfforts.length === 0) {
     return EMPTY_CAPABILITIES;
@@ -201,7 +201,7 @@ const discoverGrokModelsViaAcp = (
       environment,
       childProcessSpawner,
       cwd: process.cwd(),
-      alwaysApprove: false,
+      runtimeMode: "approval-required",
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
@@ -321,8 +321,8 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
   }
 
   // Skill discovery is independent of ACP model probing: the `$` picker only
-  // needs filesystem metadata, and should still work when ACP startup fails.
-  const skills = yield* discoverGrokSkills(cwd, environment);
+  // needs its own probe and should still work when ACP startup fails.
+  const skills = yield* discoverGrokSkills(grokSettings, environment, cwd);
 
   const discoveryExit = yield* discoverGrokModelsViaAcp(grokSettings, environment).pipe(
     Effect.timeoutOption(GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS),

@@ -12,7 +12,13 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
+import {
+  type ChatMessage,
+  isImageAttachment,
+  type SessionPhase,
+  type Thread,
+  type ThreadShell,
+} from "../types";
 import {
   type ComposerImageAttachment,
   type ComposerThreadDraftState,
@@ -61,18 +67,29 @@ export function shouldShowPlanFollowUpPrompt(input: {
   readonly pendingUserInputCount: number;
   readonly interactionMode: ProviderInteractionMode;
   readonly latestTurnSettled: boolean;
-  readonly hasActionablePlan: boolean;
-  readonly planModeEnabled: boolean;
-  readonly providers: ReadonlyArray<
+  readonly hasActionableProposedPlan: boolean;
+  readonly hasComposerAttachments: boolean;
+  readonly planModeEnabled?: boolean;
+  readonly providers?: ReadonlyArray<
     Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">
   >;
-  readonly modelSelection: Pick<ModelSelection, "instanceId"> | null | undefined;
+  readonly modelSelection?: Pick<ModelSelection, "instanceId"> | null | undefined;
 }): boolean {
+  const interactionMode =
+    input.planModeEnabled !== undefined && input.providers !== undefined
+      ? resolveProviderInteractionModeForDispatch({
+          ...input,
+          planModeEnabled: input.planModeEnabled,
+          providers: input.providers,
+          modelSelection: input.modelSelection,
+        })
+      : input.interactionMode;
   return (
     input.pendingUserInputCount === 0 &&
-    resolveProviderInteractionModeForDispatch(input) === "plan" &&
+    interactionMode === "plan" &&
     input.latestTurnSettled &&
-    input.hasActionablePlan
+    input.hasActionableProposedPlan &&
+    !input.hasComposerAttachments
   );
 }
 
@@ -323,7 +340,7 @@ export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
     return;
   }
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
+    if (!isImageAttachment(attachment)) {
       continue;
     }
     revokeBlobPreviewUrl(attachment.previewUrl);
@@ -336,7 +353,7 @@ export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[
   }
   const previewUrls: string[] = [];
   for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
+    if (!isImageAttachment(attachment)) continue;
     if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
     previewUrls.push(attachment.previewUrl);
   }
