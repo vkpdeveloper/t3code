@@ -27,6 +27,9 @@ const emitXAiModelChangedOnSetModel =
   process.env.T3_ACP_EMIT_XAI_MODEL_CHANGED_ON_SET_MODEL === "1";
 const effectiveReasoningOnSetModel = process.env.T3_ACP_EFFECTIVE_REASONING_ON_SET_MODEL?.trim();
 const padGrokModelIds = process.env.T3_ACP_PAD_GROK_MODEL_IDS === "1";
+const configuredGrokModelIds = process.env.T3_ACP_GROK_MODEL_IDS?.split(",")
+  .map((modelId) => modelId.trim())
+  .filter((modelId) => modelId.length > 0);
 const requestedGrokMockAltContextTokens = Number(
   process.env.T3_ACP_GROK_MOCK_ALT_CONTEXT_TOKENS ?? "262144",
 );
@@ -306,7 +309,9 @@ const grokReasoningEfforts = [
 ] as const;
 
 function grokAcpModels(): ReadonlyArray<AcpSchema.ModelInfo> {
-  return ["grok-build", "grok-mock-alt"].map((modelId) => {
+  return (
+    configuredGrokModelIds?.length ? configuredGrokModelIds : ["grok-build", "grok-mock-alt"]
+  ).map((modelId) => {
     const catalogModelId = padGrokModelIds ? ` ${modelId} ` : modelId;
     return {
       modelId: catalogModelId,
@@ -325,7 +330,7 @@ function modelState(): AcpSchema.SessionModelState {
   const models = grokAcpModels();
   const modelId = models.some((model) => model.modelId === currentModelId)
     ? currentModelId
-    : "grok-build";
+    : (models[0]?.modelId ?? "grok-build");
   return {
     currentModelId: modelId,
     availableModels: models,

@@ -835,6 +835,139 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("uses Grok 4.6 for image turns requested on Grok 4.5", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-45-image-upgrade");
+      const requestLogDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-image-upgrade-log-")),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({
+          T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          T3_ACP_GROK_MODEL_IDS: "grok-4.5,grok-4.6",
+          T3_ACP_EMIT_XAI_MODEL_CHANGED_ON_SET_MODEL: "1",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const { attachmentsDir } = yield* ServerConfig;
+      const attachment = {
+        type: "image" as const,
+        id: "grok-45-image-12345678-1234-1234-1234-123456789abc",
+        name: "selection.png",
+        mimeType: "image/png" as const,
+        sizeBytes: 4,
+      };
+      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+      yield* Effect.promise(() =>
+        NodeFSP.mkdir(NodePath.dirname(attachmentPath), { recursive: true }),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(attachmentPath, Uint8Array.from([1, 2, 3, 4])));
+
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      const eventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => runtimeEvents.push(event)),
+      ).pipe(Effect.forkChild);
+      const instanceId = ProviderInstanceId.make("grok");
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId, model: "grok-4.5" },
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "inspect this image",
+        attachments: [attachment],
+        modelSelection: { instanceId, model: "grok-4.5" },
+      });
+      for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const setModelRequests = requests.filter((request) => request.method === "session/set_model");
+      assert.deepStrictEqual(
+        setModelRequests.map(
+          (request) => (request.params as { readonly modelId?: unknown } | undefined)?.modelId,
+        ),
+        ["grok-4.6"],
+      );
+      const promptRequest = requests.find((request) => request.method === "session/prompt");
+      assert.deepStrictEqual(
+        (promptRequest?.params as { readonly prompt?: unknown } | undefined)?.prompt,
+        [
+          { type: "text", text: "inspect this image" },
+          { type: "image", data: "AQIDBA==", mimeType: "image/png" },
+        ],
+      );
+      const turnStarted = runtimeEvents.find((event) => event.type === "turn.started");
+      assert.equal(
+        turnStarted?.type === "turn.started" ? turnStarted.payload.model : undefined,
+        "grok-4.6",
+      );
+      const sessionConfigured = runtimeEvents.findLast(
+        (event) => event.type === "session.configured",
+      );
+      assert.equal(
+        sessionConfigured?.type === "session.configured"
+          ? sessionConfigured.payload.config.model
+          : undefined,
+        "grok-4.6",
+      );
+
+      yield* Fiber.interrupt(eventsFiber);
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects Grok 4.5 image turns when Grok 4.6 is unavailable", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-45-image-no-upgrade");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_GROK_MODEL_IDS: "grok-4.5" }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const { attachmentsDir } = yield* ServerConfig;
+      const attachment = {
+        type: "image" as const,
+        id: "grok-45-no-upgrade-12345678-1234-1234-1234-123456789abc",
+        name: "selection.png",
+        mimeType: "image/png" as const,
+        sizeBytes: 4,
+      };
+      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+      yield* Effect.promise(() =>
+        NodeFSP.mkdir(NodePath.dirname(attachmentPath), { recursive: true }),
+      );
+      yield* Effect.promise(() => NodeFSP.writeFile(attachmentPath, Uint8Array.from([1, 2, 3, 4])));
+
+      const instanceId = ProviderInstanceId.make("grok");
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId, model: "grok-4.5" },
+      });
+      const error = yield* Effect.flip(
+        adapter.sendTurn({
+          threadId,
+          input: "inspect this image",
+          attachments: [attachment],
+          modelSelection: { instanceId, model: "grok-4.5" },
+        }),
+      );
+
+      if (error._tag !== "ProviderAdapterValidationError") {
+        assert.fail(`Expected ProviderAdapterValidationError, received ${error._tag}`);
+      }
+      assert.include(error.issue, "Grok 4.5 cannot reliably inspect images");
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("completes a Grok turn from xAI prompt completion when the prompt RPC hangs", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-xai-prompt-complete-fallback");

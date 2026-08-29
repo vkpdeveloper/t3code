@@ -80,6 +80,8 @@ const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonStri
 
 const PROVIDER = ProviderDriverKind.make("grok");
 const GROK_RESUME_VERSION = 1 as const;
+const GROK_45_MODEL_ID = "grok-4.5";
+const GROK_IMAGE_MODEL_ID = "grok-4.6";
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -1233,12 +1235,31 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 });
               }
 
+              const effectiveTurnModelId = requestedTurnModelId ?? ctx.currentModelId;
+              // Grok Build 1.0.5 accepts and persists ACP image blocks on 4.5,
+              // but 4.5 answers from unrelated visual context. The same payload
+              // is interpreted correctly by 4.6, so image turns use that model
+              // instead of returning a plausible but false answer.
+              const imageTurnNeedsUpgrade =
+                imagePromptParts.length > 0 && effectiveTurnModelId === GROK_45_MODEL_ID;
+              if (imageTurnNeedsUpgrade && !ctx.contextWindowByModelId.has(GROK_IMAGE_MODEL_ID)) {
+                return yield* new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "sendTurn",
+                  issue:
+                    "Grok 4.5 cannot reliably inspect images. Update Grok CLI to use Grok 4.6, then retry.",
+                });
+              }
+              const promptModelId = imageTurnNeedsUpgrade
+                ? GROK_IMAGE_MODEL_ID
+                : requestedTurnModelId;
+
               const modelSelectionRevision = ctx.modelSelectionRevision;
               const optimisticModelSelection = yield* applyGrokAcpModelSelection({
                 runtime: ctx.acp,
                 currentModelId: ctx.currentModelId,
                 currentReasoningEffort: ctx.currentReasoningEffort,
-                requestedModelId: requestedTurnModelId,
+                requestedModelId: promptModelId,
                 requestedReasoningEffort: getModelSelectionStringOptionValue(
                   turnModelSelection,
                   "reasoningEffort",
