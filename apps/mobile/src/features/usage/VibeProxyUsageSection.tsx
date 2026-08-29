@@ -25,11 +25,11 @@ import {
   type VibeProxyQuotaWindowView,
 } from "@t3tools/shared/vibeProxyUsage";
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, Switch, View } from "react-native";
+import { Pressable, View } from "react-native";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { VibeProxyUsageView } from "../../state/vibeProxyUsage";
@@ -102,8 +102,6 @@ function VibeProxyConfigurationForm(props: {
   readonly settings: VibeProxySettings;
   readonly onSave: (patch: ServerSettingsPatch) => Promise<SettingsUpdateOutcome>;
 }) {
-  const activeTrack = String(useThemeColor("--color-switch-active"));
-  const inactiveTrack = String(useThemeColor("--color-secondary-border"));
   const [enabled, setEnabled] = useState(props.settings.enabled);
   const [baseUrl, setBaseUrl] = useState(props.settings.baseUrl);
   const [apiKey, setApiKey] = useState("");
@@ -158,12 +156,10 @@ function VibeProxyConfigurationForm(props: {
             Read subscription limits from Vibe-Proxy.
           </Text>
         </View>
-        <Switch
+        <ThemedSwitch
           accessibilityLabel="Enable Vibe-Proxy usage"
           disabled={isSaving}
-          ios_backgroundColor={inactiveTrack}
           onValueChange={setEnabled}
-          trackColor={{ false: inactiveTrack, true: activeTrack }}
           value={enabled}
         />
       </View>

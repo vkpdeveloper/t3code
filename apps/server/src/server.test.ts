@@ -109,12 +109,14 @@ import {
 } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
@@ -393,6 +395,7 @@ const buildAppUnderTest = (options?: {
   config?: Partial<ServerConfig.ServerConfig["Service"]>;
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
+    environmentTheme?: Partial<EnvironmentTheme.EnvironmentThemeService["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
     providerService?: Partial<ProviderService.ProviderService["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
@@ -411,6 +414,7 @@ const buildAppUnderTest = (options?: {
     >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
+    threadDeletionReactor?: Partial<ThreadDeletionReactor["Service"]>;
     analyticsService?: Partial<AnalyticsService.AnalyticsService["Service"]>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
@@ -628,14 +632,21 @@ const buildAppUnderTest = (options?: {
       },
     ).pipe(
       Layer.provide(
-        Layer.mock(Keybindings.Keybindings)({
-          loadConfigState: Effect.succeed({
-            keybindings: [],
-            issues: [],
+        Layer.mergeAll(
+          Layer.mock(Keybindings.Keybindings)({
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+            ...options?.layers?.keybindings,
           }),
-          streamChanges: Stream.empty,
-          ...options?.layers?.keybindings,
-        }),
+          Layer.mock(EnvironmentTheme.EnvironmentThemeService)({
+            current: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.environmentTheme,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mergeAll(
@@ -788,13 +799,20 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          latestSequence: Effect.succeed(0),
-          ...options?.layers?.orchestrationEngine,
-        }),
+        Layer.mergeAll(
+          Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
+            readEvents: () => Stream.empty,
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+            streamDomainEvents: Stream.empty,
+            latestSequence: Effect.succeed(0),
+            ...options?.layers?.orchestrationEngine,
+          }),
+          Layer.mock(ThreadDeletionReactor)({
+            start: () => Effect.void,
+            drainThrough: () => Effect.void,
+            ...options?.layers?.threadDeletionReactor,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
@@ -4866,6 +4884,84 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  // An already-shipped client decodes this stream against an event union
+  // without environmentThemesUpdated, so an ungated emit would kill its whole
+  // config subscription. Opting in is the only way to receive them.
+  it.effect("subscribeServerConfig sends published themes to an opt-in subscriber", () =>
+    Effect.gen(function* () {
+      const themes = [
+        {
+          id: "nightfall",
+          name: "Nightfall",
+          appearance: "dark" as const,
+          canvas: "#1a1b26",
+          accent: "#7aa2f7",
+        },
+      ] as const;
+
+      yield* buildAppUnderTest({
+        layers: {
+          environmentTheme: {
+            current: Effect.succeed(themes),
+            streamChanges: Stream.succeed(themes),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({ environmentThemes: true }).pipe(
+            Stream.take(2),
+            Stream.runCollect,
+          ),
+        ),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      // Not in the snapshot as well, or every opt-in client receives the same
+      // array twice on every connect.
+      if (first?.type === "snapshot") assert.equal(first.config.environmentThemes, undefined);
+      assert.equal(second?.type, "environmentThemesUpdated");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("subscribeServerConfig withholds published themes from other subscribers", () =>
+    Effect.gen(function* () {
+      const themes = [
+        {
+          id: "nightfall",
+          name: "Nightfall",
+          appearance: "dark" as const,
+          canvas: "#1a1b26",
+          accent: "#7aa2f7",
+        },
+      ] as const;
+
+      yield* buildAppUnderTest({
+        layers: {
+          environmentTheme: {
+            current: Effect.succeed(themes),
+            streamChanges: Stream.succeed(themes),
+          },
+          providerRegistry: { streamChanges: Stream.empty },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(1), Stream.runCollect),
+        ),
+      );
+
+      const first = Array.from(events)[0];
+      assert.equal(first?.type, "snapshot");
+      if (first?.type === "snapshot") assert.equal(first.config.environmentThemes, undefined);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>
     Effect.gen(function* () {
       const nextProviders = [
@@ -5381,11 +5477,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         {
           surface: "mobile",
           appVersion: "1.2.3",
+          clientAppVersion: "1.2.3",
+          clientOs: "iOS",
           os: "iOS",
           osMajorVersion: 18,
+          clientOsMajorVersion: 18,
           deviceModel: "iPhone 15 Pro",
+          clientDeviceModel: "iPhone 15 Pro",
         },
-        { surface: "mobile", appVersion: "1.2.3" },
+        {
+          surface: "mobile",
+          appVersion: "1.2.3",
+          clientAppVersion: "1.2.3",
+          clientOs: "iOS",
+          os: "iOS",
+          osMajorVersion: 18,
+          clientOsMajorVersion: 18,
+          deviceModel: "iPhone 15 Pro",
+          clientDeviceModel: "iPhone 15 Pro",
+        },
       ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

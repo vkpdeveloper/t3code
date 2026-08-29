@@ -1,12 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpSchema from "effect-acp/schema";
 
 import {
   applyGrokAcpModelSelection,
   buildGrokAcpSpawnInput,
   currentGrokModelSelectionFromSessionSetup,
+  grokAcpSpawnArgs,
   grokAcpSessionCompatibilityGroup,
+  isValidGrokReasoningEffortToken,
   resolveGrokAcpBaseModelId,
 } from "./GrokAcpSupport.ts";
 
@@ -54,23 +57,60 @@ describe("buildGrokAcpSpawnInput", () => {
       { binaryPath: "/usr/local/bin/grok" },
       "/tmp/project",
       undefined,
-      true,
+      "full-access",
     );
 
     expect(spawn.args).toEqual(["agent", "--always-approve", "stdio"]);
+  });
+
+  it("puts approval-required mode on the argv so config cannot override it", () => {
+    const spawn = buildGrokAcpSpawnInput(
+      { binaryPath: "/usr/local/bin/grok" },
+      "/tmp/project",
+      undefined,
+      "approval-required",
+    );
+
+    expect(spawn.args).toEqual(["--permission-mode", "default", "agent", "stdio"]);
+  });
+});
+
+describe("grokAcpSpawnArgs", () => {
+  it("maps every runtime mode to the Grok CLI permission mode", () => {
+    expect(grokAcpSpawnArgs("auto-accept-edits")).toEqual([
+      "--permission-mode",
+      "acceptEdits",
+      "agent",
+      "stdio",
+    ]);
+    expect(grokAcpSpawnArgs("auto")).toEqual(["--permission-mode", "auto", "agent", "stdio"]);
+  });
+});
+
+describe("isValidGrokReasoningEffortToken", () => {
+  it("accepts future ACP tokens and rejects malformed metadata values", () => {
+    expect(isValidGrokReasoningEffortToken("xhigh")).toBe(true);
+    expect(isValidGrokReasoningEffortToken("turbo_v2")).toBe(true);
+    expect(isValidGrokReasoningEffortToken("not a token")).toBe(false);
+    expect(isValidGrokReasoningEffortToken("-leading-dash")).toBe(false);
+    expect(isValidGrokReasoningEffortToken("x".repeat(33))).toBe(false);
   });
 });
 
 describe("applyGrokAcpModelSelection", () => {
   const makeRecordingRuntime = (failure?: EffectAcpErrors.AcpError) => {
-    const modelCalls: Array<{ modelId: string; meta?: Readonly<Record<string, unknown>> }> = [];
+    const modelCalls: Array<{
+      modelId: string;
+      meta?: EffectAcpSchema.SetSessionModelRequest["_meta"];
+    }> = [];
     const runtime = {
-      setSessionModel: (modelId: string, meta?: Readonly<Record<string, unknown>>) =>
-        Effect.gen(function* () {
-          modelCalls.push({ modelId, ...(meta ? { meta } : {}) });
-          if (failure) return yield* failure;
-          return {};
-        }),
+      setSessionModel: (
+        modelId: string,
+        meta?: EffectAcpSchema.SetSessionModelRequest["_meta"],
+      ) => {
+        modelCalls.push({ modelId, ...(meta ? { meta } : {}) });
+        return failure ? Effect.fail(failure) : Effect.succeed({});
+      },
     };
     return { runtime, modelCalls };
   };
@@ -168,6 +208,23 @@ describe("applyGrokAcpModelSelection", () => {
       });
       expect(modelCalls).toEqual([{ modelId: "grok-4.5" }]);
       expect(result).toEqual({ modelId: "grok-4.5", reasoningEffort: undefined });
+    }),
+  );
+
+  it.effect("drops malformed effort metadata instead of sending it", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      const result = yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-4.6",
+        currentReasoningEffort: "high",
+        requestedModelId: "grok-4.6",
+        requestedReasoningEffort: "not a token",
+        mapError: (cause) => cause.message,
+      });
+
+      expect(modelCalls).toEqual([{ modelId: "grok-4.6" }]);
+      expect(result).toEqual({ modelId: "grok-4.6", reasoningEffort: undefined });
     }),
   );
 

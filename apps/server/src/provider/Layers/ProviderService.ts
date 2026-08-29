@@ -338,7 +338,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       return credential;
     });
   const clearMcpSession = (threadId: ThreadId) =>
-    McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
+    revokeMcpCredential(threadId).pipe(
       Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
 
@@ -1433,7 +1433,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.operation": "send-turn",
       "provider.thread_id": input.threadId,
       "provider.interaction_mode": input.interactionMode,
-      "provider.attachment_count": input.attachments.length,
+      "provider.attachment_count": attachments.length,
     });
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
