@@ -318,24 +318,29 @@ function modeState(): AcpSchema.SessionModeState {
 }
 
 const grokReasoningEfforts = [
-  { id: "low", value: "low", label: "Low", default: false },
-  { id: "medium", value: "medium", label: "Medium", default: true },
-  { id: "high", value: "high", label: "High", default: false },
+  { id: "xhigh", value: "xhigh", label: "Extra High Effort", default: false },
+  { id: "high", value: "high", label: "High Effort", default: true },
+  { id: "low", value: "low", label: "Low Effort", default: false },
 ] as const;
 
 function grokAcpModels(): ReadonlyArray<AcpSchema.ModelInfo> {
   return (
-    configuredGrokModelIds?.length ? configuredGrokModelIds : ["grok-build", "grok-mock-alt"]
+    configuredGrokModelIds?.length ? configuredGrokModelIds : ["grok-4.6", "grok-mock-alt"]
   ).map((modelId) => {
     const catalogModelId = padGrokModelIds ? ` ${modelId} ` : modelId;
     return {
       modelId: catalogModelId,
-      name: modelId === "grok-build" ? "Grok Build" : "Grok Mock Alt",
+      name: modelId === "grok-mock-alt" ? "Grok Mock Alt" : `Grok ${modelId.replace("grok-", "")}`,
       _meta: {
         supportsReasoningEffort: true,
-        reasoningEffort: currentReasoning,
+        reasoningEffort: initialGrokReasoningEffort ?? currentReasoning,
         reasoningEfforts: grokReasoningEfforts,
-        totalContextTokens: modelId === "grok-mock-alt" ? grokMockAltContextTokens : 262_144,
+        totalContextTokens:
+          modelId === "grok-mock-alt"
+            ? grokMockAltContextTokens
+            : modelId === "grok-4.6"
+              ? 500_000
+              : 262_144,
       },
     };
   });
@@ -345,7 +350,7 @@ function modelState(): AcpSchema.SessionModelState {
   const models = grokAcpModels();
   const modelId = models.some((model) => model.modelId === currentModelId)
     ? currentModelId
-    : (models[0]?.modelId ?? "grok-build");
+    : (models[0]?.modelId ?? "grok-4.6");
   return {
     currentModelId: modelId,
     availableModels: models,
@@ -365,6 +370,9 @@ const program = Effect.gen(function* () {
           loadSession: true,
           promptCapabilities: { image: supportsImages },
         },
+        // Grok advertises model state before any session exists; the provider
+        // health check reads it from here without authenticating.
+        _meta: { modelState: modelState() },
       };
     }),
   );

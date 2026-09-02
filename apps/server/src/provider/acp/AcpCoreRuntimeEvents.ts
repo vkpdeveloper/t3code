@@ -8,16 +8,16 @@ import {
   type ProviderRuntimeEvent,
   type RuntimeRequestId,
   type ThreadId,
-  type ToolLifecycleItemType,
   type TurnId,
 } from "@t3tools/contracts";
 
-import type {
-  AcpPermissionRequest,
-  AcpPlanUpdate,
-  AcpTextItemType,
-  AcpTextStreamKind,
-  AcpToolCallState,
+import {
+  type AcpPermissionRequest,
+  type AcpPlanUpdate,
+  type AcpTextItemType,
+  type AcpTextStreamKind,
+  type AcpToolCallState,
+  canonicalItemTypeFromAcpToolKind,
 } from "./AcpRuntimeModel.ts";
 
 type AcpAdapterRawSource = Extract<
@@ -45,22 +45,6 @@ function canonicalRequestTypeFromAcpKind(kind: string | "unknown"): AcpCanonical
     case "delete":
     case "move":
       return "file_change_approval";
-    default:
-      return "dynamic_tool_call";
-  }
-}
-
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType {
-  switch (kind) {
-    case "execute":
-      return "command_execution";
-    case "edit":
-    case "delete":
-    case "move":
-      return "file_change";
-    case "search":
-    case "fetch":
-      return "web_search";
     default:
       return "dynamic_tool_call";
   }

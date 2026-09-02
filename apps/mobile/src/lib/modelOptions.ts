@@ -6,7 +6,7 @@ import type {
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
 import {
-  buildProviderOptionSelectionsFromDescriptors,
+  buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
   modelChangeRequiresNewThread,
 } from "@t3tools/shared/model";
@@ -75,11 +75,12 @@ function normalizeSelectionOptions(
   if (!capabilities) {
     return selection;
   }
-  const options = buildProviderOptionSelectionsFromDescriptors(
+  const options = buildExplicitProviderOptionSelectionsFromDescriptors(
     getProviderOptionDescriptors({
       caps: capabilities,
       selections: selection.options,
     }),
+    selection.options,
   );
   return options
     ? { ...selection, options }

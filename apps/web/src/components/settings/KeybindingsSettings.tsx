@@ -70,6 +70,7 @@ import {
   type WhenVariableOption,
   unknownWhenVariables,
   whenAstToExpression,
+  whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -355,6 +356,37 @@ function WhenVariableSelect({
   );
 }
 
+function WhenExpressionRemoveButton({
+  label,
+  className,
+  onRemove,
+}: {
+  label: string;
+  className?: string | undefined;
+  onRemove: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        delay={200}
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn("size-7", className)}
+            aria-label={label}
+            onClick={onRemove}
+          />
+        }
+      >
+        <MinusIcon aria-hidden className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function WhenExpressionNodeEditor({
   node,
   variables,
@@ -394,16 +426,10 @@ function WhenExpressionNodeEditor({
           onChange={(value) => onChange(setConditionIdentifier(node, value))}
         />
         {onRemove ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="size-7"
-            aria-label="Remove condition"
-            onClick={onRemove}
-          >
-            <MinusIcon className="size-3.5" />
-          </Button>
+          <WhenExpressionRemoveButton
+            label={whenNodeRemoveLabel(node, depth)}
+            onRemove={onRemove}
+          />
         ) : null}
       </div>
     );
@@ -429,16 +455,11 @@ function WhenExpressionNodeEditor({
             Not
           </Toggle>
           {onRemove ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="ml-auto size-7"
-              aria-label="Remove negated group"
-              onClick={onRemove}
-            >
-              <MinusIcon className="size-3.5" />
-            </Button>
+            <WhenExpressionRemoveButton
+              label={whenNodeRemoveLabel(node, depth)}
+              className="ml-auto"
+              onRemove={onRemove}
+            />
           ) : null}
         </div>
         <div className="relative pl-4">
@@ -552,16 +573,11 @@ function WhenExpressionNodeEditor({
           Group
         </Button>
         {onRemove ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="ml-auto size-7"
-            aria-label="Remove group"
-            onClick={onRemove}
-          >
-            <MinusIcon className="size-3.5" />
-          </Button>
+          <WhenExpressionRemoveButton
+            label={whenNodeRemoveLabel(node, depth)}
+            className="ml-auto"
+            onRemove={onRemove}
+          />
         ) : null}
       </div>
       <div className="space-y-2">
