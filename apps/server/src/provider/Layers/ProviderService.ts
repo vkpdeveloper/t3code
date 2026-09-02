@@ -29,6 +29,7 @@ import {
   type ProviderSession,
   type ProviderTurnStartResult,
 } from "@t3tools/contracts";
+import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -787,11 +788,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     context: ProviderTurnRetryContext,
     input: ProviderSendTurnInputType,
   ) {
-    const routed = yield* resolveRoutableSession({
+    let routed = yield* resolveRoutableSession({
       threadId: input.threadId,
       operation: "ProviderService.sendTurn",
-      allowRecovery: true,
+      allowRecovery: false,
     });
+    if (
+      input.continuation === true &&
+      !input.input &&
+      (input.attachments?.length ?? 0) === 0 &&
+      routed.adapter.capabilities.promptlessTurnContinuation !== true
+    ) {
+      return yield* toValidationError(
+        "ProviderService.sendTurn",
+        `Provider '${routed.adapter.provider}' requires an explicit continuation prompt`,
+      );
+    }
+    if (!routed.isActive) {
+      routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.sendTurn",
+        allowRecovery: true,
+      });
+    }
     context.source = {
       instanceId: routed.instanceId,
       provider: routed.adapter.provider,
@@ -1418,16 +1437,27 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
 
     const attachments = parsed.attachments ?? [];
-    if (!parsed.input && attachments.length === 0) {
+    if (!parsed.input && attachments.length === 0 && parsed.continuation !== true) {
       return yield* toValidationError(
         "ProviderService.sendTurn",
         "Either input text or at least one attachment is required",
       );
     }
 
+    const inputTextWithCitations =
+      parsed.input === undefined ? undefined : expandAssistantCitationsForProvider(parsed.input);
+    if (inputTextWithCitations !== parsed.input) {
+      yield* decodeInputOrValidationError({
+        operation: "ProviderService.sendTurn",
+        schema: ProviderSendTurnInput.fields.input,
+        payload: inputTextWithCitations,
+      });
+    }
+
     const input = {
       ...parsed,
-      attachments,
+      ...(inputTextWithCitations !== undefined ? { input: inputTextWithCitations } : {}),
+      ...(parsed.attachments !== undefined ? { attachments } : {}),
     };
     yield* Effect.annotateCurrentSpan({
       "provider.operation": "send-turn",
@@ -1753,21 +1783,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ),
       );
       const activeSessions = sessionsByProvider.flatMap((sessions) => sessions);
-      const persistedBindings = yield* directory.listThreadIds().pipe(
-        Effect.flatMap((threadIds) =>
-          Effect.forEach(
-            threadIds,
-            (threadId) =>
-              directory
-                .getBinding(threadId)
-                .pipe(
-                  Effect.orElseSucceed(() =>
-                    Option.none<ProviderSessionDirectory.ProviderRuntimeBinding>(),
-                  ),
-                ),
-            { concurrency: "unbounded" },
-          ),
-        ),
+      // Only live adapter sessions appear in this response. Resolving every
+      // historical binding here makes each call scale with the full thread
+      // history instead of the active session set.
+      const persistedBindings = yield* Effect.forEach(
+        [...new Set(activeSessions.map((session) => session.threadId))],
+        (threadId) =>
+          directory
+            .getBinding(threadId)
+            .pipe(
+              Effect.orElseSucceed(() =>
+                Option.none<ProviderSessionDirectory.ProviderRuntimeBinding>(),
+              ),
+            ),
+        { concurrency: "unbounded" },
+      ).pipe(
         Effect.orElseSucceed(
           () => [] as Array<Option.Option<ProviderSessionDirectory.ProviderRuntimeBinding>>,
         ),

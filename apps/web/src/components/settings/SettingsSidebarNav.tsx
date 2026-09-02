@@ -47,6 +47,7 @@ import {
   type SettingsSearchItem,
 } from "./settingsSearch";
 import { isElectron } from "~/env";
+import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 
 const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
@@ -90,12 +91,20 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     () => SETTINGS_NAV_ITEMS.filter((item) => isSettingsPathAvailable(item.to, isElectron)),
     [],
   );
+  const searchableItems = useAvailableSettingsSearchItems();
   const results = useMemo(
-    () => searchSettings(query).filter((result) => isSettingsPathAvailable(result.to, isElectron)),
-    [query],
+    () =>
+      searchSettings(query, searchableItems).filter((result) =>
+        isSettingsPathAvailable(result.to, isElectron),
+      ),
+    [query, searchableItems],
   );
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
+
+  useEffect(() => {
+    setActiveResultIndex((index) => Math.min(index, Math.max(results.length - 1, 0)));
+  }, [results.length]);
 
   useEffect(() => {
     const result = results[activeResultIndex];

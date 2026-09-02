@@ -104,6 +104,7 @@ it.effect("restores a persisted usage-limit timer and resumes at the reset time"
       readEvents: () => Stream.empty,
       dispatch: (command) => Queue.offer(commands, command).pipe(Effect.as({ sequence: 1 })),
       streamDomainEvents: Stream.empty,
+      subscribeDomainEvents: Effect.succeed(Stream.empty),
       latestSequence: Effect.succeed(0),
     } satisfies OrchestrationEngineShape;
     const snapshot = makeShellSnapshot();

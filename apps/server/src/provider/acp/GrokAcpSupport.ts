@@ -19,7 +19,6 @@ const T3_CODE_OAUTH_REFERRER = "t3code";
 const GROK_AUTH_METHOD_API_KEY = "xai.api_key";
 const GROK_AUTH_METHOD_CACHED_TOKEN = "cached_token";
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
-const GROK_LEGACY_DEFAULT_MODEL_ID = "grok-build";
 const GROK_STOCK_SESSION_COMPATIBILITY_GROUP = "grok-stock";
 const GROK_STRICT_AGENT_TYPES = new Set(["codex", "grok-build-orchestrator"]);
 
@@ -103,10 +102,16 @@ export const makeGrokAcpRuntime = (
     return yield* makeXAiPromptCompletionRuntime(runtime);
   });
 
+/**
+ * T3's built-in Grok slug. It is the CLI's product name, not a model id the ACP accepts,
+ * so selecting it means "use whatever model the Grok session currently runs on".
+ */
+export const GROK_DEFAULT_MODEL_SLUG = "grok-build";
+
 export function resolveGrokAcpBaseModelId(model: string | null | undefined): string {
   const trimmed = model?.trim();
-  const base = trimmed && trimmed.length > 0 ? trimmed : GROK_LEGACY_DEFAULT_MODEL_ID;
-  return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? GROK_LEGACY_DEFAULT_MODEL_ID;
+  const base = trimmed && trimmed.length > 0 ? trimmed : GROK_DEFAULT_MODEL_SLUG;
+  return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? GROK_DEFAULT_MODEL_SLUG;
 }
 
 export function grokAcpSessionCompatibilityGroup(
@@ -265,19 +270,15 @@ export function applyGrokAcpModelSelection<E>(input: {
   readonly requestedReasoningEffort?: string | undefined;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
 }): Effect.Effect<GrokAcpModelSelectionState, E> {
-  const requestedModelId = input.requestedModelId?.trim() || undefined;
+  // The product slug is never sent over the wire; it keeps the session's current model.
+  const requestedInput = input.requestedModelId?.trim() || undefined;
+  const requestedModelId = requestedInput === GROK_DEFAULT_MODEL_SLUG ? undefined : requestedInput;
   const reasoningProvided = input.requestedReasoningEffort !== undefined;
   const requestedReasoningEffort = reasoningProvided
     ? normalizeGrokReasoningEffort(input.requestedReasoningEffort)
     : undefined;
-  const targetModelId =
-    requestedModelId === GROK_LEGACY_DEFAULT_MODEL_ID
-      ? input.currentModelId
-      : (requestedModelId ?? input.currentModelId);
-  const modelChanged =
-    requestedModelId !== undefined &&
-    requestedModelId !== GROK_LEGACY_DEFAULT_MODEL_ID &&
-    requestedModelId !== input.currentModelId;
+  const targetModelId = requestedModelId ?? input.currentModelId;
+  const modelChanged = requestedModelId !== undefined && requestedModelId !== input.currentModelId;
   const effortChanged =
     reasoningProvided && requestedReasoningEffort !== input.currentReasoningEffort;
 
