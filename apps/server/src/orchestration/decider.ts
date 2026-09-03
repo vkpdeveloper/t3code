@@ -380,6 +380,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           operatorParentThreadId: command.operatorParentThreadId ?? null,
           operatorBatchId: command.operatorBatchId ?? null,
+          automationId: command.automationId ?? null,
+          automationRunId: command.automationRunId ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },

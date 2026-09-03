@@ -87,6 +87,7 @@ const decodeTransferShellSnapshot = Schema.decodeUnknownEffect(
 );
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
+import * as AutomationService from "./automation/AutomationService.ts";
 import * as ServerConfig from "./config.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
 import {
@@ -472,6 +473,7 @@ const buildAppUnderTest = (options?: {
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
     >;
     vibeProxyUsage?: Partial<VibeProxyUsageService.VibeProxyUsageService["Service"]>;
+    automationService?: Partial<AutomationService.AutomationService["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -909,7 +911,20 @@ const buildAppUnderTest = (options?: {
       ),
     );
 
-    const appLayer = servedRoutesLayer.pipe(
+    const servedRoutesWithAutomationLayer = servedRoutesLayer.pipe(
+      Layer.provide(
+        Layer.mock(AutomationService.AutomationService)({
+          list: Effect.succeed({ automations: [] }),
+          create: () => Effect.die("Automation creation is not stubbed in this test"),
+          update: () => Effect.die("Automation update is not stubbed in this test"),
+          remove: () => Effect.die("Automation deletion is not stubbed in this test"),
+          runNow: () => Effect.die("Automation execution is not stubbed in this test"),
+          ...options?.layers?.automationService,
+        }),
+      ),
+    );
+
+    const appLayer = servedRoutesWithAutomationLayer.pipe(
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(UsageService.layerTest),
       Layer.provide(

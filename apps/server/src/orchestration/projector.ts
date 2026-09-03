@@ -304,6 +304,8 @@ export function projectEvent(
             operatorWorkspacePath: null,
             operatorWorkspaceBranch: null,
             operatorWaitStartedAt: null,
+            automationId: payload.automationId ?? null,
+            automationRunId: payload.automationRunId ?? null,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,

@@ -118,6 +118,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VibeProxyUsageService from "./usage/VibeProxyUsageService.ts";
 import * as WorktreeCleanup from "./worktreeCleanup.ts";
+import * as AutomationService from "./automation/AutomationService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -468,7 +469,14 @@ const RuntimeCoreDependenciesLive = Layer.merge(
   WorktreeCleanup.layer.pipe(Layer.provide(RuntimeCoreDependenciesBaseLive)),
 );
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const AutomationServiceLive = AutomationService.layer.pipe(
+  Layer.provide(RuntimeCoreDependenciesLive),
+);
+
+const RuntimeDependenciesLive = Layer.merge(
+  RuntimeCoreDependenciesLive,
+  AutomationServiceLive,
+).pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),

@@ -1,4 +1,5 @@
 import {
+  AutomationId,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -197,6 +198,37 @@ function makeHarness() {
 }
 
 describe("environment entity projections", () => {
+  it("keeps automation threads out of normal navigation while preserving direct access", () => {
+    const harness = makeHarness();
+    const automationThreadId = ThreadId.make("automation-thread");
+    harness.registry.set(
+      harness.shellStateAtom,
+      AsyncResult.success(
+        shellState({
+          ...SNAPSHOT,
+          threads: [
+            ...SNAPSHOT.threads,
+            {
+              ...THREAD_SHELL,
+              id: automationThreadId,
+              automationId: AutomationId.make("automation-1"),
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(harness.registry.get(harness.threadShells.threadRefsAtom)).toHaveLength(2);
+    expect(
+      harness.registry.get(
+        harness.threadShells.threadShellAtom({
+          environmentId: ENVIRONMENT_ID,
+          threadId: automationThreadId,
+        }),
+      )?.id,
+    ).toBe(automationThreadId);
+  });
+
   it("composes detail collections with authoritative shell workspace metadata", () => {
     const messages: OrchestrationThread["messages"] = [];
     const detail = {

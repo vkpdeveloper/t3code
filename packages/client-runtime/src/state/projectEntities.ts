@@ -5,6 +5,7 @@ import type {
   ProjectId,
   ScopedProjectRef,
 } from "@t3tools/contracts";
+import { AUTOMATION_WORKSPACE_PROJECT_ID } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -41,10 +42,12 @@ export function createEnvironmentProjectAtoms(input: {
   const environmentProjectRefsAtom = Atom.family((environmentId: EnvironmentId) => {
     let previous: ReadonlyArray<ScopedProjectRef> = [];
     return Atom.make((get) => {
-      const next = get(environmentProjectsAtom(environmentId)).map((project) => ({
-        environmentId,
-        projectId: project.id,
-      }));
+      const next = get(environmentProjectsAtom(environmentId))
+        .filter((project) => project.id !== AUTOMATION_WORKSPACE_PROJECT_ID)
+        .map((project) => ({
+          environmentId,
+          projectId: project.id,
+        }));
       if (projectRefsEqual(previous, next)) {
         return previous;
       }

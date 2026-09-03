@@ -470,6 +470,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           operator_workspace_path AS "operatorWorkspacePath",
           operator_workspace_branch AS "operatorWorkspaceBranch",
           operator_wait_started_at AS "operatorWaitStartedAt",
+          automation_id AS "automationId",
+          automation_run_id AS "automationRunId",
           linked_pull_request_json AS "linkedPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -514,6 +516,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           operator_workspace_path AS "operatorWorkspacePath",
           operator_workspace_branch AS "operatorWorkspaceBranch",
           operator_wait_started_at AS "operatorWaitStartedAt",
+          automation_id AS "automationId",
+          automation_run_id AS "automationRunId",
           linked_pull_request_json AS "linkedPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -560,6 +564,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           operator_workspace_path AS "operatorWorkspacePath",
           operator_workspace_branch AS "operatorWorkspaceBranch",
           operator_wait_started_at AS "operatorWaitStartedAt",
+          automation_id AS "automationId",
+          automation_run_id AS "automationRunId",
           linked_pull_request_json AS "linkedPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -583,6 +589,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_threads
         WHERE deleted_at IS NULL
           AND archived_at IS NOT NULL
+          AND automation_id IS NULL
         ORDER BY project_id ASC, archived_at DESC, thread_id DESC
       `,
   });
@@ -892,6 +899,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ON projects.project_id = threads.project_id
           WHERE threads.deleted_at IS NULL
             AND threads.archived_at IS NULL
+            AND threads.automation_id IS NULL
             AND projects.deleted_at IS NULL
             AND messages.is_streaming = 0
             AND (
@@ -1024,6 +1032,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           operator_workspace_path AS "operatorWorkspacePath",
           operator_workspace_branch AS "operatorWorkspaceBranch",
           operator_wait_started_at AS "operatorWaitStartedAt",
+          automation_id AS "automationId",
+          automation_run_id AS "automationRunId",
           linked_pull_request_json AS "linkedPullRequest",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
@@ -1925,6 +1935,8 @@ pending_approval_requests AS (
                 operatorWorkspacePath: row.operatorWorkspacePath ?? null,
                 operatorWorkspaceBranch: row.operatorWorkspaceBranch ?? null,
                 operatorWaitStartedAt: row.operatorWaitStartedAt ?? null,
+                automationId: row.automationId ?? null,
+                automationRunId: row.automationRunId ?? null,
                 ...(row.linkedPullRequest === null
                   ? {}
                   : { linkedPullRequest: row.linkedPullRequest }),
@@ -2142,6 +2154,8 @@ pending_approval_requests AS (
                   operatorWorkspacePath: row.operatorWorkspacePath ?? null,
                   operatorWorkspaceBranch: row.operatorWorkspaceBranch ?? null,
                   operatorWaitStartedAt: row.operatorWaitStartedAt ?? null,
+                  automationId: row.automationId ?? null,
+                  automationRunId: row.automationRunId ?? null,
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
@@ -2288,6 +2302,8 @@ pending_approval_requests AS (
                       operatorWorkspacePath: row.operatorWorkspacePath ?? null,
                       operatorWorkspaceBranch: row.operatorWorkspaceBranch ?? null,
                       operatorWaitStartedAt: row.operatorWaitStartedAt ?? null,
+                      automationId: row.automationId ?? null,
+                      automationRunId: row.automationRunId ?? null,
                       ...(row.linkedPullRequest === null
                         ? {}
                         : { linkedPullRequest: row.linkedPullRequest }),
@@ -2443,6 +2459,8 @@ pending_approval_requests AS (
                   operatorWorkspacePath: row.operatorWorkspacePath ?? null,
                   operatorWorkspaceBranch: row.operatorWorkspaceBranch ?? null,
                   operatorWaitStartedAt: row.operatorWaitStartedAt ?? null,
+                  automationId: row.automationId ?? null,
+                  automationRunId: row.automationRunId ?? null,
                   ...(row.linkedPullRequest === null
                     ? {}
                     : { linkedPullRequest: row.linkedPullRequest }),
@@ -2748,6 +2766,8 @@ pending_approval_requests AS (
         operatorWorkspacePath: threadRow.value.operatorWorkspacePath ?? null,
         operatorWorkspaceBranch: threadRow.value.operatorWorkspaceBranch ?? null,
         operatorWaitStartedAt: threadRow.value.operatorWaitStartedAt ?? null,
+        automationId: threadRow.value.automationId ?? null,
+        automationRunId: threadRow.value.automationRunId ?? null,
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
@@ -2992,6 +3012,8 @@ pending_approval_requests AS (
         operatorWorkspacePath: threadRow.value.operatorWorkspacePath ?? null,
         operatorWorkspaceBranch: threadRow.value.operatorWorkspaceBranch ?? null,
         operatorWaitStartedAt: threadRow.value.operatorWaitStartedAt ?? null,
+        automationId: threadRow.value.automationId ?? null,
+        automationRunId: threadRow.value.automationRunId ?? null,
         ...(threadRow.value.linkedPullRequest === null
           ? {}
           : { linkedPullRequest: threadRow.value.linkedPullRequest }),
