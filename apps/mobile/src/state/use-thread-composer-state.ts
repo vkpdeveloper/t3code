@@ -6,6 +6,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 
 import {
   CommandId,
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   MessageId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type EnvironmentId,
@@ -25,6 +26,8 @@ import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime"
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
+import { isModelSelectionUnavailable } from "../lib/modelOptions";
+import { resolveProviderInteractionMode } from "../features/threads/legacy-plan-mode";
 import {
   convertPastedImagesToAttachments,
   pasteComposerClipboard,
@@ -229,8 +232,20 @@ export function useThreadComposerState() {
       return null;
     }
 
-    const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
-      (entry) => entry.instanceId === thread.modelSelection.instanceId,
+    const modelSelection = draft.modelSelection ?? thread.modelSelection;
+    const serverConfig = selectedEnvironmentRuntime?.serverConfig;
+    if (
+      selectedEnvironmentRuntime?.connectionState === "connected" &&
+      isModelSelectionUnavailable(serverConfig, modelSelection)
+    ) {
+      Alert.alert(
+        "Antigravity model unavailable",
+        "Open model settings to finish setup or choose another model.",
+      );
+      return null;
+    }
+    const provider = serverConfig?.providers.find(
+      (entry) => entry.instanceId === modelSelection.instanceId,
     );
     const feedbackCommand =
       attachments.length === 0 &&
@@ -295,7 +310,6 @@ export function useThreadComposerState() {
 
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
-    const modelSelection = draft.modelSelection ?? thread.modelSelection;
     // Enqueue publishes the queued atom synchronously (the durable write
     // happens behind it), so clearing the draft here gives send feedback on
     // the tap frame instead of after file I/O. If the write fails the message
@@ -488,9 +502,17 @@ export function useThreadComposerState() {
       if (!selectedThreadKey) {
         return;
       }
-      updateComposerDraftSettings(selectedThreadKey, { modelSelection: value });
+      const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
+        (candidate) => candidate.instanceId === value.instanceId,
+      );
+      updateComposerDraftSettings(selectedThreadKey, {
+        modelSelection: value,
+        ...(provider?.showInteractionModeToggle === false
+          ? { interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE }
+          : {}),
+      });
     },
-    [selectedThreadKey],
+    [selectedEnvironmentRuntime?.serverConfig, selectedThreadKey],
   );
 
   const onUpdateRuntimeMode = useCallback(
@@ -508,9 +530,17 @@ export function useThreadComposerState() {
       if (!selectedThreadKey) {
         return;
       }
-      updateComposerDraftSettings(selectedThreadKey, { interactionMode: value });
+      const modelSelection =
+        getComposerDraftSnapshot(selectedThreadKey).modelSelection ??
+        selectedThread?.modelSelection;
+      const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
+        (candidate) => candidate.instanceId === modelSelection?.instanceId,
+      );
+      updateComposerDraftSettings(selectedThreadKey, {
+        interactionMode: resolveProviderInteractionMode(provider, value),
+      });
     },
-    [selectedThreadKey],
+    [selectedEnvironmentRuntime?.serverConfig, selectedThread?.modelSelection, selectedThreadKey],
   );
 
   return {

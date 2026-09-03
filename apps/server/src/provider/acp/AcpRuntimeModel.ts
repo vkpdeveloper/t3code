@@ -165,6 +165,11 @@ export type AcpParsedSessionEvent =
       readonly modeId: string;
     }
   | {
+      readonly _tag: "AvailableCommandsUpdated";
+      readonly availableCommands: ReadonlyArray<EffectAcpSchema.AvailableCommand>;
+      readonly rawPayload: unknown;
+    }
+  | {
       readonly _tag: "AssistantItemStarted";
       readonly itemId: string;
       readonly itemType: AcpTextItemType;
@@ -202,6 +207,11 @@ export type AcpParsedSessionEvent =
       readonly _tag: "UsageUpdated";
       readonly usedTokens: number;
       readonly maxTokens?: number;
+      readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "ThoughtDelta";
+      readonly text: string;
       readonly rawPayload: unknown;
     };
 
@@ -875,6 +885,14 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
   let configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | undefined;
 
   switch (upd.sessionUpdate) {
+    case "available_commands_update": {
+      events.push({
+        _tag: "AvailableCommandsUpdated",
+        availableCommands: upd.availableCommands,
+        rawPayload: params,
+      });
+      break;
+    }
     case "current_mode_update": {
       modeId = upd.currentModeId.trim();
       if (modeId) {
