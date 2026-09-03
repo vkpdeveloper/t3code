@@ -2,6 +2,15 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  Automation,
+  AutomationCreateInput,
+  AutomationEmptyResult,
+  AutomationIdInput,
+  AutomationListResult,
+  AutomationOperationError,
+  AutomationUpdateInput,
+} from "./automation.ts";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
@@ -211,6 +220,13 @@ import {
 import { VcsError } from "./vcs.ts";
 
 export const WS_METHODS = {
+  // Durable machine-owned automations
+  automationsList: "automations.list",
+  automationsCreate: "automations.create",
+  automationsUpdate: "automations.update",
+  automationsDelete: "automations.delete",
+  automationsRunNow: "automations.runNow",
+
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -340,6 +356,36 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
+
+export const WsAutomationsListRpc = Rpc.make(WS_METHODS.automationsList, {
+  payload: Schema.Struct({}),
+  success: AutomationListResult,
+  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsAutomationsCreateRpc = Rpc.make(WS_METHODS.automationsCreate, {
+  payload: AutomationCreateInput,
+  success: Automation,
+  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsAutomationsUpdateRpc = Rpc.make(WS_METHODS.automationsUpdate, {
+  payload: AutomationUpdateInput,
+  success: Automation,
+  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsAutomationsDeleteRpc = Rpc.make(WS_METHODS.automationsDelete, {
+  payload: AutomationIdInput,
+  success: AutomationEmptyResult,
+  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
+});
+
+export const WsAutomationsRunNowRpc = Rpc.make(WS_METHODS.automationsRunNow, {
+  payload: AutomationIdInput,
+  success: Automation,
+  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
+});
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -1068,6 +1114,11 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
 });
 
 export const WsRpcGroup = RpcGroup.make(
+  WsAutomationsListRpc,
+  WsAutomationsCreateRpc,
+  WsAutomationsUpdateRpc,
+  WsAutomationsDeleteRpc,
+  WsAutomationsRunNowRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

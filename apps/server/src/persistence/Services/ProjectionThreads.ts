@@ -7,6 +7,8 @@
  * @module ProjectionThreadRepository
  */
 import {
+  AutomationId,
+  AutomationRunId,
   CommandId,
   IsoDateTime,
   ModelSelection,
@@ -40,6 +42,8 @@ export const ProjectionThread = Schema.Struct({
   operatorWorkspacePath: Schema.optional(Schema.NullOr(Schema.String)),
   operatorWorkspaceBranch: Schema.optional(Schema.NullOr(Schema.String)),
   operatorWaitStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  automationRunId: Schema.optional(Schema.NullOr(AutomationRunId)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,

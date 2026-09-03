@@ -8,6 +8,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
+- [Automations](#automations)
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
@@ -42,6 +43,16 @@ A single user-to-assistant work cycle inside a thread. It starts with user input
 #### Activity
 
 A user-visible log item attached to a thread. In [the contracts][1], activities cover important non-message events like approvals, tool actions, and failures. They are projected into thread state in [projector.ts][4].
+
+### Automations
+
+#### Automation
+
+An environment-owned schedule that starts a provider turn with a saved prompt, model, runtime mode, and optional project. Definitions and run claims are stored in the environment database. The scheduler runs in [AutomationService.ts][27], so execution belongs to the selected machine rather than the client that created the schedule. See the [user guide][28].
+
+#### Automation run
+
+One claimed occurrence of an automation, either scheduled or started manually. Every run creates a normal orchestrated thread tagged with its automation and run identifiers. Client projections retain that thread for direct routing while excluding it from normal project, search, and archive lists. The run remains accessible through Automations.
 
 ### Orchestration
 
@@ -201,3 +212,5 @@ ships T3 Code already matching it.
 [24]: ./overview.md
 [25]: ../../apps/server/src/environmentTheme.ts
 [26]: ../user/environment-theme.md
+[27]: ../../apps/server/src/automation/AutomationService.ts
+[28]: ../user/automations.md

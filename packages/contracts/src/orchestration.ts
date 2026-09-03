@@ -6,6 +6,8 @@ import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
 import {
+  AutomationId,
+  AutomationRunId,
   ApprovalRequestId,
   CheckpointRef,
   ClientSurface,
@@ -464,6 +466,8 @@ export const OrchestrationThread = Schema.Struct({
   operatorWorkspacePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   operatorWorkspaceBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   operatorWaitStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  automationRunId: Schema.optional(Schema.NullOr(AutomationRunId)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -546,6 +550,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   operatorWorkspacePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   operatorWorkspaceBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   operatorWaitStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  automationRunId: Schema.optional(Schema.NullOr(AutomationRunId)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -775,6 +781,8 @@ const ThreadCreateCommand = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   operatorParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   operatorBatchId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  automationRunId: Schema.optional(Schema.NullOr(AutomationRunId)),
   createdAt: IsoDateTime,
 });
 
@@ -1276,6 +1284,8 @@ export const ThreadCreatedPayload = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   operatorParentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   operatorBatchId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  automationRunId: Schema.optional(Schema.NullOr(AutomationRunId)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

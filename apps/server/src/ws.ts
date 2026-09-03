@@ -126,6 +126,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VibeProxyUsageService from "./usage/VibeProxyUsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as AutomationService from "./automation/AutomationService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -595,6 +596,7 @@ const makeWsRpcLayer = (
       const usage = yield* UsageService.UsageService;
       const vibeProxyUsage = yield* VibeProxyUsageService.VibeProxyUsageService;
       const worktreeCleanup = yield* Effect.serviceOption(WorktreeCleanup.WorktreeCleanup);
+      const automations = yield* AutomationService.AutomationService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -1270,6 +1272,26 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [WS_METHODS.automationsList]: (_input) =>
+          observeRpcEffect(WS_METHODS.automationsList, automations.list, {
+            "rpc.aggregate": "automation",
+          }),
+        [WS_METHODS.automationsCreate]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsCreate, automations.create(input), {
+            "rpc.aggregate": "automation",
+          }),
+        [WS_METHODS.automationsUpdate]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsUpdate, automations.update(input), {
+            "rpc.aggregate": "automation",
+          }),
+        [WS_METHODS.automationsDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsDelete, automations.remove(input.id), {
+            "rpc.aggregate": "automation",
+          }),
+        [WS_METHODS.automationsRunNow]: (input) =>
+          observeRpcEffect(WS_METHODS.automationsRunNow, automations.runNow(input.id), {
+            "rpc.aggregate": "automation",
+          }),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
