@@ -2,20 +2,24 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type {
-  Automation,
-  AutomationCreateInput,
-  AutomationSchedule,
-  EnvironmentId,
-  ModelSelection,
-  ProjectId,
-  RuntimeMode,
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  type Automation,
+  type AutomationCreateInput,
+  type AutomationSchedule,
+  type EnvironmentId,
+  type ModelSelection,
+  type ProviderInstanceId,
+  type ProjectId,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import {
   AlarmClockIcon,
   CirclePauseIcon,
   Clock3Icon,
+  FolderPlusIcon,
   MoreHorizontalIcon,
   PlayIcon,
   PlusIcon,
@@ -24,10 +28,22 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
+import { mergeEnvironmentSettings, useClientSettings } from "../../hooks/useSettings";
+import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectPaths";
+import { newProjectId } from "../../lib/utils";
+import { getAppModelOptionsForInstance, resolveAppModelSelectionState } from "../../modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+} from "../../providerInstances";
 import { automationEnvironment, useAutomations } from "../../state/automations";
-import { useProjects } from "../../state/entities";
+import { useProjects, waitForProject } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { AutomationProjectPicker, MACHINE_PROJECT } from "./AutomationProjectPicker";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -49,8 +65,6 @@ import { Textarea } from "../ui/textarea";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
-
-const MACHINE_PROJECT = "__machine__";
 
 function messageFromUnknown(value: unknown): string {
   return value instanceof Error && value.message.trim() !== ""
@@ -95,11 +109,11 @@ interface AutomationFormState {
   readonly time: string;
   readonly minute: string;
   readonly weekday: "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
-  readonly modelKey: string;
+  readonly modelSelection: ModelSelection | null;
   readonly runtimeMode: RuntimeMode;
 }
 
-function defaultForm(modelKey: string): AutomationFormState {
+function defaultForm(modelSelection: ModelSelection | null): AutomationFormState {
   return {
     name: "",
     prompt: "",
@@ -108,23 +122,53 @@ function defaultForm(modelKey: string): AutomationFormState {
     time: "09:00",
     minute: "0",
     weekday: "monday",
-    modelKey,
+    modelSelection,
     runtimeMode: "full-access",
   };
+}
+
+function scheduleKindLabel(kind: AutomationSchedule["kind"]): string {
+  switch (kind) {
+    case "hourly":
+      return "Every hour";
+    case "daily":
+      return "Daily";
+    case "weekdays":
+      return "Weekdays";
+    case "weekly":
+      return "Weekly";
+  }
+}
+
+function runtimeModeLabel(mode: RuntimeMode): string {
+  switch (mode) {
+    case "auto":
+      return "Automatic";
+    case "full-access":
+      return "Full access";
+    case "auto-accept-edits":
+      return "Auto-accept edits";
+    case "approval-required":
+      return "Ask for approval";
+  }
 }
 
 export function AutomationsPage() {
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projects = useProjects();
+  const clientSettings = useClientSettings();
   const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(
     primaryEnvironmentId ?? environments[0]?.environmentId ?? null,
   );
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [addingProject, setAddingProject] = useState(false);
+  const [newProjectPath, setNewProjectPath] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const query = useAutomations(environmentId);
   const createAutomation = useAtomCommand(automationEnvironment.create);
+  const createProject = useAtomCommand(projectEnvironment.create);
   const updateAutomation = useAtomCommand(automationEnvironment.update);
   const removeAutomation = useAtomCommand(automationEnvironment.remove);
   const runNow = useAtomCommand(automationEnvironment.runNow);
@@ -139,28 +183,71 @@ export function AutomationsPage() {
     (environment) => environment.environmentId === environmentId,
   );
   const environmentProjects = projects.filter((project) => project.environmentId === environmentId);
-  const models = useMemo(
+  const providerStatuses = selectedEnvironment?.serverConfig?.providers ?? [];
+  const settings = useMemo(
     () =>
-      (selectedEnvironment?.serverConfig?.providers ?? []).flatMap((provider) =>
-        provider.enabled && provider.installed
-          ? provider.models.map((model) => ({
-              key: `${provider.instanceId}\u0000${model.slug}`,
-              selection: {
-                instanceId: provider.instanceId,
-                model: model.slug,
-              } satisfies ModelSelection,
-              label: `${provider.displayName ?? provider.driver} · ${model.shortName ?? model.name}`,
-            }))
-          : [],
+      mergeEnvironmentSettings(
+        selectedEnvironment?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+        clientSettings,
       ),
-    [selectedEnvironment],
+    [clientSettings, selectedEnvironment?.serverConfig?.settings],
   );
-  const [form, setForm] = useState<AutomationFormState>(() => defaultForm(""));
-  useEffect(() => {
-    if (form.modelKey === "" && models[0]) {
-      setForm((current) => ({ ...current, modelKey: models[0]!.key }));
+  const providerInstanceEntries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+      ),
+    [providerStatuses, settings],
+  );
+  const defaultModelSelection = useMemo(
+    () =>
+      providerStatuses.length > 0
+        ? resolveAppModelSelectionState(settings, providerStatuses)
+        : null,
+    [providerStatuses, settings],
+  );
+  const [form, setForm] = useState<AutomationFormState>(() => defaultForm(null));
+  const modelOptionsByInstance = useMemo(() => {
+    const options = new Map<ProviderInstanceId, ReturnType<typeof getAppModelOptionsForInstance>>();
+    for (const entry of providerInstanceEntries) {
+      options.set(
+        entry.instanceId,
+        getAppModelOptionsForInstance(
+          settings,
+          entry,
+          entry.instanceId === form.modelSelection?.instanceId ? form.modelSelection.model : null,
+        ),
+      );
     }
-  }, [form.modelKey, models]);
+    return options;
+  }, [form.modelSelection, providerInstanceEntries, settings]);
+  useEffect(() => {
+    const selectedEntry = providerInstanceEntries.find(
+      (entry) => entry.instanceId === form.modelSelection?.instanceId,
+    );
+    const selectionExists =
+      selectedEntry?.enabled === true &&
+      selectedEntry.isAvailable &&
+      modelOptionsByInstance
+        .get(selectedEntry.instanceId)
+        ?.some((option) => option.slug === form.modelSelection?.model);
+    if (!selectionExists) {
+      setForm((current) =>
+        current.modelSelection === null && defaultModelSelection === null
+          ? current
+          : { ...current, modelSelection: defaultModelSelection },
+      );
+    }
+  }, [defaultModelSelection, form.modelSelection, modelOptionsByInstance, providerInstanceEntries]);
+
+  useEffect(() => {
+    if (
+      form.projectId !== MACHINE_PROJECT &&
+      !environmentProjects.some((project) => project.id === form.projectId)
+    ) {
+      setForm((current) => ({ ...current, projectId: MACHINE_PROJECT }));
+    }
+  }, [environmentProjects, form.projectId]);
 
   const mutate = async <A, E>(id: string, action: () => Promise<AtomCommandResult<A, E>>) => {
     setWorkingId(id);
@@ -176,8 +263,7 @@ export function AutomationsPage() {
 
   const submit = async () => {
     if (environmentId === null) return;
-    const model = models.find((candidate) => candidate.key === form.modelKey);
-    if (!model || form.name.trim() === "" || form.prompt.trim() === "") {
+    if (form.modelSelection === null || form.name.trim() === "" || form.prompt.trim() === "") {
       setError("Name, instructions, and a model are required.");
       return;
     }
@@ -193,13 +279,56 @@ export function AutomationsPage() {
       prompt: form.prompt.trim(),
       projectId: form.projectId === MACHINE_PROJECT ? null : (form.projectId as ProjectId),
       schedule,
-      modelSelection: model.selection,
+      modelSelection: form.modelSelection,
       runtimeMode: form.runtimeMode,
       enabled: true,
     };
     const succeeded = await mutate("create", () => createAutomation({ environmentId, input }));
     if (succeeded) {
-      setForm(defaultForm(models[0]?.key ?? ""));
+      setForm(defaultForm(defaultModelSelection));
+      setAddingProject(false);
+      setNewProjectPath("");
+      setDialogOpen(false);
+    }
+  };
+
+  const registerProject = async () => {
+    if (environmentId === null) return;
+    const workspaceRoot = newProjectPath.trim();
+    if (workspaceRoot === "") {
+      setError("Enter a folder path for the project.");
+      return;
+    }
+    const existingProject = findProjectByPath(environmentProjects, workspaceRoot);
+    if (existingProject) {
+      setForm((current) => ({ ...current, projectId: existingProject.id }));
+      setAddingProject(false);
+      setNewProjectPath("");
+      return;
+    }
+
+    const projectId = newProjectId();
+    const succeeded = await mutate("project:create", () =>
+      createProject({
+        environmentId,
+        input: {
+          projectId,
+          title: inferProjectTitleFromPath(workspaceRoot),
+          workspaceRoot,
+          createWorkspaceRootIfMissing: true,
+          defaultModelSelection: null,
+        },
+      }),
+    );
+    if (!succeeded) return;
+
+    try {
+      await waitForProject(scopeProjectRef(environmentId, projectId));
+      setForm((current) => ({ ...current, projectId }));
+      setAddingProject(false);
+      setNewProjectPath("");
+    } catch (cause) {
+      setError(messageFromUnknown(cause));
     }
   };
 
@@ -246,7 +375,7 @@ export function AutomationsPage() {
           </SelectPopup>
         </Select>
         <Button
-          disabled={environmentId === null || models.length === 0}
+          disabled={environmentId === null || defaultModelSelection === null}
           onClick={() => {
             setError(null);
             setDialogOpen(true);
@@ -312,7 +441,10 @@ export function AutomationsPage() {
                           <Link
                             className="group inline-flex items-center gap-1.5 rounded outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                             to="/$environmentId/$threadId"
-                            params={{ environmentId: environmentId!, threadId: latestRun.threadId }}
+                            params={{
+                              environmentId: environmentId!,
+                              threadId: latestRun.threadId,
+                            }}
                           >
                             <Clock3Icon className="size-3.5 text-muted-foreground" />
                             <span>{runStatusLabel(latestRun)}</span>
@@ -339,7 +471,10 @@ export function AutomationsPage() {
                           onClick={() =>
                             environmentId &&
                             void mutate(automation.id, () =>
-                              runNow({ environmentId, input: { id: automation.id } }),
+                              runNow({
+                                environmentId,
+                                input: { id: automation.id },
+                              }),
                             )
                           }
                           size="icon-sm"
@@ -368,7 +503,10 @@ export function AutomationsPage() {
                               onClick={() =>
                                 environmentId &&
                                 void mutate(automation.id, () =>
-                                  removeAutomation({ environmentId, input: { id: automation.id } }),
+                                  removeAutomation({
+                                    environmentId,
+                                    input: { id: automation.id },
+                                  }),
                                 )
                               }
                             >
@@ -401,12 +539,27 @@ export function AutomationsPage() {
         </ScrollArea>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            setAddingProject(false);
+            setNewProjectPath("");
+            setError(null);
+          }
+        }}
+      >
         <DialogPopup className="w-full sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>New automation</DialogTitle>
           </DialogHeader>
           <DialogPanel className="grid gap-4">
+            {error ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            ) : null}
             <div className="grid gap-1.5">
               <Label htmlFor="automation-name">Name</Label>
               <Input
@@ -428,54 +581,103 @@ export function AutomationsPage() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label>Workspace</Label>
-                <Select
+                <Label>Project</Label>
+                <AutomationProjectPicker
+                  environmentLabel={selectedEnvironment?.label ?? "this"}
+                  projects={environmentProjects}
                   value={form.projectId}
-                  onValueChange={(projectId) => projectId && setForm({ ...form, projectId })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup>
-                    <SelectItem value={MACHINE_PROJECT}>Machine workspace</SelectItem>
-                    {environmentProjects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.title}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                  onAddProject={() => {
+                    setError(null);
+                    setAddingProject(true);
+                  }}
+                  onChange={(projectId) => setForm({ ...form, projectId })}
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label>Model</Label>
-                <Select
-                  value={form.modelKey}
-                  onValueChange={(modelKey) => modelKey && setForm({ ...form, modelKey })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectPopup>
-                    {models.map((model) => (
-                      <SelectItem key={model.key} value={model.key}>
-                        {model.label}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
+                {form.modelSelection ? (
+                  <ProviderModelPicker
+                    activeInstanceId={form.modelSelection.instanceId}
+                    instanceEntries={providerInstanceEntries}
+                    lockedProvider={null}
+                    model={form.modelSelection.model}
+                    modelOptionsByInstance={modelOptionsByInstance}
+                    triggerAriaLabel="Choose model"
+                    triggerClassName="h-10 w-full max-w-none px-3"
+                    triggerVariant="outline"
+                    onInstanceModelChange={(instanceId, model) =>
+                      setForm({
+                        ...form,
+                        modelSelection: { instanceId, model },
+                      })
+                    }
+                  />
+                ) : (
+                  <Button className="h-10 w-full justify-start" disabled variant="outline">
+                    No model available
+                  </Button>
+                )}
               </div>
             </div>
+            {addingProject ? (
+              <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium">
+                    Add project to {selectedEnvironment?.label ?? "machine"}
+                  </span>
+                  <Button
+                    aria-label="Cancel adding project"
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setAddingProject(false);
+                      setNewProjectPath("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <Label htmlFor="automation-project-path">Folder path</Label>
+                <div className="flex gap-2">
+                  <Input
+                    autoFocus
+                    id="automation-project-path"
+                    placeholder="/path/to/project"
+                    value={newProjectPath}
+                    onChange={(event) => setNewProjectPath(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void registerProject();
+                      }
+                    }}
+                  />
+                  <Button
+                    disabled={workingId === "project:create" || newProjectPath.trim() === ""}
+                    type="button"
+                    variant="outline"
+                    onClick={() => void registerProject()}
+                  >
+                    <FolderPlusIcon /> Add
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label>Schedule</Label>
                 <Select
                   value={form.scheduleKind}
                   onValueChange={(scheduleKind) =>
-                    setForm({ ...form, scheduleKind: scheduleKind as AutomationSchedule["kind"] })
+                    setForm({
+                      ...form,
+                      scheduleKind: scheduleKind as AutomationSchedule["kind"],
+                    })
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{scheduleKindLabel(form.scheduleKind)}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup>
                     <SelectItem value="hourly">Every hour</SelectItem>
@@ -510,7 +712,10 @@ export function AutomationsPage() {
                 <Select
                   value={form.weekday}
                   onValueChange={(weekday) =>
-                    setForm({ ...form, weekday: weekday as AutomationFormState["weekday"] })
+                    setForm({
+                      ...form,
+                      weekday: weekday as AutomationFormState["weekday"],
+                    })
                   }
                 >
                   <SelectTrigger>
@@ -537,7 +742,7 @@ export function AutomationsPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue>{runtimeModeLabel(form.runtimeMode)}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
                   <SelectItem value="full-access">Full access</SelectItem>
@@ -549,27 +754,17 @@ export function AutomationsPage() {
           </DialogPanel>
           <DialogFooter>
             <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
-            <DialogClose
+            <Button
               disabled={
                 workingId === "create" ||
                 form.name.trim() === "" ||
                 form.prompt.trim() === "" ||
-                form.modelKey === ""
+                form.modelSelection === null
               }
-              render={
-                <Button
-                  disabled={
-                    workingId === "create" ||
-                    form.name.trim() === "" ||
-                    form.prompt.trim() === "" ||
-                    form.modelKey === ""
-                  }
-                  onClick={() => void submit()}
-                />
-              }
+              onClick={() => void submit()}
             >
               <AlarmClockIcon /> Schedule
-            </DialogClose>
+            </Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
