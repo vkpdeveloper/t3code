@@ -35,6 +35,8 @@ const clientSettings: ClientSettings = {
   desktopNotifyTaskFailed: true,
   continueThreadsAfterServerUpdate: true,
   contextWindowMeterEnabled: false,
+  composerCollapseOnBlur: false,
+  composerCollapseOnScroll: true,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   diffLayout: "stacked",

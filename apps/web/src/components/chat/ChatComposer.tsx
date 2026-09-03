@@ -3596,8 +3596,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isComposerResting = shouldUseRestingComposerLayout({
     isExistingThread: routeKind === "server" && activeThreadId !== null,
     isMobileViewport,
-    isFocused: isComposerFocused && !isComposerScrollCollapsed,
+    isFocused: isComposerFocused,
+    isScrollCollapsed: isComposerScrollCollapsed,
     hasExpandedChrome: composerHasExpandedChrome,
+    collapseOnBlur: settings.composerCollapseOnBlur,
   });
   // The relocated controls live in the context strip whenever the composer is
   // collapsed for any reason, the desktop resting layout or the phone
@@ -3669,8 +3671,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const canTrackComposerScrollGesture =
     routeKind === "server" && activeThreadId !== null && !isMobileViewport;
   const canScrollCollapseComposer =
-    canTrackComposerScrollGesture && !composerHasExpandedChrome && !showInlineTasksBadge;
-  composerScrollCollapseEligibleRef.current = canScrollCollapseComposer;
+    canTrackComposerScrollGesture &&
+    settings.composerCollapseOnScroll &&
+    !composerHasExpandedChrome &&
+    !showInlineTasksBadge;
+  // Scrolling only has something to collapse while the composer is expanded.
+  // With blur collapse off that includes an unfocused composer, so the wheel
+  // handler keys off this rather than editor focus.
+  composerScrollCollapseEligibleRef.current = canScrollCollapseComposer && !isComposerResting;
 
   useEffect(() => {
     if (!canScrollCollapseComposer) {
@@ -3711,11 +3719,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       resetComposerScrollGesture(composerScrollGestureRef.current);
     };
     const handleTimelineWheel = (event: WheelEvent) => {
-      const activeElement = document.activeElement;
-      const isPromptEditorFocused =
-        activeElement instanceof HTMLElement &&
-        activeElement.isContentEditable &&
-        composerFormRef.current?.contains(activeElement) === true;
       if (event.ctrlKey || !(event.target instanceof Element)) {
         return;
       }
@@ -3749,8 +3752,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         now: window.performance.now(),
         deltaPx,
         collapseThresholdPx: COMPOSER_SCROLL_COLLAPSE_THRESHOLD_PX,
-        collapseEligible:
-          targetsTimeline && composerScrollCollapseEligibleRef.current && isPromptEditorFocused,
+        collapseEligible: targetsTimeline && composerScrollCollapseEligibleRef.current,
         canScrollInGestureDirection,
         scrollsTowardLogicalEnd: event.deltaY > 0 && isTimelineAtLogicalEnd(),
       });
