@@ -61,6 +61,9 @@ import Migration0046 from "./Migrations/046_ProjectionThreadLinkedPullRequest.ts
 import Migration0047 from "./Migrations/047_ProjectionThreadsUnsettledAt.ts";
 import Migration0048 from "./Migrations/048_ClearAutomaticProjectModelDefaults.ts";
 import Migration0049 from "./Migrations/049_Automations.ts";
+import Migration0050 from "./Migrations/050_ProjectionProjectsAutoPull.ts";
+import Migration0051 from "./Migrations/051_RepairAutomaticSettlementTimestamps.ts";
+import Migration0052 from "./Migrations/052_ProjectionProjectIcon.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -122,6 +125,9 @@ export const migrationEntries = [
   [47, "ProjectionThreadsUnsettledAt", Migration0047],
   [48, "ClearAutomaticProjectModelDefaults", Migration0048],
   [49, "Automations", Migration0049],
+  [50, "ProjectionProjectsAutoPull", Migration0050],
+  [51, "RepairAutomaticSettlementTimestamps", Migration0051],
+  [52, "ProjectionProjectIcon", Migration0052],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

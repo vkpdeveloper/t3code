@@ -20,8 +20,10 @@ import { scopedProjectKey, scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
 import { prepareTurnAttachments, type PreparedTurnAttachments } from "../lib/attachmentUpload";
 import { randomHex } from "../lib/uuid";
+import { isModelSelectionUnavailable } from "../lib/modelOptions";
 import { appAtomRegistry } from "./atom-registry";
 import { useProjects, useServerConfigs, useThreadShells } from "./entities";
+import { serverEnvironment } from "./server";
 import {
   confirmThreadOutboxMessageQueued,
   ensureThreadOutboxLoaded,
@@ -649,15 +651,25 @@ export function useThreadOutboxDrain(): void {
 
   const sendQueuedMessage = useCallback(
     async (queuedMessage: QueuedThreadMessage, thread: EnvironmentThreadShell) => {
-      const settings = resolveQueuedThreadSettings(queuedMessage, thread);
+      const serverConfig = appAtomRegistry.get(
+        serverEnvironment.configValueAtom(queuedMessage.environmentId),
+      );
+      if (!serverConfig) return false;
+      const settings = resolveQueuedThreadSettings(queuedMessage, thread, serverConfig.providers);
       const interactionMode = resolveMobileThreadInteractionMode({
         preferenceLoaded: planModePreferenceLoaded,
         planModeEnabled,
-        providers: serverConfigs.get(queuedMessage.environmentId)?.providers ?? [],
+        providers: serverConfig.providers,
         modelSelection: settings.modelSelection,
         preferredMode: settings.interactionMode,
         fallbackMode: thread.interactionMode,
       });
+      if (isModelSelectionUnavailable(serverConfig, settings.modelSelection)) {
+        return restoreQueuedMessage(
+          queuedMessage,
+          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+        );
+      }
       const { reportFailure } = makeDeliveryHelpers(queuedMessage);
 
       if (!modelSelectionsEqual(settings.modelSelection, thread.modelSelection)) {
@@ -713,8 +725,7 @@ export function useThreadOutboxDrain(): void {
       try {
         const preparedResult = await prepareQueuedMessageAttachments(
           queuedMessage,
-          serverConfigs.get(queuedMessage.environmentId)?.environment.capabilities
-            .attachmentUploads === true,
+          serverConfig.environment.capabilities.attachmentUploads === true,
         );
         if (preparedResult.status === "abandoned") {
           return true;
@@ -742,6 +753,29 @@ export function useThreadOutboxDrain(): void {
       if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) {
         return true;
       }
+      const currentConfig = appAtomRegistry.get(
+        serverEnvironment.configValueAtom(queuedMessage.environmentId),
+      );
+      if (!currentConfig) return false;
+      if (isModelSelectionUnavailable(currentConfig, settings.modelSelection)) {
+        return restoreQueuedMessage(
+          persistedMessage,
+          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+        );
+      }
+      const sendSettings = resolveQueuedThreadSettings(
+        queuedMessage,
+        settings,
+        currentConfig.providers,
+      );
+      const sendInteractionMode = resolveMobileThreadInteractionMode({
+        preferenceLoaded: planModePreferenceLoaded,
+        planModeEnabled,
+        providers: currentConfig.providers,
+        modelSelection: sendSettings.modelSelection,
+        preferredMode: sendSettings.interactionMode,
+        fallbackMode: thread.interactionMode,
+      });
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
@@ -753,9 +787,9 @@ export function useThreadOutboxDrain(): void {
             text: queuedMessage.text,
             attachments: prepared.attachments,
           },
-          modelSelection: settings.modelSelection,
-          runtimeMode: settings.runtimeMode,
-          interactionMode,
+          modelSelection: sendSettings.modelSelection,
+          runtimeMode: sendSettings.runtimeMode,
+          interactionMode: sendInteractionMode,
           createdAt: queuedMessage.createdAt,
         },
       });
@@ -789,7 +823,6 @@ export function useThreadOutboxDrain(): void {
       startTurn,
       updateThreadMetadata,
       restoreQueuedMessage,
-      serverConfigs,
     ],
   );
 
@@ -803,22 +836,32 @@ export function useThreadOutboxDrain(): void {
       if (modelSelection === undefined) {
         return false;
       }
-      const interactionMode = resolveMobileThreadInteractionMode({
-        preferenceLoaded: planModePreferenceLoaded,
-        planModeEnabled,
-        providers: serverConfigs.get(queuedMessage.environmentId)?.providers ?? [],
-        modelSelection,
-        preferredMode: queuedMessage.interactionMode,
-        fallbackMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      });
+      const serverConfig = appAtomRegistry.get(
+        serverEnvironment.configValueAtom(queuedMessage.environmentId),
+      );
+      if (!serverConfig) return false;
+      const settings = resolveQueuedThreadSettings(
+        queuedMessage,
+        {
+          modelSelection,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        },
+        serverConfig.providers,
+      );
+      if (isModelSelectionUnavailable(serverConfig, settings.modelSelection)) {
+        return restoreQueuedMessage(
+          queuedMessage,
+          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+        );
+      }
       let prepared: PreparedTurnAttachments;
       let persistedMessage: QueuedThreadMessage;
       let deliveryRevision: number;
       try {
         const preparedResult = await prepareQueuedMessageAttachments(
           queuedMessage,
-          serverConfigs.get(queuedMessage.environmentId)?.environment.capabilities
-            .attachmentUploads === true,
+          serverConfig.environment.capabilities.attachmentUploads === true,
         );
         if (preparedResult.status === "abandoned") {
           return true;
@@ -846,6 +889,29 @@ export function useThreadOutboxDrain(): void {
       if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) {
         return true;
       }
+      const currentConfig = appAtomRegistry.get(
+        serverEnvironment.configValueAtom(queuedMessage.environmentId),
+      );
+      if (!currentConfig) return false;
+      if (isModelSelectionUnavailable(currentConfig, settings.modelSelection)) {
+        return restoreQueuedMessage(
+          persistedMessage,
+          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+        );
+      }
+      const sendSettings = resolveQueuedThreadSettings(
+        queuedMessage,
+        settings,
+        currentConfig.providers,
+      );
+      const sendInteractionMode = resolveMobileThreadInteractionMode({
+        preferenceLoaded: planModePreferenceLoaded,
+        planModeEnabled,
+        providers: currentConfig.providers,
+        modelSelection: sendSettings.modelSelection,
+        preferredMode: sendSettings.interactionMode,
+        fallbackMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      });
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
@@ -858,9 +924,9 @@ export function useThreadOutboxDrain(): void {
           text: queuedMessage.text.trim(),
           attachments: queuedMessage.attachments,
           uploadedAttachments: prepared.attachments,
-          modelSelection,
-          runtimeMode: queuedMessage.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-          interactionMode,
+          modelSelection: sendSettings.modelSelection,
+          runtimeMode: sendSettings.runtimeMode,
+          interactionMode: sendInteractionMode,
           workspaceMode: creation.workspaceMode,
           branch: creation.branch,
           worktreePath: creation.worktreePath,
@@ -901,7 +967,6 @@ export function useThreadOutboxDrain(): void {
       planModeEnabled,
       planModePreferenceLoaded,
       restoreQueuedMessage,
-      serverConfigs,
       startTurn,
     ],
   );
@@ -989,8 +1054,8 @@ export function useThreadOutboxDrain(): void {
         environmentConnected: environment?.connectionState === "connected",
         threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
       });
-      // The delivery action resolves first; the file-capability gate applies
-      // only to a message that will send. Gating earlier would restore a
+      // The delivery action resolves first; capability checks apply only to
+      // a message that will send. Checking earlier would restore a
       // creation whose startTurn already made the thread as a duplicate draft
       // instead of removing it.
       const serverConfig = serverConfigs.get(nextQueuedMessage.environmentId);

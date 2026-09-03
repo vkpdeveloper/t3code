@@ -11,20 +11,22 @@
  * cannot see them. This mirrors how the Codex app-server reports skills over
  * `skills/list`. Discovery is best-effort: an older CLI without `inspect`,
  * a timeout, or a non-zero exit falls back to the filesystem locations used
- * by older Grok versions. Malformed successful output also falls back, while a
- * valid empty catalog remains empty.
+ * by older Grok versions. If the fallback is also empty, the typed probe error
+ * prevents workspace snapshots from caching an empty catalog.
  *
  * @module provider/Drivers/GrokSkills
  */
 import * as NodeOS from "node:os";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { GrokSettings, ServerProviderSkill } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import * as Schema from "effect/Schema";
+import { ChildProcess } from "effect/unstable/process";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { parse as parseYamlDocument } from "yaml";
 
@@ -174,24 +176,39 @@ const discoverGrokSkillsFromFilesystem = Effect.fn("discoverGrokSkills")(functio
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
 });
 
+class GrokSkillsProbeError extends Schema.TaggedErrorClass<GrokSkillsProbeError>()(
+  "GrokSkillsProbeError",
+  {
+    stage: Schema.Literals(["spawn", "timeout", "exit", "decode"]),
+    cwd: Schema.optional(Schema.String),
+    exitCode: Schema.optional(Schema.Number),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    const location = this.cwd === undefined ? "" : ` for '${this.cwd}'`;
+    const exitCode = this.exitCode === undefined ? "" : ` with exit code ${this.exitCode}`;
+    return `\`grok inspect --json\` failed during ${this.stage}${location}${exitCode}.`;
+  }
+}
 /**
  * Map `grok inspect --json` output onto provider skills. Entries without a
  * name or a filesystem path are skipped; `userInvocable: false` skills are
  * kept but disabled so pickers that filter on `enabled` hide them.
  */
-export function parseGrokInspectSkills(stdout: string): ReadonlyArray<ServerProviderSkill> {
+function decodeGrokInspectSkills(stdout: string): ReadonlyArray<ServerProviderSkill> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return [];
+    return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) {
-    return [];
+    return undefined;
   }
   const entries = (parsed as Record<string, unknown>).skills;
   if (!Array.isArray(entries)) {
-    return [];
+    return undefined;
   }
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -223,34 +240,20 @@ export function parseGrokInspectSkills(stdout: string): ReadonlyArray<ServerProv
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function hasGrokInspectSkillsPayload(stdout: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return false;
-  }
-  return (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    Array.isArray((parsed as Record<string, unknown>).skills)
-  );
+export function parseGrokInspectSkills(stdout: string): ReadonlyArray<ServerProviderSkill> {
+  return decodeGrokInspectSkills(stdout) ?? [];
 }
 
 /**
  * Run `grok inspect --json` and map the reported catalog onto provider
- * skills. Never fails: any spawn error, non-zero exit, or timeout resolves
- * to an empty list.
+ * skills. Callers that need best-effort discovery can recover this effect to
+ * an empty list; workspace callers leave failures typed so they are not cached.
  */
 export const discoverGrokSkills = Effect.fn("discoverGrokSkills")(function* (
   grokSettings: Pick<GrokSettings, "binaryPath">,
   environment: NodeJS.ProcessEnv = process.env,
   cwd?: string,
-): Effect.fn.Return<
-  ReadonlyArray<ServerProviderSkill>,
-  never,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-> {
+) {
   const command = grokSettings.binaryPath || "grok";
   const inspectResult = yield* Effect.gen(function* () {
     const spawnCommand = yield* resolveSpawnCommand(command, ["inspect", "--json"], {
@@ -264,26 +267,60 @@ export const discoverGrokSkills = Effect.fn("discoverGrokSkills")(function* (
         shell: spawnCommand.shell,
       }),
     );
-  }).pipe(Effect.timeoutOption(GROK_SKILLS_PROBE_TIMEOUT_MS), Effect.result);
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new GrokSkillsProbeError({
+          stage: "spawn",
+          ...(cwd ? { cwd } : {}),
+          cause,
+        }),
+    ),
+    Effect.timeoutOption(GROK_SKILLS_PROBE_TIMEOUT_MS),
+    Effect.result,
+  );
 
-  if (Result.isFailure(inspectResult) || Option.isNone(inspectResult.success)) {
-    yield* Effect.logDebug("Grok skill discovery failed; continuing without skills.");
-    return yield* discoverGrokSkillsFromFilesystem(cwd, environment);
+  const fallbackOrFail = Effect.fn("GrokSkills.fallbackOrFail")(function* (
+    error: GrokSkillsProbeError,
+  ) {
+    const fallback = yield* discoverGrokSkillsFromFilesystem(cwd, environment).pipe(
+      Effect.provide(NodeServices.layer),
+    );
+    if (fallback.length > 0) {
+      return fallback;
+    }
+    return yield* error;
+  });
+
+  if (Result.isFailure(inspectResult)) {
+    return yield* fallbackOrFail(inspectResult.failure);
+  }
+  if (Option.isNone(inspectResult.success)) {
+    return yield* fallbackOrFail(
+      new GrokSkillsProbeError({
+        stage: "timeout",
+        ...(cwd ? { cwd } : {}),
+      }),
+    );
   }
   const output = inspectResult.success.value;
   if (output.code !== 0) {
-    yield* Effect.logDebug("Grok skill discovery exited non-zero; continuing without skills.", {
-      exitCode: output.code,
-    });
-    return yield* discoverGrokSkillsFromFilesystem(cwd, environment);
+    return yield* fallbackOrFail(
+      new GrokSkillsProbeError({
+        stage: "exit",
+        ...(cwd ? { cwd } : {}),
+        exitCode: output.code,
+      }),
+    );
   }
-  const skills = parseGrokInspectSkills(output.stdout);
-  if (skills.length > 0) {
+  const skills = decodeGrokInspectSkills(output.stdout);
+  if (skills) {
     return skills;
   }
-  if (hasGrokInspectSkillsPayload(output.stdout)) {
-    return skills;
-  }
-  // Older Grok versions may print ordinary command output for `inspect`.
-  return yield* discoverGrokSkillsFromFilesystem(cwd, environment);
+  return yield* fallbackOrFail(
+    new GrokSkillsProbeError({
+      stage: "decode",
+      ...(cwd ? { cwd } : {}),
+    }),
+  );
 });
