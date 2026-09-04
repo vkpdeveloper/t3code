@@ -21,7 +21,7 @@ const PROJECTS = [
   { environmentId: ENV_B, id: PROJECT_ID, title: "atom" },
 ] as unknown as ReadonlyArray<EnvironmentProject>;
 
-type Fixture = "running" | "completed" | "approval" | "unknown";
+type Fixture = "running" | "completed" | "approval" | "input" | "unknown";
 
 function makeThread(
   environmentId: EnvironmentId,
@@ -43,13 +43,14 @@ function makeThread(
     archivedAt: overrides.archivedAt ?? null,
     backgroundLiveness: overrides.backgroundLiveness ?? null,
     hasPendingApprovals: fixture === "approval",
-    hasPendingUserInput: false,
+    hasPendingUserInput: fixture === "input",
   };
   const startedAt =
     overrides.startedAt === undefined ? "2026-09-04T09:50:00.000Z" : overrides.startedAt;
   switch (fixture) {
     case "running":
     case "approval":
+    case "input":
       return {
         ...base,
         session: { status: "running", providerName: "Codex", lastError: null },
@@ -81,22 +82,24 @@ function aggregate(threads: ReadonlyArray<EnvironmentThreadShell>) {
 }
 
 describe("aggregateAgentStatus", () => {
-  it("lists active threads across environments with their machine labels, oldest first", () => {
+  it("lists attention states first, then running agents oldest first", () => {
     const result = aggregate([
       makeThread(ENV_B, "b1", "running", { startedAt: "2026-09-04T09:55:00.000Z" }),
       makeThread(ENV_A, "a1", "running", { startedAt: "2026-09-04T09:40:00.000Z" }),
       makeThread(ENV_A, "a2", "approval", { startedAt: "2026-09-04T09:50:00.000Z" }),
+      makeThread(ENV_B, "b2", "input", { startedAt: "2026-09-04T09:45:00.000Z" }),
     ]);
 
     expect(result.rows.map((row) => [row.threadId, row.environmentLabel, row.phase])).toEqual([
-      ["a1", "macair", "running"],
       ["a2", "macair", "waiting_for_approval"],
+      ["b2", "dell", "waiting_for_input"],
+      ["a1", "macair", "running"],
       ["b1", "dell", "running"],
     ]);
-    expect(result.rows[0]?.projectTitle).toBe("t3code");
-    expect(result.rows[2]?.projectTitle).toBe("atom");
-    expect(result.rows[0]?.startedAtMs).toBe(Date.parse("2026-09-04T09:40:00.000Z"));
-    expect(result.rows[0]?.deepLink).toBe("/threads/env-a/a1");
+    expect(result.rows[2]?.projectTitle).toBe("t3code");
+    expect(result.rows[3]?.projectTitle).toBe("atom");
+    expect(result.rows[2]?.startedAtMs).toBe(Date.parse("2026-09-04T09:40:00.000Z"));
+    expect(result.rows[2]?.deepLink).toBe("/threads/env-a/a1");
   });
 
   it("drops completed, archived, and unresolved threads", () => {

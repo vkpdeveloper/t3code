@@ -18,7 +18,9 @@ Turning off **Web Push** unsubscribes that browser. Opening a notification retur
 
 On Android, **Settings → Notifications** has two device-local switches:
 
-- **Agent Status** keeps one silent, ongoing notification that lists every agent currently working across all of your paired machines, with the machine name, project, thread, and an elapsed timer. T3 Code stays connected in the background while it is on. On Android 16 QPR1 and later the notification is promoted to a Live Update. Tapping it opens the task when one agent is running, or Home when several are.
-- **Agent Alerts** posts a local notification when an agent finishes, fails, or needs approval or input. Alerts only fire while T3 Code is not on screen. Tapping one opens the thread.
+- **Agent Status** keeps one silent, ongoing notification for active agents across your paired machines. Rows that need approval or input come first, followed by running agents from oldest to newest. Each row shows the thread title, machine, project, and elapsed time. The footer counts only machines that are online. T3 Code stays connected in the background while this setting is on. Tapping the notification opens the task when one agent is active, or Home when several are.
+- **Agent Alerts** posts a local notification when an agent finishes, fails, or needs approval or input. A newer alert for the same thread replaces the older one, and starting work again clears it. Alerts only fire while T3 Code is not on screen. Tapping one opens the thread.
+
+On Android 16 QPR1 and later, Agent Status uses the system Live Update design when Android allows promoted notifications for T3 Code. It shows phase-colored progress for the active agents. Other devices use a compact T3 layout colored from the selected mobile theme. Expand it to see up to six agent rows. Settings tells you when Live Updates are unavailable.
 
 Both work without any push service. Nothing leaves the phone and the machines it is paired with. Force-stopping the app ends the background connection until you open T3 Code again.

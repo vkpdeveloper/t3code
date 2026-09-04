@@ -26,10 +26,16 @@ const PROJECTS = [
   { environmentId: ENV_B, id: PROJECT_ID, title: "atom" },
 ] as unknown as ReadonlyArray<EnvironmentProject>;
 
+const THEME = {
+  accentColor: "#ff4f00",
+  backgroundColor: "#101010",
+  foregroundColor: "#f5f5f5",
+};
+
 function makeThread(
   environmentId: EnvironmentId,
   threadId: string,
-  fixture: "running" | "completed" | "failed",
+  fixture: "running" | "completed" | "failed" | "approval" | "input",
   startedAt = "2026-09-04T09:50:00.000Z",
 ): EnvironmentThreadShell {
   const base = {
@@ -41,11 +47,13 @@ function makeThread(
     updatedAt: "2026-09-04T10:00:00.000Z",
     archivedAt: null,
     backgroundLiveness: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
+    hasPendingApprovals: fixture === "approval",
+    hasPendingUserInput: fixture === "input",
   };
   switch (fixture) {
     case "running":
+    case "approval":
+    case "input":
       return {
         ...base,
         session: { status: "running", providerName: "Codex", lastError: null },
@@ -84,6 +92,9 @@ function input(
     threads,
     projects: PROJECTS,
     environmentLabels: LABELS,
+    onlineCount: 1,
+    totalCount: 2,
+    theme: THEME,
     settings: {
       enabled: true,
       taskCompleted: true,
@@ -107,7 +118,9 @@ describe("presentAgentStatus", () => {
 
     expect(effects.map((effect) => effect.type)).toEqual(["update-summary"]);
     const summary = effects[0]?.type === "update-summary" ? effects[0].summary : null;
-    expect(summary?.environmentCount).toBe(2);
+    expect(summary?.onlineCount).toBe(1);
+    expect(summary?.totalCount).toBe(2);
+    expect(summary?.theme).toEqual(THEME);
     expect(summary?.launchUrlScheme).toBe("t3code-dev");
     expect(summary?.rows.map((row) => [row.environmentLabel, row.phaseLabel])).toEqual([
       ["macair", "Working"],
@@ -141,8 +154,9 @@ describe("presentAgentStatus", () => {
       input([makeThread(ENV_A, "a1", "completed"), makeThread(ENV_B, "b1", "running")]),
     );
 
-    expect(effects.map((effect) => effect.type)).toEqual(["alert", "update-summary"]);
-    const alert = effects[0]?.type === "alert" ? effects[0].notification : null;
+    expect(effects.map((effect) => effect.type)).toEqual(["show-alert", "update-summary"]);
+    const alert = effects[0]?.type === "show-alert" ? effects[0].notification : null;
+    expect(effects[0]).toMatchObject({ type: "show-alert", identifier: "env-a:a1" });
     expect(alert?.kind).toBe("task-completed");
     expect(alert?.title).toBe("Completed - t3code");
     expect(alert?.threadRef).toEqual({ environmentId: ENV_A, threadId: "a1" });
@@ -160,10 +174,11 @@ describe("presentAgentStatus", () => {
       input([makeThread(ENV_A, "a1", "failed")]),
     );
 
-    expect(effects.map((effect) => effect.type)).toEqual(["alert", "update-summary"]);
+    expect(effects.map((effect) => effect.type)).toEqual(["show-alert", "update-summary"]);
     const summary = effects[1]?.type === "update-summary" ? effects[1].summary : null;
     expect(summary?.rows).toEqual([]);
-    expect(summary?.environmentCount).toBe(2);
+    expect(summary?.onlineCount).toBe(1);
+    expect(summary?.totalCount).toBe(2);
     expect(state.presentedIdentity).not.toBeNull();
   });
 
@@ -204,7 +219,7 @@ describe("presentAgentStatus", () => {
     expect(stillOff.effects).toEqual([]);
   });
 
-  it("re-sends the summary when a machine connects or drops", () => {
+  it("re-sends the summary when the online machine count changes", () => {
     const seeded: AgentStatusPresenterState = presentAgentStatus(
       INITIAL_AGENT_STATUS_PRESENTER_STATE,
       input([makeThread(ENV_A, "a1", "running")]),
@@ -212,12 +227,44 @@ describe("presentAgentStatus", () => {
     const { effects } = presentAgentStatus(
       seeded,
       input([makeThread(ENV_A, "a1", "running")], {
-        environmentLabels: new Map([[ENV_A, "macair"]]),
+        onlineCount: 2,
       }),
     );
 
     expect(effects.map((effect) => effect.type)).toEqual(["update-summary"]);
     const summary = effects[0]?.type === "update-summary" ? effects[0].summary : null;
-    expect(summary?.environmentCount).toBe(1);
+    expect(summary?.onlineCount).toBe(2);
+    expect(summary?.totalCount).toBe(2);
+  });
+
+  it("replaces alerts by thread identifier and dismisses them when work restarts", () => {
+    const running = presentAgentStatus(
+      INITIAL_AGENT_STATUS_PRESENTER_STATE,
+      input([makeThread(ENV_A, "a1", "running")]),
+    ).state;
+    const approval = presentAgentStatus(running, input([makeThread(ENV_A, "a1", "approval")]));
+
+    expect(approval.effects[0]).toMatchObject({
+      type: "show-alert",
+      identifier: "env-a:a1",
+    });
+
+    const inputNeeded = presentAgentStatus(
+      approval.state,
+      input([makeThread(ENV_A, "a1", "input")]),
+    );
+    expect(inputNeeded.effects[0]).toMatchObject({
+      type: "show-alert",
+      identifier: "env-a:a1",
+    });
+
+    const restarted = presentAgentStatus(
+      inputNeeded.state,
+      input([makeThread(ENV_A, "a1", "running", "2026-09-04T10:05:00.000Z")]),
+    );
+    expect(restarted.effects[0]).toEqual({
+      type: "dismiss-alert",
+      identifier: "env-a:a1",
+    });
   });
 });

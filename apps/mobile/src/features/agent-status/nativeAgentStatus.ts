@@ -6,14 +6,23 @@ export interface NativeAgentStatusRow {
   readonly environmentLabel: string;
   readonly projectTitle: string;
   readonly threadTitle: string;
+  readonly phase: "starting" | "running" | "waiting_for_approval" | "waiting_for_input";
   readonly phaseLabel: string;
   readonly deepLink: string;
   readonly startedAtMs?: number;
 }
 
+export interface NativeAgentStatusTheme {
+  readonly accentColor: string;
+  readonly backgroundColor: string;
+  readonly foregroundColor: string;
+}
+
 export interface NativeAgentStatusSummary {
   readonly rows: ReadonlyArray<NativeAgentStatusRow>;
-  readonly environmentCount: number;
+  readonly onlineCount: number;
+  readonly totalCount: number;
+  readonly theme: NativeAgentStatusTheme;
   readonly launchUrlScheme: string;
 }
 
