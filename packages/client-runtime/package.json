@@ -183,6 +183,10 @@
       "types": "./src/state/terminal.ts",
       "default": "./src/state/terminal.ts"
     },
+    "./state/threadNotifications": {
+      "types": "./src/state/threadNotifications.ts",
+      "default": "./src/state/threadNotifications.ts"
+    },
     "./state/threads": {
       "types": "./src/state/threads.ts",
       "default": "./src/state/threads.ts"

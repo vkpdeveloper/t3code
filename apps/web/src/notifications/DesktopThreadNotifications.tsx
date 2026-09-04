@@ -21,7 +21,7 @@ import {
   EMPTY_THREAD_PHASE_SNAPSHOT,
   type ThreadNotificationSettings,
   type ThreadPhaseSnapshot,
-} from "./desktopNotifications.logic";
+} from "@t3tools/client-runtime/state/threadNotifications";
 import { playAlertChime } from "./alertSound";
 import {
   clearThreadAlert,

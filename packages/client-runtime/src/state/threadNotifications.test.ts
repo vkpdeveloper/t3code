@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from "./models.ts";
 
 import {
   buildProjectTitleMap,
@@ -10,7 +10,7 @@ import {
   threadNotificationKey,
   type ThreadNotificationSettings,
   type ThreadPhaseSnapshot,
-} from "./desktopNotifications.logic";
+} from "./threadNotifications.ts";
 
 const ENVIRONMENT_ID = "env-1" as EnvironmentId;
 const PROJECT_ID = "project-1" as ProjectId;

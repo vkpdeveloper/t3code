@@ -21,6 +21,7 @@ import {
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
+import { AgentStatusSettingsSection } from "../agent-status/AgentStatusSettingsSection";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
@@ -137,6 +138,8 @@ function LocalSettingsRouteScreen() {
             target="SettingsEnvironments"
           />
         </SettingsSection>
+
+        <AgentStatusSettingsSection />
 
         <GeneralSettingsSection />
 
@@ -523,6 +526,8 @@ function ConfiguredSettingsRouteScreen() {
             onValueChange={handleLiveActivitiesChange}
           />
         </SettingsSection>
+
+        <AgentStatusSettingsSection />
 
         <GeneralSettingsSection />
 

@@ -1,0 +1,25 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <!-- Android 16 QPR1 promotes the ongoing status notification to a Live Update. -->
+  <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+  <application>
+    <!--
+      specialUse: the service holds the environment sockets open so agent
+      status changes reach the phone while the app is backgrounded. dataSync
+      would fit the letter of the docs but Android 15 caps it at six hours per
+      day, and this connection is meant to outlive a workday.
+    -->
+    <service
+      android:name=".T3AgentStatusService"
+      android:exported="false"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Keeps T3 Code connected to the user's own machines to show live coding agent status." />
+    </service>
+  </application>
+</manifest>

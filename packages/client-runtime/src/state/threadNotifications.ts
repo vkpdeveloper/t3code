@@ -1,12 +1,12 @@
 import type { DesktopNotificationKind, ScopedThreadRef } from "@t3tools/contracts";
-import type {
-  EnvironmentProject,
-  EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
 import { projectThreadAwareness, type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
-import { agentNotificationKind } from "@t3tools/shared/agentNotifications";
+import {
+  agentNotificationKind,
+  notificationBody,
+  notificationTitle,
+} from "@t3tools/shared/agentNotifications";
 
-import { notificationBody, notificationTitle } from "./notificationCopy";
+import type { EnvironmentProject, EnvironmentThreadShell } from "./models.ts";
 
 export interface ThreadNotificationSettings {
   readonly enabled: boolean;

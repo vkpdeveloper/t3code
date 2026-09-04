@@ -1,0 +1,23 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+group = 'com.t3tools.agentstatus'
+version = '0.0.0'
+
+android {
+  namespace 'expo.modules.t3agentstatus'
+  compileSdk rootProject.ext.compileSdkVersion
+
+  defaultConfig {
+    minSdkVersion rootProject.ext.minSdkVersion
+    targetSdkVersion rootProject.ext.targetSdkVersion
+  }
+}
+
+dependencies {
+  implementation project(':expo-modules-core')
+  // HeadlessJsTaskService lives in React Native itself.
+  implementation 'com.facebook.react:react-android'
+  // ProgressStyle and setRequestPromotedOngoing (Android 16 Live Updates) need core 1.17+.
+  implementation 'androidx.core:core:1.17.0'
+}
