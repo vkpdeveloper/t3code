@@ -14,21 +14,32 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
-import kotlin.math.roundToInt
 
-/** Builds the single ongoing notification that summarizes active agent tasks. */
+/**
+ * Builds the single ongoing notification that summarizes active agent tasks.
+ *
+ * Two renderings share one content model:
+ * - Live Update (Android 16 QPR1+, when allowed and the user keeps it on):
+ *   the stock template, promoted, with a status-bar chip. No progress bar;
+ *   an agent has no meaningful percentage.
+ * - Custom: a compact row layout inside the system's decorated card. The
+ *   collapsed row is the first agent, the expanded view lists every agent.
+ *   Text follows the system palette; only the phase dot takes the theme
+ *   accent, so the card reads as native rather than a box inside a box.
+ */
 object AgentStatusNotifications {
   const val STATUS_CHANNEL_ID = "t3code.agent-status"
   const val ALERT_CHANNEL_ID = "t3code.agent-alerts"
   const val STATUS_NOTIFICATION_ID = 0x7301
 
-  /** Promoted ongoing notifications and ProgressStyle require Android 16 QPR1. */
+  /** Promoted ongoing notifications require Android 16 QPR1. */
   const val PROMOTED_NOTIFICATIONS_SDK = 36
 
   private const val MAX_LISTED_ROWS = 6
   private const val MAX_CHIP_LENGTH = 7
   private const val APPROVAL_COLOR = "#f59e0b"
   private const val INPUT_COLOR = "#3b82f6"
+  private val STARTING_COLOR = Color.parseColor("#9ca3af")
 
   fun ensureChannels(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -70,130 +81,100 @@ object AgentStatusNotifications {
 
   fun build(context: Context, summary: AgentStatusSummary): Notification {
     val rows = summary.rows
-    val title = title(rows)
     val firstRow = rows.firstOrNull()
-    val earliestStartMs = rows.mapNotNull { it.startedAtMs }.minOrNull()
     val manager = context.getSystemService(NotificationManager::class.java)
-    val promotionAvailable = canPostPromoted(manager)
-    val foreground = parseColor(summary.theme.foregroundColor, Color.BLACK)
-    val background = parseColor(summary.theme.backgroundColor, Color.WHITE)
-    val accent = parseColor(summary.theme.accentColor, foreground)
-    val muted = blend(foreground, background, 0.58f)
+    val liveUpdate = summary.liveUpdatesEnabled && canPostPromoted(manager)
+    val accent = parseColor(summary.theme.accentColor, Color.GRAY)
 
     val builder = NotificationCompat.Builder(context, STATUS_CHANNEL_ID)
       .setSmallIcon(smallIcon(context))
-      .setContentTitle(title)
-      .setContentText(firstRow?.threadTitle?.ifBlank { "Untitled task" } ?: machinesLine(summary))
-      .setSubText(firstRow?.let(::rowMetadata) ?: machinesLine(summary))
+      .setContentTitle(headline(rows))
+      .setContentText(firstRow?.let(::rowMetadata) ?: offlineLine(summary) ?: "")
       .setColor(accent)
       .setColorized(false)
       .setOngoing(true)
       .setOnlyAlertOnce(true)
       .setSilent(true)
-      .setShowWhen(true)
+      .setShowWhen(false)
       .setCategory(NotificationCompat.CATEGORY_PROGRESS)
       .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
       .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
       .setContentIntent(openAppIntent(context, summary, firstRow))
 
-    if (earliestStartMs != null) {
-      builder.setWhen(earliestStartMs.toLong()).setUsesChronometer(true)
-    } else {
-      builder.setShowWhen(false)
-    }
-
-    if (promotionAvailable && rows.isNotEmpty()) {
+    if (liveUpdate) {
+      // Stock template. Multiple agents list in the expanded view; the chip
+      // in the status bar carries the count or the approval nudge.
+      val earliestStartMs = rows.mapNotNull { it.startedAtMs }.minOrNull()
+      if (earliestStartMs != null) {
+        builder.setShowWhen(true).setWhen(earliestStartMs.toLong()).setUsesChronometer(true)
+      }
+      if (rows.size > 1) {
+        val inbox = NotificationCompat.InboxStyle()
+        rows.take(MAX_LISTED_ROWS).forEach { row -> inbox.addLine(rowLine(row)) }
+        builder.setStyle(inbox)
+      }
       builder
-        .setStyle(progressStyle(rows, accent, muted))
         .setRequestPromotedOngoing(true)
         .setShortCriticalText(chipText(rows))
-    } else if (!promotionAvailable) {
-      val content = collapsedView(context, summary, title, foreground, background, accent)
-      val expanded = expandedView(context, summary, title, foreground, background, accent, muted)
+    } else {
       builder
         .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-        .setCustomContentView(content)
-        .setCustomBigContentView(expanded)
+        .setCustomContentView(collapsedView(context, summary, accent))
+        .setCustomBigContentView(expandedView(context, summary, accent))
     }
 
     return builder.build()
   }
 
-  private fun progressStyle(
-    rows: List<AgentStatusRow>,
-    accent: Int,
-    muted: Int,
-  ): NotificationCompat.ProgressStyle {
-    val listedRows = rows.take(MAX_LISTED_ROWS)
-    val style = NotificationCompat.ProgressStyle()
-      .setProgressIndeterminate(true)
-      .setStyledByProgress(false)
-
-    listedRows.forEachIndexed { index, row ->
-      style.addProgressSegment(
-        NotificationCompat.ProgressStyle.Segment(1)
-          .setId(row.threadKey.hashCode())
-          .setColor(phaseColor(row.phase, accent, muted)),
-      )
-      if (index > 0) {
-        style.addProgressPoint(
-          NotificationCompat.ProgressStyle.Point(index)
-            .setId(row.threadKey.hashCode())
-            .setColor(muted),
-        )
-      }
-    }
-    return style
-  }
-
+  /** Collapsed: the first agent as one row, or the idle headline. */
   private fun collapsedView(
     context: Context,
     summary: AgentStatusSummary,
-    title: String,
-    foreground: Int,
-    background: Int,
     accent: Int,
-  ): RemoteViews = RemoteViews(context.packageName, R.layout.t3_agent_status_collapsed).apply {
-    setInt(R.id.status_collapsed_root, "setBackgroundColor", background)
-    setTextColor(R.id.status_collapsed_mark, accent)
-    setTextColor(R.id.status_collapsed_title, foreground)
-    setTextColor(R.id.status_collapsed_chronometer, foreground)
-    setTextViewText(R.id.status_collapsed_title, title)
-    setChronometerOrHide(
-      R.id.status_collapsed_chronometer,
-      summary.rows.mapNotNull { it.startedAtMs }.minOrNull(),
-    )
+  ): RemoteViews {
+    val view = RemoteViews(context.packageName, R.layout.t3_agent_status_row)
+    val row = summary.rows.firstOrNull()
+    if (row == null) {
+      view.setTextColor(R.id.status_row_dot, STARTING_COLOR)
+      view.setTextViewText(R.id.status_row_title, headline(summary.rows))
+      view.setTextViewText(R.id.status_row_metadata, offlineLine(summary) ?: "")
+      view.setViewVisibility(R.id.status_row_chronometer, View.GONE)
+      return view
+    }
+    bindRow(view, row, accent)
+    val more = summary.rows.size - 1
+    if (more > 0) {
+      view.setViewVisibility(R.id.status_row_more, View.VISIBLE)
+      view.setTextViewText(R.id.status_row_more, "+$more")
+    }
+    return view
   }
 
   private fun expandedView(
     context: Context,
     summary: AgentStatusSummary,
-    title: String,
-    foreground: Int,
-    background: Int,
     accent: Int,
-    muted: Int,
   ): RemoteViews = RemoteViews(context.packageName, R.layout.t3_agent_status_expanded).apply {
-    setInt(R.id.status_expanded_root, "setBackgroundColor", background)
-    setTextColor(R.id.status_expanded_mark, accent)
-    setTextColor(R.id.status_expanded_title, foreground)
-    setTextColor(R.id.status_footer, muted)
-    setTextViewText(R.id.status_expanded_title, title)
-    setTextViewText(R.id.status_footer, machinesLine(summary))
     removeAllViews(R.id.status_rows)
-
     summary.rows.take(MAX_LISTED_ROWS).forEach { row ->
-      val rowView = RemoteViews(context.packageName, R.layout.t3_agent_status_row).apply {
-        setTextColor(R.id.status_row_dot, phaseColor(row.phase, accent, muted))
-        setTextColor(R.id.status_row_title, foreground)
-        setTextColor(R.id.status_row_metadata, muted)
-        setTextColor(R.id.status_row_chronometer, muted)
-        setTextViewText(R.id.status_row_title, row.threadTitle.ifBlank { "Untitled task" })
-        setTextViewText(R.id.status_row_metadata, rowMetadata(row))
-        setChronometerOrHide(R.id.status_row_chronometer, row.startedAtMs)
-      }
+      val rowView = RemoteViews(context.packageName, R.layout.t3_agent_status_row)
+      bindRow(rowView, row, accent)
       addView(R.id.status_rows, rowView)
     }
+    val footer = offlineLine(summary)
+    if (footer == null && summary.rows.isNotEmpty()) {
+      setViewVisibility(R.id.status_footer, View.GONE)
+    } else {
+      setViewVisibility(R.id.status_footer, View.VISIBLE)
+      setTextViewText(R.id.status_footer, footer ?: headline(summary.rows))
+    }
+  }
+
+  private fun bindRow(view: RemoteViews, row: AgentStatusRow, accent: Int) {
+    view.setTextColor(R.id.status_row_dot, phaseColor(row.phase, accent))
+    view.setTextViewText(R.id.status_row_title, row.threadTitle.ifBlank { "Untitled task" })
+    view.setTextViewText(R.id.status_row_metadata, rowMetadata(row))
+    view.setChronometerOrHide(R.id.status_row_chronometer, row.startedAtMs)
   }
 
   private fun RemoteViews.setChronometerOrHide(viewId: Int, startedAtMs: Double?) {
@@ -206,8 +187,10 @@ object AgentStatusNotifications {
     setChronometer(viewId, SystemClock.elapsedRealtime() - elapsedSinceStart, null, true)
   }
 
-  private fun title(rows: List<AgentStatusRow>): String {
-    if (rows.any { it.phase == "waiting_for_approval" }) return "Approval needed"
+  private fun headline(rows: List<AgentStatusRow>): String {
+    val approvals = rows.count { it.phase == "waiting_for_approval" }
+    if (approvals == 1) return "1 agent needs approval"
+    if (approvals > 1) return "$approvals agents need approval"
     return when (rows.size) {
       0 -> "No agents running"
       1 -> "1 agent working"
@@ -215,27 +198,32 @@ object AgentStatusNotifications {
     }
   }
 
-  private fun rowMetadata(row: AgentStatusRow): String =
-    listOf(row.environmentLabel, row.projectTitle)
+  /** Machine and project, plus the phase when the agent is blocked on the user. */
+  private fun rowMetadata(row: AgentStatusRow): String {
+    val place = listOf(row.environmentLabel, row.projectTitle)
       .filter { it.isNotBlank() }
       .joinToString(" · ")
-
-  private fun machinesLine(summary: AgentStatusSummary): String {
-    val online = summary.onlineCount.coerceAtLeast(0)
-    val total = summary.totalCount.coerceAtLeast(0)
-    if (online != total) return "$online of $total machines online"
-    return when (online) {
-      0 -> "No machines online"
-      1 -> "1 machine online"
-      else -> "$online machines online"
-    }
+    val blocked = row.phase == "waiting_for_approval" || row.phase == "waiting_for_input"
+    return if (blocked && row.phaseLabel.isNotBlank()) "${row.phaseLabel} · $place" else place
   }
 
-  private fun phaseColor(phase: String, accent: Int, muted: Int): Int =
+  private fun rowLine(row: AgentStatusRow): String =
+    "${row.threadTitle.ifBlank { "Untitled task" }} · ${rowMetadata(row)}"
+
+  /** Only worth a line when something is unreachable; all online is the default state. */
+  private fun offlineLine(summary: AgentStatusSummary): String? {
+    val online = summary.onlineCount.coerceAtLeast(0)
+    val total = summary.totalCount.coerceAtLeast(0)
+    if (total == 0 || online >= total) return null
+    val offline = total - online
+    return if (offline == 1) "1 machine offline" else "$offline machines offline"
+  }
+
+  private fun phaseColor(phase: String, accent: Int): Int =
     when (phase) {
       "waiting_for_approval" -> Color.parseColor(APPROVAL_COLOR)
       "waiting_for_input" -> Color.parseColor(INPUT_COLOR)
-      "starting" -> muted
+      "starting" -> STARTING_COLOR
       else -> accent
     }
 
@@ -251,18 +239,6 @@ object AgentStatusNotifications {
     } catch (_: IllegalArgumentException) {
       fallback
     }
-
-  private fun blend(foreground: Int, background: Int, foregroundAmount: Float): Int {
-    val backgroundAmount = 1f - foregroundAmount
-    return Color.rgb(
-      (Color.red(foreground) * foregroundAmount + Color.red(background) * backgroundAmount)
-        .roundToInt(),
-      (Color.green(foreground) * foregroundAmount + Color.green(background) * backgroundAmount)
-        .roundToInt(),
-      (Color.blue(foreground) * foregroundAmount + Color.blue(background) * backgroundAmount)
-        .roundToInt(),
-    )
-  }
 
   private fun openAppIntent(
     context: Context,

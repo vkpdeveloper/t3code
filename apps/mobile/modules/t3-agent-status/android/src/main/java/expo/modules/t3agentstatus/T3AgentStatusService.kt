@@ -86,22 +86,20 @@ class T3AgentStatusService : HeadlessJsTaskService() {
     const val KEEP_ALIVE_TASK_KEY = "T3AgentStatusKeepAlive"
 
     private const val EXTRA_LAUNCH_SCHEME = "launchUrlScheme"
+    private const val EXTRA_LIVE_UPDATES = "liveUpdatesEnabled"
     private const val EXTRA_ONLINE_COUNT = "onlineCount"
     private const val EXTRA_TOTAL_COUNT = "totalCount"
     private const val EXTRA_ACCENT_COLOR = "accentColor"
-    private const val EXTRA_BACKGROUND_COLOR = "backgroundColor"
-    private const val EXTRA_FOREGROUND_COLOR = "foregroundColor"
     private const val EXTRA_ROW_COUNT = "rowCount"
     private const val EXTRA_ROW_PREFIX = "row."
 
     fun updateIntent(context: Context, summary: AgentStatusSummary): Intent =
       Intent(context, T3AgentStatusService::class.java).apply {
         putExtra(EXTRA_LAUNCH_SCHEME, summary.launchUrlScheme)
+        putExtra(EXTRA_LIVE_UPDATES, summary.liveUpdatesEnabled)
         putExtra(EXTRA_ONLINE_COUNT, summary.onlineCount)
         putExtra(EXTRA_TOTAL_COUNT, summary.totalCount)
         putExtra(EXTRA_ACCENT_COLOR, summary.theme.accentColor)
-        putExtra(EXTRA_BACKGROUND_COLOR, summary.theme.backgroundColor)
-        putExtra(EXTRA_FOREGROUND_COLOR, summary.theme.foregroundColor)
         putExtra(EXTRA_ROW_COUNT, summary.rows.size)
         summary.rows.forEachIndexed { index, row ->
           val prefix = "$EXTRA_ROW_PREFIX$index."
@@ -142,9 +140,8 @@ class T3AgentStatusService : HeadlessJsTaskService() {
         totalCount = intent.getIntExtra(EXTRA_TOTAL_COUNT, 0)
         theme = AgentStatusTheme().apply {
           accentColor = intent.getStringExtra(EXTRA_ACCENT_COLOR) ?: "#262626"
-          backgroundColor = intent.getStringExtra(EXTRA_BACKGROUND_COLOR) ?: "#f2f2f7"
-          foregroundColor = intent.getStringExtra(EXTRA_FOREGROUND_COLOR) ?: "#262626"
         }
+        liveUpdatesEnabled = intent.getBooleanExtra(EXTRA_LIVE_UPDATES, true)
         launchUrlScheme = intent.getStringExtra(EXTRA_LAUNCH_SCHEME) ?: ""
       }
     }

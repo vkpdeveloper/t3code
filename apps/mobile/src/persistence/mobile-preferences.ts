@@ -50,6 +50,11 @@ export interface Preferences {
    * sockets stay open while the app is backgrounded.
    */
   readonly agentStatusNotificationEnabled?: boolean;
+  /**
+   * Android only. Lets Agent Status use the system Live Update design on
+   * Android 16 QPR1+. Off keeps the themed T3 notification everywhere.
+   */
+  readonly agentStatusLiveUpdatesEnabled?: boolean;
   /** Android only. Local alerts when an agent finishes, fails, or needs a reply. */
   readonly agentAlertsEnabled?: boolean;
 }
@@ -112,6 +117,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
     agentStatusNotificationEnabled?: boolean;
+    agentStatusLiveUpdatesEnabled?: boolean;
     agentAlertsEnabled?: boolean;
   } = {};
 
@@ -188,6 +194,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.agentStatusNotificationEnabled === "boolean") {
     preferences.agentStatusNotificationEnabled = parsed.agentStatusNotificationEnabled;
+  }
+  if (typeof parsed.agentStatusLiveUpdatesEnabled === "boolean") {
+    preferences.agentStatusLiveUpdatesEnabled = parsed.agentStatusLiveUpdatesEnabled;
   }
   if (typeof parsed.agentAlertsEnabled === "boolean") {
     preferences.agentAlertsEnabled = parsed.agentAlertsEnabled;

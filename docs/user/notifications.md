@@ -18,9 +18,10 @@ Turning off **Web Push** unsubscribes that browser. Opening a notification retur
 
 On Android, **Settings → Notifications** has two device-local switches:
 
-- **Agent Status** keeps one silent, ongoing notification for active agents across your paired machines. Rows that need approval or input come first, followed by running agents from oldest to newest. Each row shows the thread title, machine, project, and elapsed time. The footer counts only machines that are online. T3 Code stays connected in the background while this setting is on. Tapping the notification opens the task when one agent is active, or Home when several are.
+- **Agent Status** keeps one silent, ongoing notification for active agents across your paired machines. Rows that need approval or input come first, followed by running agents from oldest to newest. Each row shows the thread title, machine, project, and elapsed time. A footer appears only when a paired machine is offline. T3 Code stays connected in the background while this setting is on. Tapping the notification opens the task when one agent is active, or Home when several are.
+- **Live Updates** (Android 16 QPR1 and later) lets Agent Status use the system Live Update design with a status-bar chip. Turn it off to keep the compact T3 layout, which matches the system notification style and marks each agent with a phase-colored dot.
 - **Agent Alerts** posts a local notification when an agent finishes, fails, or needs approval or input. A newer alert for the same thread replaces the older one, and starting work again clears it. Alerts only fire while T3 Code is not on screen. Tapping one opens the thread.
 
-On Android 16 QPR1 and later, Agent Status uses the system Live Update design when Android allows promoted notifications for T3 Code. It shows phase-colored progress for the active agents. Other devices use a compact T3 layout colored from the selected mobile theme. Expand it to see up to six agent rows. Settings tells you when Live Updates are unavailable.
+The T3 layout shows the first agent when collapsed, with a count of the others. Expand it to see up to six agent rows.
 
 Both work without any push service. Nothing leaves the phone and the machines it is paired with. Force-stopping the app ends the background connection until you open T3 Code again.

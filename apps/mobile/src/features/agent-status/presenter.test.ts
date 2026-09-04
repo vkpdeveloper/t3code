@@ -26,11 +26,7 @@ const PROJECTS = [
   { environmentId: ENV_B, id: PROJECT_ID, title: "atom" },
 ] as unknown as ReadonlyArray<EnvironmentProject>;
 
-const THEME = {
-  accentColor: "#ff4f00",
-  backgroundColor: "#101010",
-  foregroundColor: "#f5f5f5",
-};
+const THEME = { accentColor: "#ff4f00" };
 
 function makeThread(
   environmentId: EnvironmentId,
@@ -103,6 +99,7 @@ function input(
       inputNeeded: true,
     },
     statusNotificationEnabled: true,
+    liveUpdatesEnabled: true,
     appActive: false,
     launchUrlScheme: "t3code-dev",
     ...overrides,
@@ -217,6 +214,21 @@ describe("presentAgentStatus", () => {
       input([makeThread(ENV_A, "a1", "running")], { statusNotificationEnabled: false }),
     );
     expect(stillOff.effects).toEqual([]);
+  });
+
+  it("re-sends the summary when Live Updates are switched off", () => {
+    const seeded = presentAgentStatus(
+      INITIAL_AGENT_STATUS_PRESENTER_STATE,
+      input([makeThread(ENV_A, "a1", "running")]),
+    ).state;
+    const { effects } = presentAgentStatus(
+      seeded,
+      input([makeThread(ENV_A, "a1", "running")], { liveUpdatesEnabled: false }),
+    );
+
+    expect(effects.map((effect) => effect.type)).toEqual(["update-summary"]);
+    const summary = effects[0]?.type === "update-summary" ? effects[0].summary : null;
+    expect(summary?.liveUpdatesEnabled).toBe(false);
   });
 
   it("re-sends the summary when the online machine count changes", () => {

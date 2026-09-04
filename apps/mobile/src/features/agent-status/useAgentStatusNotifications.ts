@@ -140,16 +140,14 @@ export function useAgentStatusNotifications(): void {
   const { themeAppearance, themeId } = useAppearancePreferences();
   const notificationTheme = useMemo(() => {
     const colors = getMobileThemeRuntimeVariables(themeId, themeAppearance);
-    return {
-      accentColor: colors["--color-primary"],
-      backgroundColor: colors["--color-screen"],
-      foregroundColor: colors["--color-foreground"],
-    };
+    return { accentColor: colors["--color-primary"] };
   }, [themeAppearance, themeId]);
   const statusEnabled =
     AsyncResult.isSuccess(preferences) && preferences.value.agentStatusNotificationEnabled === true;
   const alertsEnabled =
     AsyncResult.isSuccess(preferences) && preferences.value.agentAlertsEnabled === true;
+  const liveUpdatesEnabled =
+    AsyncResult.isSuccess(preferences) && preferences.value.agentStatusLiveUpdatesEnabled !== false;
   const preferencesLoaded = AsyncResult.isSuccess(preferences);
   const stateRef = useRef<AgentStatusPresenterState>(INITIAL_AGENT_STATUS_PRESENTER_STATE);
 
@@ -182,6 +180,7 @@ export function useAgentStatusNotifications(): void {
           inputNeeded: true,
         },
         statusNotificationEnabled: statusEnabled,
+        liveUpdatesEnabled,
         appActive: AppState.currentState === "active",
         launchUrlScheme: launchUrlScheme(),
       });
@@ -255,7 +254,7 @@ export function useAgentStatusNotifications(): void {
       for (const unsubscribe of connectionUnsubscribes.values()) unsubscribe();
       appStateSubscription.remove();
     };
-  }, [alertsEnabled, notificationTheme, preferencesLoaded, statusEnabled]);
+  }, [alertsEnabled, liveUpdatesEnabled, notificationTheme, preferencesLoaded, statusEnabled]);
 
   // Turning the switch off must clear the notification even though the effect
   // above re-runs with a fresh presenter state that knows nothing was posted.

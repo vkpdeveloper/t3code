@@ -12,10 +12,9 @@ export interface NativeAgentStatusRow {
   readonly startedAtMs?: number;
 }
 
+/** Only the accent crosses the bridge; the notification text follows the system shade. */
 export interface NativeAgentStatusTheme {
   readonly accentColor: string;
-  readonly backgroundColor: string;
-  readonly foregroundColor: string;
 }
 
 export interface NativeAgentStatusSummary {
@@ -23,6 +22,8 @@ export interface NativeAgentStatusSummary {
   readonly onlineCount: number;
   readonly totalCount: number;
   readonly theme: NativeAgentStatusTheme;
+  /** False forces the themed layout even where Android offers Live Updates. */
+  readonly liveUpdatesEnabled: boolean;
   readonly launchUrlScheme: string;
 }
 

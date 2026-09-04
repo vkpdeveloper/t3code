@@ -30,6 +30,7 @@ export interface AgentStatusPresenterInput {
   readonly settings: ThreadNotificationSettings;
   /** Whether the persistent status notification is wanted at all. */
   readonly statusNotificationEnabled: boolean;
+  readonly liveUpdatesEnabled: boolean;
   /** Whether the app is on screen; alerts stay quiet while it is. */
   readonly appActive: boolean;
   readonly launchUrlScheme: string;
@@ -115,7 +116,7 @@ export function presentAgentStatus(
   // Counts and colors belong in the identity so connection and appearance
   // changes refresh the native notification even when the rows stay fixed.
   const summaryIdentity = input.statusNotificationEnabled
-    ? `${input.onlineCount}/${input.totalCount}\u0000${JSON.stringify(input.theme)}\u0000${aggregate.identity}`
+    ? `${input.onlineCount}/${input.totalCount}\u0000${input.liveUpdatesEnabled}\u0000${JSON.stringify(input.theme)}\u0000${aggregate.identity}`
     : null;
 
   let presentedIdentity = previous.presentedIdentity;
@@ -132,6 +133,7 @@ export function presentAgentStatus(
         onlineCount: input.onlineCount,
         totalCount: input.totalCount,
         theme: input.theme,
+        liveUpdatesEnabled: input.liveUpdatesEnabled,
         rows: aggregate.rows.map((row) => ({
           threadKey: `${row.environmentId}:${row.threadId}`,
           environmentLabel: row.environmentLabel,

@@ -23,8 +23,6 @@ class AgentStatusRow : Record {
 
 class AgentStatusTheme : Record {
   @Field var accentColor: String = "#262626"
-  @Field var backgroundColor: String = "#f2f2f7"
-  @Field var foregroundColor: String = "#262626"
 }
 
 class AgentStatusSummary : Record {
@@ -32,6 +30,7 @@ class AgentStatusSummary : Record {
   @Field var onlineCount: Int = 0
   @Field var totalCount: Int = 0
   @Field var theme: AgentStatusTheme = AgentStatusTheme()
+  @Field var liveUpdatesEnabled: Boolean = true
   @Field var launchUrlScheme: String = ""
 }
 

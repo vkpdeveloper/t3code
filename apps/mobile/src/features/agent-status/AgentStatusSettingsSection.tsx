@@ -25,6 +25,7 @@ function AndroidAgentStatusSettingsSection() {
   const loaded = AsyncResult.isSuccess(preferences);
   const statusEnabled = loaded && preferences.value.agentStatusNotificationEnabled === true;
   const alertsEnabled = loaded && preferences.value.agentAlertsEnabled === true;
+  const liveUpdatesEnabled = loaded && preferences.value.agentStatusLiveUpdatesEnabled !== false;
   const [promotedNotificationsAvailable, setPromotedNotificationsAvailable] = useState(
     () => nativeAgentStatus()?.canPostPromotedNotifications() === true,
   );
@@ -84,6 +85,16 @@ function AndroidAgentStatusSettingsSection() {
           value={statusEnabled}
           onValueChange={(value) => toggle("agentStatusNotificationEnabled", value)}
         />
+        {promotedNotificationsAvailable ? (
+          <SettingsSwitchRow
+            icon="bolt.horizontal.circle"
+            label="Live Updates"
+            subtitle="Use the Android 16 Live Update design instead of the compact layout"
+            disabled={!loaded || !statusEnabled}
+            value={liveUpdatesEnabled}
+            onValueChange={(value) => savePreferences({ agentStatusLiveUpdatesEnabled: value })}
+          />
+        ) : null}
         <SettingsSwitchRow
           icon="bell.badge"
           label="Agent Alerts"
@@ -93,11 +104,6 @@ function AndroidAgentStatusSettingsSection() {
           onValueChange={(value) => toggle("agentAlertsEnabled", value)}
         />
       </SettingsSection>
-      {!promotedNotificationsAvailable ? (
-        <Text className="px-2 text-sm text-foreground-muted">
-          Live Updates are unavailable. Agent Status will use the standard themed notification.
-        </Text>
-      ) : null}
       <Text className="px-2 text-sm text-foreground-muted">
         Agent Status keeps T3 Code connected in the background while agents run. Everything stays on
         this device: no push service is involved.
