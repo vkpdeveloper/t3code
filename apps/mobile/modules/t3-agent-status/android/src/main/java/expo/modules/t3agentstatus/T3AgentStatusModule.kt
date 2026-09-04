@@ -15,14 +15,23 @@ class AgentStatusRow : Record {
   @Field var environmentLabel: String = ""
   @Field var projectTitle: String = ""
   @Field var threadTitle: String = ""
+  @Field var phase: String = "running"
   @Field var phaseLabel: String = ""
   @Field var deepLink: String = ""
   @Field var startedAtMs: Double? = null
 }
 
+class AgentStatusTheme : Record {
+  @Field var accentColor: String = "#262626"
+  @Field var backgroundColor: String = "#f2f2f7"
+  @Field var foregroundColor: String = "#262626"
+}
+
 class AgentStatusSummary : Record {
   @Field var rows: List<AgentStatusRow> = emptyList()
-  @Field var environmentCount: Int = 0
+  @Field var onlineCount: Int = 0
+  @Field var totalCount: Int = 0
+  @Field var theme: AgentStatusTheme = AgentStatusTheme()
   @Field var launchUrlScheme: String = ""
 }
 

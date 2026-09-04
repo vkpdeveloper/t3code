@@ -1,15 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
+import { connectionProjectionPhase } from "@t3tools/client-runtime/connection";
+import type { EnvironmentId } from "@t3tools/contracts";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AppState } from "react-native";
 
+import { environmentCatalog } from "../../connection/catalog";
+import { getMobileThemeRuntimeVariables } from "../../lib/mobileThemeVariables";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentPresentations } from "../../state/presentation";
 import { environmentProjects } from "../../state/projects";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { environmentThreadShells } from "../../state/threads";
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   ALERT_CHANNEL_ID,
   nativeAgentStatus,
@@ -61,6 +67,34 @@ function launchUrlScheme(): string {
   return Array.isArray(scheme) ? (scheme[0] ?? "t3code") : (scheme ?? "t3code");
 }
 
+function countOnlineEnvironments(environmentIds: Iterable<EnvironmentId>): number {
+  let onlineCount = 0;
+  for (const environmentId of environmentIds) {
+    const result = appAtomRegistry.get(environmentCatalog.stateAtom(environmentId));
+    const state = Option.getOrNull(AsyncResult.value(result));
+    if (state !== null && connectionProjectionPhase(state) === "ready") {
+      onlineCount += 1;
+    }
+  }
+  return onlineCount;
+}
+
+const pendingAlertOperations = new Map<string, Promise<void>>();
+
+function runAlertOperation(identifier: string, operation: () => Promise<void>): void {
+  const previous = pendingAlertOperations.get(identifier) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(operation)
+    .catch(() => undefined)
+    .finally(() => {
+      if (pendingAlertOperations.get(identifier) === next) {
+        pendingAlertOperations.delete(identifier);
+      }
+    });
+  pendingAlertOperations.set(identifier, next);
+}
+
 function performEffect(effect: AgentStatusEffect): void {
   const native = nativeAgentStatus();
   switch (effect.type) {
@@ -70,18 +104,27 @@ function performEffect(effect: AgentStatusEffect): void {
     case "stop-summary":
       native?.stop();
       return;
-    case "alert":
-      void Notifications.scheduleNotificationAsync({
-        content: {
-          title: effect.notification.title,
-          body: effect.notification.body,
-          data: {
-            environmentId: effect.notification.threadRef.environmentId,
-            threadId: effect.notification.threadRef.threadId,
+    case "show-alert":
+      runAlertOperation(effect.identifier, async () => {
+        await Notifications.dismissNotificationAsync(effect.identifier).catch(() => undefined);
+        await Notifications.scheduleNotificationAsync({
+          identifier: effect.identifier,
+          content: {
+            title: effect.notification.title,
+            body: effect.notification.body,
+            data: {
+              environmentId: effect.notification.threadRef.environmentId,
+              threadId: effect.notification.threadRef.threadId,
+            },
           },
-        },
-        trigger: { channelId: ALERT_CHANNEL_ID },
-      }).catch(() => undefined);
+          trigger: { channelId: ALERT_CHANNEL_ID },
+        });
+      });
+      return;
+    case "dismiss-alert":
+      runAlertOperation(effect.identifier, () =>
+        Notifications.dismissNotificationAsync(effect.identifier),
+      );
       return;
   }
 }
@@ -94,6 +137,15 @@ function performEffect(effect: AgentStatusEffect): void {
  */
 export function useAgentStatusNotifications(): void {
   const preferences = useAtomValue(mobilePreferencesAtom);
+  const { themeAppearance, themeId } = useAppearancePreferences();
+  const notificationTheme = useMemo(() => {
+    const colors = getMobileThemeRuntimeVariables(themeId, themeAppearance);
+    return {
+      accentColor: colors["--color-primary"],
+      backgroundColor: colors["--color-screen"],
+      foregroundColor: colors["--color-foreground"],
+    };
+  }, [themeAppearance, themeId]);
   const statusEnabled =
     AsyncResult.isSuccess(preferences) && preferences.value.agentStatusNotificationEnabled === true;
   const alertsEnabled =
@@ -114,10 +166,14 @@ export function useAgentStatusNotifications(): void {
     const reconcile = () => {
       timer = null;
       if (disposed) return;
+      const environmentLabels = readEnvironmentLabels();
       const { state, effects } = presentAgentStatus(stateRef.current, {
         threads: appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
         projects: appAtomRegistry.get(environmentProjects.projectsAtom),
-        environmentLabels: readEnvironmentLabels(),
+        environmentLabels,
+        onlineCount: countOnlineEnvironments(environmentLabels.keys()),
+        totalCount: environmentLabels.size,
+        theme: notificationTheme,
         settings: {
           enabled: alertsEnabled,
           taskCompleted: true,
@@ -143,9 +199,28 @@ export function useAgentStatusNotifications(): void {
       timer = setTimeout(reconcile, RECONCILE_DEBOUNCE_MS);
     };
 
+    const connectionUnsubscribes = new Map<EnvironmentId, () => void>();
+    const syncConnectionSubscriptions = () => {
+      const environmentIds = new Set(readEnvironmentLabels().keys());
+      for (const [environmentId, unsubscribe] of connectionUnsubscribes) {
+        if (!environmentIds.has(environmentId)) {
+          unsubscribe();
+          connectionUnsubscribes.delete(environmentId);
+        }
+      }
+      for (const environmentId of environmentIds) {
+        if (connectionUnsubscribes.has(environmentId)) continue;
+        connectionUnsubscribes.set(
+          environmentId,
+          appAtomRegistry.subscribe(environmentCatalog.stateAtom(environmentId), schedule),
+        );
+      }
+    };
+
     // Seed synchronously: everything already loaded is recorded without
     // firing, so a cold start never replays a backlog of alerts.
     reconcile();
+    syncConnectionSubscriptions();
 
     const unsubscribeThreads = appAtomRegistry.subscribe(
       environmentThreadShells.threadShellsAtom,
@@ -157,7 +232,10 @@ export function useAgentStatusNotifications(): void {
     );
     const unsubscribeEnvironments = appAtomRegistry.subscribe(
       environmentPresentations.presentationsAtom,
-      schedule,
+      () => {
+        syncConnectionSubscriptions();
+        schedule();
+      },
     );
     // Android may refuse a foreground service start from the background; the
     // next foreground pass re-sends the summary because its identity moves on.
@@ -174,9 +252,10 @@ export function useAgentStatusNotifications(): void {
       unsubscribeThreads();
       unsubscribeProjects();
       unsubscribeEnvironments();
+      for (const unsubscribe of connectionUnsubscribes.values()) unsubscribe();
       appStateSubscription.remove();
     };
-  }, [alertsEnabled, preferencesLoaded, statusEnabled]);
+  }, [alertsEnabled, notificationTheme, preferencesLoaded, statusEnabled]);
 
   // Turning the switch off must clear the notification even though the effect
   // above re-runs with a fresh presenter state that knows nothing was posted.

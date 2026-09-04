@@ -35,6 +35,18 @@ function isActivePhase(phase: AgentAwarenessPhase): phase is AgentStatusPhase {
   return ACTIVE_PHASES.has(phase);
 }
 
+function agentStatusPriority(phase: AgentStatusPhase): number {
+  switch (phase) {
+    case "waiting_for_approval":
+      return 0;
+    case "waiting_for_input":
+      return 1;
+    case "starting":
+    case "running":
+      return 2;
+  }
+}
+
 export interface AgentStatusRow {
   readonly environmentId: EnvironmentId;
   readonly threadId: string;
@@ -68,8 +80,8 @@ function parseIsoMs(value: string | null | undefined): number | null {
 
 /**
  * Folds every environment's thread shells into the rows the status
- * notification lists. Rows sort by start time so the oldest running task is
- * first and its start drives the notification chronometer.
+ * notification lists. Attention states sort first, then active work sorts by
+ * start time so the oldest running task leads the notification.
  */
 export function aggregateAgentStatus(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
@@ -109,6 +121,8 @@ export function aggregateAgentStatus(input: {
   }
 
   rows.sort((left, right) => {
+    const phasePriority = agentStatusPriority(left.phase) - agentStatusPriority(right.phase);
+    if (phasePriority !== 0) return phasePriority;
     const leftStart = left.startedAtMs ?? Number.MAX_SAFE_INTEGER;
     const rightStart = right.startedAtMs ?? Number.MAX_SAFE_INTEGER;
     if (leftStart !== rightStart) return leftStart - rightStart;

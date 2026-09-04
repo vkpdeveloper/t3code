@@ -1,14 +1,14 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as Notifications from "expo-notifications";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback } from "react";
-import { Alert, Linking, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Alert, AppState, Linking, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../settings/components/SettingsSwitchRow";
-import { supportsAgentStatusNotification } from "./nativeAgentStatus";
+import { nativeAgentStatus, supportsAgentStatusNotification } from "./nativeAgentStatus";
 
 /**
  * Android-only switches for the persistent agent status notification and
@@ -25,6 +25,22 @@ function AndroidAgentStatusSettingsSection() {
   const loaded = AsyncResult.isSuccess(preferences);
   const statusEnabled = loaded && preferences.value.agentStatusNotificationEnabled === true;
   const alertsEnabled = loaded && preferences.value.agentAlertsEnabled === true;
+  const [promotedNotificationsAvailable, setPromotedNotificationsAvailable] = useState(
+    () => nativeAgentStatus()?.canPostPromotedNotifications() === true,
+  );
+
+  useEffect(() => {
+    const refresh = () => {
+      setPromotedNotificationsAvailable(
+        nativeAgentStatus()?.canPostPromotedNotifications() === true,
+      );
+    };
+    refresh();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => subscription.remove();
+  }, []);
 
   const ensurePermission = useCallback(async (): Promise<boolean> => {
     const existing = await Notifications.getPermissionsAsync();
@@ -77,6 +93,11 @@ function AndroidAgentStatusSettingsSection() {
           onValueChange={(value) => toggle("agentAlertsEnabled", value)}
         />
       </SettingsSection>
+      {!promotedNotificationsAvailable ? (
+        <Text className="px-2 text-sm text-foreground-muted">
+          Live Updates are unavailable. Agent Status will use the standard themed notification.
+        </Text>
+      ) : null}
       <Text className="px-2 text-sm text-foreground-muted">
         Agent Status keeps T3 Code connected in the background while agents run. Everything stays on
         this device: no push service is involved.
