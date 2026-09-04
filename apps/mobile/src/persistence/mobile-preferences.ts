@@ -44,6 +44,14 @@ export interface Preferences {
   /** Fresh keys reset both shelves to collapsed when users update. */
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
+  /**
+   * Android only. Keeps a silent ongoing notification listing every running
+   * agent across paired machines, backed by a foreground service so the
+   * sockets stay open while the app is backgrounded.
+   */
+  readonly agentStatusNotificationEnabled?: boolean;
+  /** Android only. Local alerts when an agent finishes, fails, or needs a reply. */
+  readonly agentAlertsEnabled?: boolean;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
@@ -103,6 +111,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     planModeEnabled?: boolean;
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
+    agentStatusNotificationEnabled?: boolean;
+    agentAlertsEnabled?: boolean;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -175,6 +185,12 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.threadListSnoozedShelfExpanded === "boolean") {
     preferences.threadListSnoozedShelfExpanded = parsed.threadListSnoozedShelfExpanded;
+  }
+  if (typeof parsed.agentStatusNotificationEnabled === "boolean") {
+    preferences.agentStatusNotificationEnabled = parsed.agentStatusNotificationEnabled;
+  }
+  if (typeof parsed.agentAlertsEnabled === "boolean") {
+    preferences.agentAlertsEnabled = parsed.agentAlertsEnabled;
   }
   return preferences;
 }

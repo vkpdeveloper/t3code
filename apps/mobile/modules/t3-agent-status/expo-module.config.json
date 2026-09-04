@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["expo.modules.t3agentstatus.T3AgentStatusModule"]
+  }
+}

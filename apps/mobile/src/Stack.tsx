@@ -19,6 +19,7 @@ import { getCompactBrandHeaderOptions } from "./components/CompactBrandTitle";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
 import { AutomationsRouteScreen } from "./features/automations/AutomationsRouteScreen";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
+import { useAgentStatusNotifications } from "./features/agent-status/useAgentStatusNotifications";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
@@ -373,6 +374,8 @@ function workspacePathFromState(state: NavigationState): string {
 function ThreadOutboxDrainWorker() {
   useThreadOutboxDrain();
   useComposerAttachmentUploadWorker();
+  // Android status notification and local alerts; same reasoning, same leaf.
+  useAgentStatusNotifications();
   return null;
 }
 
