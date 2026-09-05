@@ -1,4 +1,5 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
+import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
 
 import { OPERATOR_PROVIDER_INSTRUCTIONS } from "../operator/OperatorInstructions.ts";
 
@@ -53,7 +54,7 @@ const t3CodeToolInstructions = (
   return sections.join("");
 };
 
-export const codexPlanModeDeveloperInstructions = (
+const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
   imageGenerationAvailable = false,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
@@ -187,7 +188,7 @@ If the user stays in Plan mode and asks for revisions after a prior \`<proposed_
 ${t3CodeToolInstructions(browserToolsAvailable, imageGenerationAvailable)}
 </collaboration_mode>`;
 
-export const codexDefaultModeDeveloperInstructions = (
+const codexDefaultModeDeveloperInstructions = (
   browserToolsAvailable: boolean,
   imageGenerationAvailable = false,
 ): string => `<collaboration_mode># Collaboration Mode: Default
@@ -209,11 +210,6 @@ export interface CodexRuntimeInfo {
   readonly reasoningEffort: string;
 }
 
-// Values come from trusted config, but keep the block single-line regardless.
-function toSingleLine(value: string): string {
-  return value.replaceAll(/\s+/g, " ").trim();
-}
-
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
@@ -231,5 +227,5 @@ export function buildCodexDeveloperInstructions(
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable, imageGenerationAvailable);
   return `${base}
 
-<runtime_info>In case you're asked: you are running in T3 Code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+${buildRuntimeInstructions({ harness: "Codex", ...runtime })}`;
 }

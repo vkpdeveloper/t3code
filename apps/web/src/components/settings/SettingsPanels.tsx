@@ -154,6 +154,7 @@ import {
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
+  useSettingsSearchTarget,
   useSettingsSearchTargetId,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -203,14 +204,12 @@ const BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS: Record<BackgroundActivityProfil
 };
 
 const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile, string> = {
-  balanced:
-    "Pauses background probes when clients are idle, the host is locked, or low power mode is active.",
+  balanced: "Pauses probes for idle clients, locked hosts, or low power mode.",
   performance: "Allows scoped background probes while any subscribed client remains connected.",
   "battery-saver": "Also pauses background probes when the host or client is on battery.",
 };
 
-const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION =
-  "Uses custom background intervals with the selected shared power policy.";
+const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION = "Uses custom intervals.";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
@@ -422,7 +421,7 @@ function AboutVersionSection() {
       {hasDesktopBridge ? (
         <SettingsRow
           title="Update track"
-          description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+          description="Use stable releases or nightly builds. Switch back anytime."
           control={
             <Select
               value={selectedUpdateChannel}
@@ -569,7 +568,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-        ? ["Continue threads after server updates"]
+        ? ["Continue threads after restarts"]
         : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
@@ -1117,7 +1116,7 @@ export function AppearanceSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="appearance" title="Appearance">
+      <SettingsSection id="appearance" title="Colors & themes" variant="plain" hideTitle>
         <div id={searchableSetting("theme").id}>
           <ThemeLibrary
             appearanceMode={appearanceMode}
@@ -1133,7 +1132,9 @@ export function AppearanceSettingsPanel() {
             onImportOpenChange={setIsImportThemeOpen}
           />
         </div>
+      </SettingsSection>
 
+      <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow
           {...searchableSetting("setting-appearance-contrast")}
           description="Adjust the contrast of colors and borders across the interface."
@@ -1184,7 +1185,7 @@ export function AppearanceSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
-          description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
+          description="Higher values make menus, dialogs, and the composer more solid."
           resetAction={
             settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
               <SettingResetButton
@@ -1505,7 +1506,7 @@ function FontSmoothingRow() {
   return (
     <SettingsRow
       {...searchableSetting("font-smoothing")}
-      description="Render text with thinner grayscale anti-aliasing instead of macOS's heavier default."
+      description="Use thinner grayscale text smoothing instead of the macOS default."
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
           <SettingResetButton
@@ -1636,6 +1637,7 @@ function TypographySection() {
   }, [searchTargetId, setAdvanced]);
   return (
     <SettingsSection
+      id="typography"
       title="Typography"
       headerAction={
         <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -1915,6 +1917,7 @@ function LegacyFeaturesSection() {
   const updateSettings = useUpdatePrimarySettings();
   const [open, setOpen] = useState(false);
   const searchTargetId = useSettingsSearchTargetId();
+  const targetRef = useSettingsSearchTarget<HTMLElement>("legacy-features");
   // Unfold once per search jump; tracking the handled id lets the user fold
   // the section back up without the still-set target immediately reopening it.
   const lastExpandedTargetRef = useRef<string | null>(null);
@@ -1932,19 +1935,19 @@ function LegacyFeaturesSection() {
   }, [searchTargetId]);
 
   return (
-    <section className="space-y-3">
+    <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-lg font-semibold tracking-[-0.025em] text-muted-foreground transition-colors group-hover:text-foreground">
+          <h2 className="text-sm font-normal tracking-[-0.005em] text-foreground/70 transition-colors group-hover:text-foreground">
             Legacy features
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>
         <CollapsiblePanel>
-          <div className="relative space-y-1 overflow-visible pt-3 text-foreground">
+          <div className="relative overflow-visible rounded-xl border border-border/60 bg-card/40 text-foreground shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50 [&>[data-slot=settings-row]]:rounded-none">
             <SettingsRow
               {...searchableSetting("legacy-plan-mode")}
-              description="Brings back the Build/Plan toggle in the composer along with the /plan and /default commands and the Shift+Tab shortcut. While off, every thread runs in build mode."
+              description="Restore Build/Plan, /plan, /default, and Shift+Tab. Off uses build mode."
               control={
                 <Switch
                   checked={settings.planModeEnabled}
@@ -1993,7 +1996,7 @@ function LegacyFeaturesSection() {
             <SettingsRow
               serverScoped
               {...searchableSetting("legacy-token-streaming")}
-              description="Paints assistant output token by token instead of in complete chunks. Not recommended: it is significantly slower, and long responses become harder to follow. Kept only for compatibility with the old behavior."
+              description="Stream output token by token. This legacy mode is slower and harder to follow."
               control={
                 <Switch
                   checked={settings.enableLegacyTokenStreaming}
@@ -2019,7 +2022,7 @@ function LegacyFeaturesSection() {
             />
             <SettingsRow
               {...searchableSetting("legacy-sidebar")}
-              description="Brings back the original sidebar with per-project thread trees. The default sidebar shows one flat list: active work as rich cards, settled threads as compact rows."
+              description="Restore per-project thread trees instead of the default flat sidebar."
               control={
                 <Switch
                   checked={settings.legacySidebarEnabled}
@@ -2101,7 +2104,7 @@ export function GeneralSettingsPanel() {
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
-      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Current shared policy: ${
+      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Shared policy: ${
           BACKGROUND_ACTIVITY_PROFILE_LABELS[activeBackgroundActivityProfile]
         }.`
       : BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS[resolvedBackgroundActivity.profile];
@@ -2113,7 +2116,7 @@ export function GeneralSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SharedSettingsMismatchAlert />
-      <SettingsSection title="General">
+      <SettingsSection id="organization" title="Organization">
         <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
@@ -2225,7 +2228,9 @@ export function GeneralSettingsPanel() {
             ) : null}
           </>
         ) : null}
+      </SettingsSection>
 
+      <SettingsSection id="behavior" title="Behavior">
         <SettingsRow
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
@@ -2267,7 +2272,6 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
-
         <SettingsRow
           {...searchableSetting("hide-whitespace-changes")}
           description="Set whether the diff panel ignores whitespace-only edits by default."
@@ -2293,7 +2297,6 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-
         <SettingsRow
           {...searchableSetting("diff-layout")}
           description="Show diffs stacked or side by side. The toggle in the diff toolbar changes this too."
@@ -2331,7 +2334,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("proactive-panels")}
-          description="Automatically open the linked pull request when it appears and the turn diff when agent work finishes."
+          description="Open linked pull requests when found and turn diffs when work changes files."
           resetAction={
             settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled ? (
               <SettingResetButton
@@ -2489,12 +2492,13 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("continue-threads-after-server-update")}
-          description="Automatically resume active threads after a server update restarts the environment."
+          serverScoped
+          description="Automatically resume interrupted threads after an update, crash, or machine restart. Applies to this environment and all connected environments that support it. Update older servers first."
           resetAction={
             settings.continueThreadsAfterServerUpdate !==
             DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
               <SettingResetButton
-                label="continue threads after server updates"
+                label="continue threads after restarts"
                 onClick={() =>
                   updateSettings({
                     continueThreadsAfterServerUpdate:
@@ -2510,7 +2514,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
               }
-              aria-label="Continue threads after server updates"
+              aria-label="Continue threads after restarts"
             />
           }
         />
@@ -2602,7 +2606,9 @@ export function GeneralSettingsPanel() {
             </>
           }
         />
+      </SettingsSection>
 
+      <SettingsSection id="projects-and-threads" title="Projects & threads">
         <SettingsRow
           serverScoped
           {...searchableSetting("new-threads")}
@@ -2649,38 +2655,35 @@ export function GeneralSettingsPanel() {
           }
         />
 
-        {settings.defaultThreadEnvMode === "worktree" ? (
-          <SettingsRow
-            serverScoped
-            className="bg-muted/20 sm:pl-9"
-            title={searchableSetting("start-from-origin").title}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
-            resetAction={
-              settings.newWorktreesStartFromOrigin !==
-              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
-                <SettingResetButton
-                  label="new worktrees start from origin"
-                  onClick={() =>
-                    updateSettings({
-                      newWorktreesStartFromOrigin:
-                        DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.newWorktreesStartFromOrigin}
-                onCheckedChange={(checked) =>
-                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+        <SettingsRow
+          serverScoped
+          className="bg-muted/20 sm:pl-9"
+          title={searchableSetting("start-from-origin").title}
+          description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+          resetAction={
+            settings.newWorktreesStartFromOrigin !==
+            DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
+              <SettingResetButton
+                label="new worktrees start from origin"
+                onClick={() =>
+                  updateSettings({
+                    newWorktreesStartFromOrigin:
+                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
+                  })
                 }
-                aria-label="Start new worktrees from origin by default"
               />
-            }
-          />
-        ) : null}
-
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.newWorktreesStartFromOrigin}
+              onCheckedChange={(checked) =>
+                updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+              }
+              aria-label="Start new worktrees from origin by default"
+            />
+          }
+        />
         <SettingsRow
           serverScoped
           {...searchableSetting("inactive-worktree-cleanup")}
@@ -2762,7 +2765,9 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+      </SettingsSection>
 
+      <SettingsSection id="confirmations" title="Confirmations">
         <SettingsRow
           {...searchableSetting("unpin-confirmation")}
           description="Ask before unpinning a thread from the pinned section."
@@ -2844,7 +2849,7 @@ export function GeneralSettingsPanel() {
         {isElectron ? (
           <SettingsRow
             {...searchableSetting("quit-confirmation")}
-            description="Choose whether the desktop app quits immediately, after a hold, or after two quick presses."
+            description="Hold mode also quits on two quick presses."
             resetAction={
               settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? (
                 <SettingResetButton
@@ -2882,11 +2887,13 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+      </SettingsSection>
 
+      <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
           serverScoped
           {...searchableSetting("text-generation-model")}
-          description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
+          description="Used for thread titles and other generated text. Source control can override it."
           resetAction={
             isTextGenerationModelDirty ? (
               <SettingResetButton
@@ -2978,7 +2985,7 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      <SettingsSection title="About">
+      <SettingsSection id="about" title="About">
         {isElectron || HOSTED_APP_CHANNEL ? (
           <AboutVersionSection />
         ) : (

@@ -290,6 +290,18 @@ Do not run an old image-only server against state that contains file attachments
 each persisted event before projection. A file-bearing event can make `ProjectionPipeline` bootstrap
 and `OrchestrationEngine` startup fail for the entire environment, not only the affected thread.
 
+## Provider update ownership
+
+A one-click provider update is offered only when the resolved executable path proves which installer
+owns it. Homebrew and npm ownership follow the real path, while native installs and the global bin
+directories of pnpm, Bun, and Vite+ may match the resolved path or its real target. Unproven
+installations remain manual-only but still report version gaps.
+
+Ownership is cached per instance and checked again immediately before the update. The maintenance
+runner refuses to continue if the lock key changed since the advisory, and reports success only when
+the refreshed provider remains installed at a readable, current version. npm updates pin the prefix
+that owns the provider so a different Node installation on `PATH` cannot receive the update.
+
 ## How provider work is requested
 
 Clients never call a provider directly. They dispatch orchestration commands over the RPC method
@@ -303,6 +315,11 @@ The engine persists an event for the command, and a server-side reactor performs
 Provider output comes back as internal commands such as `thread.message.assistant.delta` and
 `thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
 [overview.md](./overview.md) for the command/event loop.
+
+Codex async questions arrive as notifications and are answered with a new user message, not an RPC
+response. Blocking questions still use the request and response path. An async question can outlive
+its turn or a server restart, so the engine resolves it against durable activity instead of assuming
+it disappeared when it falls outside the recent in-memory window.
 
 ## Server-side workers
 

@@ -89,6 +89,11 @@ import type {
 } from "./orchestration.ts";
 import { EnvironmentId } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
+import type {
+  BrowserImportResult,
+  BrowserImportSource,
+  BrowserImportSourceId,
+} from "./browserImport.ts";
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor, ScopedThreadRef } from "./environment.ts";
@@ -1080,6 +1085,13 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   input: PreviewAutomationWaitForInput,
 });
 
+/**
+ * A System Settings pane the app can deep-link to. The identifier crosses IPC
+ * rather than a URL, so the renderer can only reach these known destinations.
+ */
+export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
+export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
+
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   /** The desktop client's OS platform, read from Electron's preload process. */
@@ -1157,6 +1169,11 @@ export interface DesktopBridge {
     listener: (activation: DesktopNotificationActivation) => void,
   ) => () => void;
   /**
+   * Open a System Settings pane by identifier. Optional: older desktop builds
+   * lack it, and callers no-op when it is missing.
+   */
+  openSystemSettings?: (pane: SystemSettingsPane) => Promise<boolean>;
+  /**
    * Probe this desktop machine for installed remote-capable editor CLIs
    * (used for remote open-in-editor deep links). Optional: older desktop
    * builds lack it; callers fall back to VS Code only.
@@ -1232,6 +1249,14 @@ export interface DesktopPreviewBridge {
     environmentId: EnvironmentId,
     profileId?: string,
   ) => Promise<DesktopPreviewWebviewConfig>;
+  /** Browsers on this machine whose cookies can be imported. */
+  listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
+  importBrowserCookies: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly sourceId: BrowserImportSourceId;
+    readonly sourceProfileDirectory: string;
+    readonly targetProfileId: string;
+  }) => Promise<BrowserImportResult>;
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /**
    * Activate the in-page element picker for the given tab. Resolves with
@@ -1296,6 +1321,8 @@ export interface LocalApi {
   };
   shell: {
     openExternal: (url: string) => Promise<void>;
+    /** Opens a known System Settings pane; no-ops outside the desktop app. */
+    openSystemSettings: (pane: SystemSettingsPane) => Promise<void>;
   };
   contextMenu: {
     show: <T extends string>(
