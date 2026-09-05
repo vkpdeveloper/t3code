@@ -6,12 +6,10 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
   DEFAULT_SERVER_SETTINGS,
   type Automation,
-  type AutomationCreateInput,
   type AutomationSchedule,
   type EnvironmentId,
-  type ModelSelection,
   type ProviderInstanceId,
-  type ProjectId,
+  ProjectId,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -21,11 +19,12 @@ import {
   HistoryIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   PlayIcon,
   PlusIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
 import { mergeEnvironmentSettings, useClientSettings } from "../../hooks/useSettings";
@@ -44,6 +43,12 @@ import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AutomationProjectPicker, MACHINE_PROJECT } from "./AutomationProjectPicker";
 import { AutomationRunHistoryDialog } from "./AutomationRunHistoryDialog";
+import {
+  automationFormFromAutomation,
+  automationInputFromForm,
+  defaultAutomationForm,
+  type AutomationFormState,
+} from "./automationForm";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import {
@@ -96,32 +101,6 @@ function dateLabel(value: string | null): string {
   }).format(new Date(value));
 }
 
-interface AutomationFormState {
-  readonly name: string;
-  readonly prompt: string;
-  readonly projectId: string;
-  readonly scheduleKind: AutomationSchedule["kind"];
-  readonly time: string;
-  readonly minute: string;
-  readonly weekday: "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
-  readonly modelSelection: ModelSelection | null;
-  readonly runtimeMode: RuntimeMode;
-}
-
-function defaultForm(modelSelection: ModelSelection | null): AutomationFormState {
-  return {
-    name: "",
-    prompt: "",
-    projectId: MACHINE_PROJECT,
-    scheduleKind: "daily",
-    time: "09:00",
-    minute: "0",
-    weekday: "monday",
-    modelSelection,
-    runtimeMode: "full-access",
-  };
-}
-
 function scheduleKindLabel(kind: AutomationSchedule["kind"]): string {
   switch (kind) {
     case "hourly":
@@ -157,7 +136,11 @@ export function AutomationsPage() {
   const clientSettings = useClientSettings();
   const environmentId =
     search.environmentId ?? primaryEnvironmentId ?? environments[0]?.environmentId ?? null;
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editor, setEditor] = useState<{
+    environmentId: EnvironmentId;
+    automation: Automation | null;
+  } | null>(null);
+  const editingAutomation = editor?.automation ?? null;
   const [addingProject, setAddingProject] = useState(false);
   const [newProjectPath, setNewProjectPath] = useState("");
   const [workingId, setWorkingId] = useState<string | null>(null);
@@ -196,7 +179,9 @@ export function AutomationsPage() {
         : null,
     [providerStatuses, settings],
   );
-  const [form, setForm] = useState<AutomationFormState>(() => defaultForm(null));
+  const [form, setForm] = useState(() =>
+    defaultAutomationForm(null, Intl.DateTimeFormat().resolvedOptions().timeZone),
+  );
   const modelOptionsByInstance = useMemo(() => {
     const options = new Map<ProviderInstanceId, ReturnType<typeof getAppModelOptionsForInstance>>();
     for (const entry of providerInstanceEntries) {
@@ -211,33 +196,21 @@ export function AutomationsPage() {
     }
     return options;
   }, [form.modelSelection, providerInstanceEntries, settings]);
-  useEffect(() => {
-    const selectedEntry = providerInstanceEntries.find(
-      (entry) => entry.instanceId === form.modelSelection?.instanceId,
+  const openEditor = (automation: Automation | null) => {
+    if (environmentId === null) return;
+    setEditor({ environmentId, automation });
+    setForm(
+      automation
+        ? automationFormFromAutomation(automation)
+        : defaultAutomationForm(
+            defaultModelSelection,
+            Intl.DateTimeFormat().resolvedOptions().timeZone,
+          ),
     );
-    const selectionExists =
-      selectedEntry?.enabled === true &&
-      selectedEntry.isAvailable &&
-      modelOptionsByInstance
-        .get(selectedEntry.instanceId)
-        ?.some((option) => option.slug === form.modelSelection?.model);
-    if (!selectionExists) {
-      setForm((current) =>
-        current.modelSelection === null && defaultModelSelection === null
-          ? current
-          : { ...current, modelSelection: defaultModelSelection },
-      );
-    }
-  }, [defaultModelSelection, form.modelSelection, modelOptionsByInstance, providerInstanceEntries]);
-
-  useEffect(() => {
-    if (
-      form.projectId !== MACHINE_PROJECT &&
-      !environmentProjects.some((project) => project.id === form.projectId)
-    ) {
-      setForm((current) => ({ ...current, projectId: MACHINE_PROJECT }));
-    }
-  }, [environmentProjects, form.projectId]);
+    setAddingProject(false);
+    setNewProjectPath("");
+    setError(null);
+  };
 
   const mutate = async <A, E>(id: string, action: () => Promise<AtomCommandResult<A, E>>) => {
     setWorkingId(id);
@@ -252,33 +225,27 @@ export function AutomationsPage() {
   };
 
   const submit = async () => {
-    if (environmentId === null) return;
-    if (form.modelSelection === null || form.name.trim() === "" || form.prompt.trim() === "") {
+    if (environmentId === null || editor?.environmentId !== environmentId) return;
+    const input = automationInputFromForm(form);
+    if (input === null) {
       setError("Name, instructions, and a model are required.");
       return;
     }
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const schedule: AutomationSchedule =
-      form.scheduleKind === "hourly"
-        ? { kind: "hourly", minute: Number(form.minute), timeZone }
-        : form.scheduleKind === "weekly"
-          ? { kind: "weekly", weekday: form.weekday, time: form.time, timeZone }
-          : { kind: form.scheduleKind, time: form.time, timeZone };
-    const input: AutomationCreateInput = {
-      name: form.name.trim(),
-      prompt: form.prompt.trim(),
-      projectId: form.projectId === MACHINE_PROJECT ? null : (form.projectId as ProjectId),
-      schedule,
-      modelSelection: form.modelSelection,
-      runtimeMode: form.runtimeMode,
-      enabled: true,
-    };
-    const succeeded = await mutate("create", () => createAutomation({ environmentId, input }));
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: input.schedule.timeZone });
+    } catch {
+      setError("Enter a valid time zone, such as Asia/Kolkata or America/New_York.");
+      return;
+    }
+    const succeeded = editingAutomation
+      ? await mutate(editingAutomation.id, () =>
+          updateAutomation({ environmentId, input: { id: editingAutomation.id, ...input } }),
+        )
+      : await mutate("create", () => createAutomation({ environmentId, input }));
     if (succeeded) {
-      setForm(defaultForm(defaultModelSelection));
       setAddingProject(false);
       setNewProjectPath("");
-      setDialogOpen(false);
+      setEditor(null);
     }
   };
 
@@ -368,10 +335,7 @@ export function AutomationsPage() {
         </Select>
         <Button
           disabled={environmentId === null || defaultModelSelection === null}
-          onClick={() => {
-            setError(null);
-            setDialogOpen(true);
-          }}
+          onClick={() => openEditor(null)}
           size="sm"
         >
           <PlusIcon /> New automation
@@ -451,6 +415,15 @@ export function AutomationsPage() {
                         ) : null}
                       </div>
                       <div className="flex items-center justify-end gap-1">
+                        <Button
+                          aria-label={`Edit ${automation.name}`}
+                          disabled={workingId === automation.id}
+                          onClick={() => openEditor(automation)}
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <PencilIcon />
+                        </Button>
                         <Switch
                           aria-label={automation.enabled ? "Pause automation" : "Resume automation"}
                           checked={automation.enabled}
@@ -487,6 +460,12 @@ export function AutomationsPage() {
                             <MoreHorizontalIcon />
                           </MenuTrigger>
                           <MenuPopup align="end">
+                            <MenuItem
+                              disabled={workingId === automation.id}
+                              onClick={() => openEditor(automation)}
+                            >
+                              <PencilIcon /> Edit
+                            </MenuItem>
                             <MenuItem onClick={() => toggle(automation)}>
                               <CirclePauseIcon /> {automation.enabled ? "Pause" : "Resume"}
                             </MenuItem>
@@ -519,7 +498,8 @@ export function AutomationsPage() {
                 <h2 className="text-sm font-medium">No automations on this machine</h2>
                 <Button
                   className="mt-4"
-                  onClick={() => setDialogOpen(true)}
+                  disabled={environmentId === null || defaultModelSelection === null}
+                  onClick={() => openEditor(null)}
                   size="sm"
                   variant="outline"
                 >
@@ -541,10 +521,10 @@ export function AutomationsPage() {
       ) : null}
 
       <Dialog
-        open={dialogOpen}
+        open={editor !== null && editor.environmentId === environmentId}
         onOpenChange={(open) => {
-          setDialogOpen(open);
           if (!open) {
+            setEditor(null);
             setAddingProject(false);
             setNewProjectPath("");
             setError(null);
@@ -553,7 +533,7 @@ export function AutomationsPage() {
       >
         <DialogPopup className="w-full sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>New automation</DialogTitle>
+            <DialogTitle>{editingAutomation ? "Edit automation" : "New automation"}</DialogTitle>
           </DialogHeader>
           <DialogPanel className="grid gap-4">
             {error ? (
@@ -586,12 +566,17 @@ export function AutomationsPage() {
                 <AutomationProjectPicker
                   environmentLabel={selectedEnvironment?.label ?? "this"}
                   projects={environmentProjects}
-                  value={form.projectId}
+                  value={form.projectId ?? MACHINE_PROJECT}
                   onAddProject={() => {
                     setError(null);
                     setAddingProject(true);
                   }}
-                  onChange={(projectId) => setForm({ ...form, projectId })}
+                  onChange={(projectId) =>
+                    setForm({
+                      ...form,
+                      projectId: projectId === MACHINE_PROJECT ? null : ProjectId.make(projectId),
+                    })
+                  }
                 />
               </div>
               <div className="grid gap-1.5">
@@ -609,7 +594,11 @@ export function AutomationsPage() {
                     onInstanceModelChange={(instanceId, model) =>
                       setForm({
                         ...form,
-                        modelSelection: { instanceId, model },
+                        modelSelection:
+                          form.modelSelection?.instanceId === instanceId &&
+                          form.modelSelection.model === model
+                            ? form.modelSelection
+                            : { instanceId, model },
                       })
                     }
                   />
@@ -723,17 +712,34 @@ export function AutomationsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup>
-                    {(["monday", "tuesday", "wednesday", "thursday", "friday"] as const).map(
-                      (day) => (
-                        <SelectItem key={day} value={day}>
-                          {day.charAt(0).toUpperCase() + day.slice(1)}
-                        </SelectItem>
-                      ),
-                    )}
+                    {(
+                      [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                        "saturday",
+                        "sunday",
+                      ] as const
+                    ).map((day) => (
+                      <SelectItem key={day} value={day}>
+                        {day.charAt(0).toUpperCase() + day.slice(1)}
+                      </SelectItem>
+                    ))}
                   </SelectPopup>
                 </Select>
               </div>
             ) : null}
+            <div className="grid gap-1.5">
+              <Label htmlFor="automation-time-zone">Time zone</Label>
+              <Input
+                id="automation-time-zone"
+                value={form.timeZone}
+                placeholder="Asia/Kolkata"
+                onChange={(event) => setForm({ ...form, timeZone: event.target.value })}
+              />
+            </div>
             <div className="grid gap-1.5">
               <Label>Permissions</Label>
               <Select
@@ -746,25 +752,41 @@ export function AutomationsPage() {
                   <SelectValue>{runtimeModeLabel(form.runtimeMode)}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
+                  <SelectItem value="auto">Automatic</SelectItem>
                   <SelectItem value="full-access">Full access</SelectItem>
                   <SelectItem value="auto-accept-edits">Auto-accept edits</SelectItem>
                   <SelectItem value="approval-required">Ask for approval</SelectItem>
                 </SelectPopup>
               </Select>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="automation-enabled">Enabled</Label>
+              <Switch
+                id="automation-enabled"
+                checked={form.enabled}
+                onCheckedChange={(enabled) => setForm({ ...form, enabled })}
+              />
+            </div>
           </DialogPanel>
           <DialogFooter>
             <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
             <Button
               disabled={
-                workingId === "create" ||
+                workingId !== null ||
                 form.name.trim() === "" ||
                 form.prompt.trim() === "" ||
-                form.modelSelection === null
+                form.modelSelection === null ||
+                form.timeZone.trim() === ""
               }
               onClick={() => void submit()}
             >
-              <AlarmClockIcon /> Schedule
+              {editingAutomation ? (
+                "Save changes"
+              ) : (
+                <>
+                  <AlarmClockIcon /> Schedule
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogPopup>

@@ -9,7 +9,9 @@ Open **Automations** from the sidebar on web or desktop. Choose the machine, the
 - a provider model and permission mode
 - an hourly, daily, weekday, or weekly schedule
 
-The schedule uses the time zone of the client that creates or edits it. Use **Run now** to test the automation without changing its next scheduled run. You can pause, resume, or delete it at any time.
+The schedule defaults to the time zone of the client that creates it. Use **Run now** to test the automation without changing its next scheduled run. You can pause, resume, or delete it at any time.
+
+On web and desktop, click the pencil beside an automation or choose **Edit** from its actions menu. Change its instructions, project, model, permissions, schedule, time zone, or enabled state, then choose **Save changes**. For unrestricted runs, set **Permissions** to **Full access**. Edits apply to future runs. Runs already started keep their original settings and history.
 
 Select an automation's name or **Run history** to see its runs, newest first. Each entry shows its date, status, and whether it was scheduled or started manually. Use **Show older runs** to browse the rest of its history and **Refresh** to check for new runs. If a run failed to start, its error appears in the list.
 
