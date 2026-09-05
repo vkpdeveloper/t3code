@@ -14,11 +14,11 @@ import {
   type ProjectId,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import {
   AlarmClockIcon,
   CirclePauseIcon,
-  Clock3Icon,
+  HistoryIcon,
   FolderPlusIcon,
   MoreHorizontalIcon,
   PlayIcon,
@@ -43,6 +43,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environmen
 import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AutomationProjectPicker, MACHINE_PROJECT } from "./AutomationProjectPicker";
+import { AutomationRunHistoryDialog } from "./AutomationRunHistoryDialog";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import {
@@ -93,12 +94,6 @@ function dateLabel(value: string | null): string {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
-}
-
-function runStatusLabel(run: Automation["runs"][number]): string {
-  if (run.status === "pending") return "Queued";
-  if (run.status === "failed") return "Failed";
-  return "Started";
 }
 
 interface AutomationFormState {
@@ -154,13 +149,14 @@ function runtimeModeLabel(mode: RuntimeMode): string {
 }
 
 export function AutomationsPage() {
+  const search = useSearch({ from: "/automations" });
+  const navigate = useNavigate({ from: "/automations" });
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projects = useProjects();
   const clientSettings = useClientSettings();
-  const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(
-    primaryEnvironmentId ?? environments[0]?.environmentId ?? null,
-  );
+  const environmentId =
+    search.environmentId ?? primaryEnvironmentId ?? environments[0]?.environmentId ?? null;
   const [dialogOpen, setDialogOpen] = useState(false);
   const [addingProject, setAddingProject] = useState(false);
   const [newProjectPath, setNewProjectPath] = useState("");
@@ -172,12 +168,6 @@ export function AutomationsPage() {
   const updateAutomation = useAtomCommand(automationEnvironment.update);
   const removeAutomation = useAtomCommand(automationEnvironment.remove);
   const runNow = useAtomCommand(automationEnvironment.runNow);
-
-  useEffect(() => {
-    if (environmentId === null && environments[0]) {
-      setEnvironmentId(primaryEnvironmentId ?? environments[0].environmentId);
-    }
-  }, [environmentId, environments, primaryEnvironmentId]);
 
   const selectedEnvironment = environments.find(
     (environment) => environment.environmentId === environmentId,
@@ -361,7 +351,9 @@ export function AutomationsPage() {
       <div className="ms-auto flex items-center gap-2">
         <Select
           value={environmentId}
-          onValueChange={(value) => setEnvironmentId(value as EnvironmentId)}
+          onValueChange={(value) =>
+            void navigate({ search: { environmentId: value as EnvironmentId } })
+          }
         >
           <SelectTrigger className="w-36" size="compact" variant="ghost">
             <SelectValue>{selectedEnvironment?.label ?? "Machine"}</SelectValue>
@@ -394,9 +386,9 @@ export function AutomationsPage() {
         <WorkspacePageHeader electron={isElectron}>{topbar}</WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
-            {error ? (
+            {error || query.error ? (
               <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-                {error}
+                {error ?? query.error}
               </div>
             ) : null}
             {query.isPending && query.data === null ? (
@@ -418,7 +410,13 @@ export function AutomationsPage() {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <AlarmClockIcon className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate text-sm font-medium">{automation.name}</span>
+                          <Link
+                            to="/automations"
+                            search={{ environmentId: environmentId!, automationId: automation.id }}
+                            className="truncate rounded text-sm font-medium outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {automation.name}
+                          </Link>
                           {!automation.enabled ? (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                               Paused
@@ -437,24 +435,18 @@ export function AutomationsPage() {
                         </div>
                       </div>
                       <div className="text-xs">
-                        {latestRun ? (
-                          <Link
-                            className="group inline-flex items-center gap-1.5 rounded outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                            to="/$environmentId/$threadId"
-                            params={{
-                              environmentId: environmentId!,
-                              threadId: latestRun.threadId,
-                            }}
-                          >
-                            <Clock3Icon className="size-3.5 text-muted-foreground" />
-                            <span>{runStatusLabel(latestRun)}</span>
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">No runs yet</span>
-                        )}
+                        <Link
+                          className="inline-flex items-center gap-1.5 rounded outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          to="/automations"
+                          search={{ environmentId: environmentId!, automationId: automation.id }}
+                          aria-label={`View run history for ${automation.name}`}
+                        >
+                          <HistoryIcon className="size-3.5 text-muted-foreground" />
+                          <span>Run history ({automation.runs.length})</span>
+                        </Link>
                         {latestRun ? (
                           <div className="mt-1 text-muted-foreground">
-                            {dateLabel(latestRun.scheduledFor)}
+                            Latest: {dateLabel(latestRun.scheduledFor)}
                           </div>
                         ) : null}
                       </div>
@@ -519,7 +511,7 @@ export function AutomationsPage() {
                   );
                 })}
               </div>
-            ) : (
+            ) : query.error ? null : (
               <div className="flex min-h-80 flex-col items-center justify-center text-center">
                 <div className="mb-3 grid size-10 place-items-center rounded-xl bg-muted">
                   <AlarmClockIcon className="size-5 text-muted-foreground" />
@@ -538,6 +530,15 @@ export function AutomationsPage() {
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
+
+      {environmentId && search.automationId ? (
+        <AutomationRunHistoryDialog
+          key={`${environmentId}:${search.automationId}`}
+          environmentId={environmentId}
+          automationId={search.automationId}
+          onClose={() => void navigate({ search: { environmentId } })}
+        />
+      ) : null}
 
       <Dialog
         open={dialogOpen}

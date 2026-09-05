@@ -69,7 +69,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
@@ -7755,6 +7755,21 @@ function ChatViewContent(props: ChatViewProps) {
             onDeleteProjectScript={deleteProjectScript}
           />
         </WorkspacePageHeader>
+
+        {activeServerThread?.automationId ? (
+          <div className="shrink-0 border-b px-4 py-2">
+            <Link
+              to="/automations"
+              search={{
+                environmentId: activeServerThread.environmentId,
+                automationId: activeServerThread.automationId,
+              }}
+              className="inline-flex items-center gap-1.5 rounded text-xs text-muted-foreground outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Run history
+            </Link>
+          </div>
+        ) : null}
 
         <ThreadErrorBanner
           error={visibleThreadError}
