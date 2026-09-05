@@ -8,6 +8,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { messageTokenSpeed } from "@t3tools/client-runtime/message-token-speed";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import {
   resolveWorkEntryToolPresentation,
@@ -1506,12 +1507,13 @@ function AssistantMessageMeta({
   alwaysVisible?: boolean;
 }) {
   const ctx = use(TimelineRowCtx);
+  const speed = copyStreaming ? null : messageTokenSpeed(message);
 
   return (
     <div
       className={cn(
         "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
-        alwaysVisible
+        alwaysVisible || speed !== null
           ? "opacity-100"
           : "opacity-0 focus-within:opacity-100 group-hover/assistant:opacity-100",
         className,
@@ -1532,6 +1534,14 @@ function AssistantMessageMeta({
           </TooltipPopup>
         </Tooltip>
       )}
+      {speed ? (
+        <Tooltip>
+          <TooltipTrigger render={<span className="text-muted-foreground text-xs tabular-nums" />}>
+            {speed.label}
+          </TooltipTrigger>
+          <TooltipPopup>{speed.description}</TooltipPopup>
+        </Tooltip>
+      ) : null}
     </div>
   );
 }

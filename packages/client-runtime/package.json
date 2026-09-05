@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./message-token-speed": {
+      "types": "./src/messageTokenSpeed.ts",
+      "default": "./src/messageTokenSpeed.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"

@@ -12,6 +12,7 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
+import { messageTokenSpeed } from "@t3tools/client-runtime/message-token-speed";
 import {
   codexArtifactTemplatePresentationLabel,
   type CodexArtifactTemplate,
@@ -1576,6 +1577,7 @@ function renderFeedEntry(
       props.terminalAssistantMessageIds.has(message.id) &&
       !assistantTurnStillInProgress &&
       !message.streaming;
+    const speed = showAssistantMeta ? messageTokenSpeed(message) : null;
 
     if (isUser) {
       const enterAnimated = isFreshTimestamp(message.createdAt);
@@ -1694,7 +1696,7 @@ function renderFeedEntry(
           );
         })}
         {showAssistantMeta ? (
-          <View className="mt-1 flex-row items-center gap-1">
+          <View className="mt-1 flex-row flex-wrap items-center gap-1">
             <CopyTextButton
               accessibilityLabel="Copy message"
               text={renderedText}
@@ -1705,6 +1707,20 @@ function renderFeedEntry(
             <Text className="font-t3-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
             </Text>
+            {speed ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={speed.label}
+                accessibilityHint="Show how reply speed is estimated"
+                onPress={() => Alert.alert("Reply speed", speed.description)}
+                hitSlop={8}
+                className="px-1"
+              >
+                <Text className="font-t3-medium text-xs tabular-nums text-adaptive-neutral-600-400">
+                  {speed.label}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
       </Animated.View>

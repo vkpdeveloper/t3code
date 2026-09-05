@@ -14,6 +14,23 @@ headline and chart. Refreshing rescans every connected environment and refetches
 each of them, so a newly released model that showed $0.00 gets a price without waiting for the daily
 pricing update.
 
+## Reply speed in chat
+
+After a turn finishes, the final reply shows an estimated delivery rate such as **≈42.5 tok/s**
+beside its timestamp on web, desktop, and mobile. Hover over the rate on web or desktop, or tap it
+on mobile, to see how it is calculated.
+
+The estimate uses the final reply's text and the time from its first recorded text to completion.
+It applies the same rough four-characters-per-token estimate across all providers and models.
+This is an [English text rule of thumb](https://help.openai.com/en/articles/4936856-understanding-and-counting-tokens);
+actual token counts vary by model, language, and content. It does not count earlier reasoning,
+tool calls, or other replies in the turn. Provider buffering and connection delays affect the
+observed rate, so this is not a model benchmark or a billing token count.
+
+Replies with less than one second of recorded delivery time, or missing timing, show
+**Speed unavailable**. Empty replies have no speed label. The value uses saved timestamps, so it
+remains available when you reopen the conversation or connect from another device.
+
 ## Review subscription limits with Vibe-Proxy
 
 Open **Settings > Usages** on web or mobile to connect a Vibe-Proxy
