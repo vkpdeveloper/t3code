@@ -52,7 +52,12 @@ export function AutomationProjectPicker(props: {
     ],
     [props.environmentLabel, props.projects],
   );
-  const selectedItem = items.find((item) => item.value === props.value) ?? items[0]!;
+  const selectedItem = items.find((item) => item.value === props.value) ?? {
+    value: props.value,
+    label: "Unavailable project",
+    detail: "Choose a project or the machine workspace",
+    project: null,
+  };
   const filteredItems = useMemo(
     () =>
       query.trim() === ""

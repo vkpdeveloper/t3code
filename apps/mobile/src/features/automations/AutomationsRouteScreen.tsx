@@ -4,7 +4,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import type { Automation, EnvironmentId } from "@t3tools/contracts";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCallback, useState } from "react";
@@ -16,6 +15,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { automationEnvironment, useAutomations } from "../../state/automations";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useEnvironments } from "../../state/environments";
+import { AutomationRunHistory } from "./AutomationRunHistory";
 
 function formatSchedule(automation: Automation): string {
   switch (automation.schedule.kind) {
@@ -42,13 +42,13 @@ function AutomationEnvironmentSection(props: {
   readonly environmentId: EnvironmentId;
   readonly label: string;
 }) {
-  const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
   const query = useAutomations(props.environmentId);
   const refresh = query.refresh;
   const runNow = useAtomCommand(automationEnvironment.runNow);
   const update = useAtomCommand(automationEnvironment.update);
   const [workingId, setWorkingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyId, setHistoryId] = useState<Automation["id"] | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -69,7 +69,17 @@ function AutomationEnvironmentSection(props: {
 
   return (
     <View className="gap-2">
-      <Text className="px-2 text-sm font-t3-medium text-foreground-muted">{props.label}</Text>
+      <View className="flex-row items-center justify-between px-2">
+        <Text className="text-sm font-t3-medium text-foreground-muted">{props.label}</Text>
+        <Pressable
+          accessibilityRole="button"
+          disabled={query.isPending}
+          onPress={refresh}
+          className="px-2 py-2"
+        >
+          <Text className="text-sm text-foreground">Refresh</Text>
+        </Pressable>
+      </View>
       <View className="overflow-hidden rounded-[24px] border-continuous bg-card">
         {query.isPending && query.data === null ? (
           <Text className="p-4 text-base text-foreground-muted">Loading…</Text>
@@ -77,7 +87,7 @@ function AutomationEnvironmentSection(props: {
           <Text className="p-4 text-base text-destructive">{query.error}</Text>
         ) : query.data?.automations.length ? (
           query.data.automations.map((automation, index) => {
-            const latestRun = automation.runs[0];
+            const historyOpen = historyId === automation.id;
             return (
               <View
                 className={`gap-3 p-4 ${index > 0 ? "border-t border-separator" : ""}`}
@@ -102,31 +112,37 @@ function AutomationEnvironmentSection(props: {
                     <Text className="text-sm text-foreground-muted">Paused</Text>
                   ) : null}
                 </View>
-                {latestRun ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    className="flex-row items-center gap-2 rounded-xl bg-surface px-3 py-2"
-                    onPress={() =>
-                      navigation.navigate("Thread", {
-                        environmentId: props.environmentId,
-                        threadId: latestRun.threadId,
-                      })
-                    }
-                  >
-                    <SymbolView
-                      name="text.bubble"
-                      size={17}
-                      tintColorClassName="accent-icon"
-                      type="monochrome"
-                    />
-                    <Text className="flex-1 text-base text-foreground">Open latest run</Text>
-                    <SymbolView
-                      name="chevron.right"
-                      size={15}
-                      tintColorClassName="accent-chevron"
-                      type="monochrome"
-                    />
-                  </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Run history for ${automation.name}`}
+                  accessibilityState={{ expanded: historyOpen }}
+                  className="flex-row items-center gap-2 rounded-xl bg-surface px-3 py-2"
+                  onPress={() => {
+                    setHistoryId(historyOpen ? null : automation.id);
+                    if (!historyOpen) refresh();
+                  }}
+                >
+                  <SymbolView
+                    name="text.bubble"
+                    size={17}
+                    tintColorClassName="accent-icon"
+                    type="monochrome"
+                  />
+                  <Text className="flex-1 text-base text-foreground">
+                    Run history ({automation.runs.length})
+                  </Text>
+                  <SymbolView
+                    name={historyOpen ? "chevron.down" : "chevron.right"}
+                    size={15}
+                    tintColorClassName="accent-chevron"
+                    type="monochrome"
+                  />
+                </Pressable>
+                {historyOpen ? (
+                  <AutomationRunHistory
+                    environmentId={props.environmentId}
+                    automation={automation}
+                  />
                 ) : null}
                 <View className="flex-row gap-2">
                   <Pressable

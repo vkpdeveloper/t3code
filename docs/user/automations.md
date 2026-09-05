@@ -9,10 +9,16 @@ Open **Automations** from the sidebar on web or desktop. Choose the machine, the
 - a provider model and permission mode
 - an hourly, daily, weekday, or weekly schedule
 
-The schedule uses the time zone of the client that creates or edits it. Use **Run now** to test the automation without changing its next scheduled run. You can pause, resume, or delete it at any time.
+The schedule defaults to the time zone of the client that creates it. Use **Run now** to test the automation without changing its next scheduled run. You can pause, resume, or delete it at any time.
 
-Each run has a full T3 Code thread. Open the latest run from Automations to watch its console, reply to the agent, handle approvals, or inspect its output from any client connected to that environment.
+On web and desktop, click the pencil beside an automation or choose **Edit** from its actions menu. Change its instructions, project, model, permissions, schedule, time zone, or enabled state, then choose **Save changes**. For unrestricted runs, set **Permissions** to **Full access**. Edits apply to future runs. Runs already started keep their original settings and history.
+
+Select an automation's name or **Run history** to see its runs, newest first. Each entry shows its date, status, and whether it was scheduled or started manually. Use **Show older runs** to browse the rest of its history and **Refresh** to check for new runs. If a run failed to start, its error appears in the list.
+
+Choose **Open run** to see that run's full thread, including its instructions, replies, tool activity, and file changes. You can reply to the agent, handle approvals, or watch a run that is still working. Use **Run history** above the thread to return to the same automation.
+
+If a run's thread was archived, choose **Restore thread**, then open it. Deleted threads cannot be restored.
 
 Automation threads stay out of project thread lists, search, and the archived-thread view. They are reachable only from the owning automation, which keeps scheduled work separate from interactive work.
 
-On mobile, open **Settings > Automations** to view every connected environment, run or pause an automation, and open its latest run. Create and delete actions are available on web and desktop.
+On mobile, open **Settings > Automations** to view every connected environment and run or pause an automation. Tap **Run history**, then select any run to open its thread. Go back to return to the list. Create and delete actions are available on web and desktop.
