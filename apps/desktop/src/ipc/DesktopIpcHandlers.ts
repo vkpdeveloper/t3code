@@ -39,6 +39,7 @@ import {
   getSystemLocale,
   getWindowFullscreenState,
   openExternal,
+  openSystemSettings,
   probeRemoteEditors,
   pickFolder,
   pickProjectFavicon,
@@ -96,6 +97,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
   yield* ipc.handle(showNotification);
+  yield* ipc.handle(openSystemSettings);
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
@@ -105,4 +107,6 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }
+  yield* ipc.handle(PreviewIpc.listBrowserImportSources);
+  yield* ipc.handle(PreviewIpc.importBrowserCookies);
 });

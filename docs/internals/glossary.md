@@ -18,6 +18,16 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 
 ### Project and workspace
 
+#### Environment
+
+One running T3 server and the machine, provider credentials, filesystem access, and durable state it
+owns. Projects and threads belong to an environment even when a remote client controls them.
+
+#### Client
+
+A web, desktop, or mobile UI connected to an environment. The desktop client can also host its own
+environment server.
+
 #### Project
 
 The top-level workspace record in the app. In [the orchestration contracts][1], a project has a `workspaceRoot` and a title. It does not contain threads: `OrchestrationProject` and `OrchestrationThread` are separate arrays on the read model, and a project can have zero threads. See [workspace-layout.md][2].
@@ -29,6 +39,11 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 #### Worktree
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
+
+#### T3 home
+
+The base data directory for an environment. Runtime state normally lives under its `userdata`
+directory.
 
 ### Thread timeline
 
@@ -92,7 +107,11 @@ The current materialized view of orchestration state. In [the contracts][1], it 
 
 A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
 
-#### Receipt
+#### Command receipt
+
+A durable record of a command's result, used to make retries idempotent.
+
+#### Runtime receipt
 
 A typed signal emitted when an async milestone completes, such as `checkpoint.baseline.captured`, `checkpoint.diff.finalized`, or `turn.processing.quiesced`. Receipts are a test-only mechanism: the production `RuntimeReceiptBusLive` publish is a no-op and only the test layer is PubSub-backed. Do not build production behavior on them. See [RuntimeReceiptBus.ts][13] and [CheckpointReactor.ts][6].
 
@@ -107,6 +126,20 @@ The live backend agent implementation and its event stream. The main service is 
 #### Provider
 
 The backend agent runtime that actually performs work. Six drivers ship built in: Codex, Claude, Cursor, Grok, OpenCode, and Antigravity. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and [CodexAdapter.ts][17] as a representative adapter.
+
+#### Driver
+
+The integration for one provider kind. A driver creates adapters from typed instance configuration.
+
+#### Provider instance
+
+One configured provider account and lifecycle. Multiple instances can use the same driver without
+sharing mutable session or catalog state.
+
+#### Adapter
+
+The boundary that translates a provider's native protocol into T3 Code operations and runtime
+events.
 
 #### Session
 

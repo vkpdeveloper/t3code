@@ -102,6 +102,8 @@ it.effect("restores a persisted usage-limit timer and resumes at the reset time"
     const commands = yield* Queue.unbounded<OrchestrationCommand>();
     const engine = {
       readEvents: () => Stream.empty,
+      readThreadEvents: () => Stream.empty,
+      getThreadReplayStats: () => Effect.die("unused thread replay stats"),
       dispatch: (command) => Queue.offer(commands, command).pipe(Effect.as({ sequence: 1 })),
       streamDomainEvents: Stream.empty,
       subscribeDomainEvents: Effect.succeed(Stream.empty),

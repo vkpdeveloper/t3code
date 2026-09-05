@@ -170,6 +170,11 @@ export type AcpParsedSessionEvent =
       readonly rawPayload: unknown;
     }
   | {
+      readonly _tag: "ConfigOptionsUpdated";
+      readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+      readonly rawPayload: unknown;
+    }
+  | {
       readonly _tag: "AssistantItemStarted";
       readonly itemId: string;
       readonly itemType: AcpTextItemType;
@@ -885,6 +890,14 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
   let configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption> | undefined;
 
   switch (upd.sessionUpdate) {
+    case "config_option_update": {
+      events.push({
+        _tag: "ConfigOptionsUpdated",
+        configOptions: upd.configOptions,
+        rawPayload: params,
+      });
+      break;
+    }
     case "available_commands_update": {
       events.push({
         _tag: "AvailableCommandsUpdated",

@@ -33,7 +33,7 @@ import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 
-export function composerSelectionAtEnd(draftMessage: string): ComposerEditorSelection {
+function composerSelectionAtEnd(draftMessage: string): ComposerEditorSelection {
   return { start: draftMessage.length, end: draftMessage.length };
 }
 
@@ -41,6 +41,7 @@ export function buildComposerSlashCommandItems(input: {
   readonly query: string;
   readonly atMessageStart: boolean;
   readonly hasThread: boolean;
+  readonly hasCompactableConversation?: boolean;
   readonly allowInteractionMode: boolean;
   readonly selectedProviderStatus: Pick<
     ServerProvider,
@@ -82,6 +83,7 @@ export function buildComposerSlashCommandItems(input: {
   if (!input.atMessageStart) return items;
   for (const command of input.selectedProviderStatus?.slashCommands ?? []) {
     if (!command.name.toLowerCase().includes(query)) continue;
+    if (command.name === "compact" && !input.hasCompactableConversation) continue;
     if (
       !input.hasThread &&
       input.selectedProviderStatus?.driver === "codex" &&
@@ -153,6 +155,7 @@ export function useComposerCommandMenu({
   selectedProviderStatus,
   threadShells = [],
   hasThread,
+  hasCompactableConversation,
   enabled = true,
   onChangeDraftMessage,
   onUpdateInteractionMode,
@@ -164,6 +167,7 @@ export function useComposerCommandMenu({
   readonly selectedProviderStatus: ServerProvider | null;
   readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
   readonly hasThread: boolean;
+  readonly hasCompactableConversation: boolean;
   readonly enabled?: boolean;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onUpdateInteractionMode?: (mode: ProviderInteractionMode) => void;
@@ -280,6 +284,7 @@ export function useComposerCommandMenu({
         query: q,
         atMessageStart: trigger.rangeStart === 0,
         hasThread,
+        hasCompactableConversation,
         allowInteractionMode: onUpdateInteractionMode !== undefined,
         selectedProviderStatus,
       });
@@ -409,6 +414,7 @@ export function useComposerCommandMenu({
     return [];
   }, [
     hasThread,
+    hasCompactableConversation,
     onUpdateInteractionMode,
     pathSearch.entries,
     selectedProviderStatus,

@@ -114,6 +114,7 @@ export interface ThreadComposerProps {
   readonly connectionError: string | null;
   readonly environmentLabel: string | null;
   readonly selectedThread: OrchestrationThreadShell;
+  readonly hasCompactableConversation: boolean;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
   readonly environmentId: EnvironmentId;
@@ -351,6 +352,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         thread.environmentId === props.environmentId && thread.id !== props.selectedThread.id,
     ),
     hasThread: true,
+    hasCompactableConversation: props.hasCompactableConversation,
     onChangeDraftMessage: props.onChangeDraftMessage,
     onUpdateInteractionMode:
       selectedProviderStatus?.showInteractionModeToggle === false

@@ -13,8 +13,9 @@ import {
 } from "@t3tools/contracts";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert } from "react-native";
 
 import { scopedProjectKey, scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
@@ -26,7 +27,6 @@ import { useProjects, useServerConfigs, useThreadShells } from "./entities";
 import { serverEnvironment } from "./server";
 import {
   confirmThreadOutboxMessageQueued,
-  ensureThreadOutboxLoaded,
   threadOutboxManager,
   threadOutboxRevision,
   updateThreadOutboxMessage,
@@ -64,6 +64,7 @@ import {
 import { mobilePreferencesAtom } from "./preferences";
 import { useAtomCommand } from "./use-atom-command";
 import {
+  dispatchingQueuedMessageIdAtom,
   editingQueuedMessageIdsAtom,
   useThreadOutboxMessages,
   useThreadOutboxShellStatuses,
@@ -72,11 +73,6 @@ import {
   setPendingConnectionError,
   useRemoteConnectionStatus,
 } from "./use-remote-environment-registry";
-
-export const dispatchingQueuedMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
-  Atom.keepAlive,
-  Atom.withLabel("mobile:thread-outbox:dispatching-message-id"),
-);
 
 function beginDispatchingQueuedMessage(queuedMessageId: MessageId): void {
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, queuedMessageId);
@@ -606,8 +602,21 @@ export function useThreadOutboxDrain(): void {
   );
 
   useEffect(() => {
-    ensureThreadOutboxLoaded();
+    let mounted = true;
+    const load = async () => {
+      if ((await threadOutboxManager.load()) || !mounted) return;
+      Alert.alert(
+        "Some queued messages could not be loaded",
+        "Unreadable records and attachment files are still saved. Other messages can still be sent.",
+        [
+          { text: "Dismiss", style: "cancel" },
+          { text: "Retry", onPress: () => void load() },
+        ],
+      );
+    };
+    void load();
     return () => {
+      mounted = false;
       for (const timer of retryTimersRef.current.values()) {
         clearTimeout(timer);
       }
@@ -667,7 +676,7 @@ export function useThreadOutboxDrain(): void {
       if (isModelSelectionUnavailable(serverConfig, settings.modelSelection)) {
         return restoreQueuedMessage(
           queuedMessage,
-          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+          "Antigravity model unavailable. Set it up on web or desktop, or choose another model.",
         );
       }
       const { reportFailure } = makeDeliveryHelpers(queuedMessage);
@@ -760,7 +769,7 @@ export function useThreadOutboxDrain(): void {
       if (isModelSelectionUnavailable(currentConfig, settings.modelSelection)) {
         return restoreQueuedMessage(
           persistedMessage,
-          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+          "Antigravity model unavailable. Set it up on web or desktop, or choose another model.",
         );
       }
       const sendSettings = resolveQueuedThreadSettings(
@@ -805,12 +814,6 @@ export function useThreadOutboxDrain(): void {
         (await completeQueuedMessageDelivery(persistedMessage, deliveryRevision)) === "removed";
       if (delivered) {
         acknowledgedExistingThreadMessageIdsRef.current.delete(persistedMessage.messageId);
-        // The delivered turn holds its own copy of the bytes. A failed delete
-        // is surfaced (never fails the delivered turn); the server also
-        // expires leaked pending uploads.
-        await prepared.releaseUploads().catch((error) => {
-          console.warn("[thread-outbox] could not delete consumed pending uploads", error);
-        });
       }
       return delivered;
     },
@@ -852,7 +855,7 @@ export function useThreadOutboxDrain(): void {
       if (isModelSelectionUnavailable(serverConfig, settings.modelSelection)) {
         return restoreQueuedMessage(
           queuedMessage,
-          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+          "Antigravity model unavailable. Set it up on web or desktop, or choose another model.",
         );
       }
       let prepared: PreparedTurnAttachments;
@@ -896,7 +899,7 @@ export function useThreadOutboxDrain(): void {
       if (isModelSelectionUnavailable(currentConfig, settings.modelSelection)) {
         return restoreQueuedMessage(
           persistedMessage,
-          "Antigravity model unavailable. Open model settings to finish setup or choose another model.",
+          "Antigravity model unavailable. Set it up on web or desktop, or choose another model.",
         );
       }
       const sendSettings = resolveQueuedThreadSettings(
@@ -922,7 +925,6 @@ export function useThreadOutboxDrain(): void {
           messageId: queuedMessage.messageId,
           createdAt: queuedMessage.createdAt,
           text: queuedMessage.text.trim(),
-          attachments: queuedMessage.attachments,
           uploadedAttachments: prepared.attachments,
           modelSelection: sendSettings.modelSelection,
           runtimeMode: sendSettings.runtimeMode,
@@ -954,13 +956,7 @@ export function useThreadOutboxDrain(): void {
         // payload as a duplicate creation. Hand it to the thread's composer.
         return recoverEditedCreationAfterDelivery(persistedMessage);
       }
-      if (outcome === "removed") {
-        await prepared.releaseUploads().catch((error) => {
-          console.warn("[thread-outbox] could not delete consumed pending uploads", error);
-        });
-        return true;
-      }
-      return false;
+      return outcome === "removed";
     },
     [
       makeDeliveryHelpers,
