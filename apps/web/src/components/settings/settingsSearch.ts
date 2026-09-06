@@ -280,6 +280,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "inactive-worktree-cleanup",
     title: "Inactive worktree cleanup",
     to: "/settings/general",
+    searchTerms: ["settled worktree node_modules artifacts prune"],
   },
   {
     id: "add-project-starts-in",

@@ -8,11 +8,14 @@ repositories, create pull requests, and review changes.
 T3 Code can reclaim space from inactive worktrees without deleting their threads or branches. In
 **Settings → General**, choose when cleanup starts, from one to seven days, or turn it off.
 
-Cleanup uses the most recent thread update for each worktree. It first removes ignored,
-re-creatable dependencies and build output for detected project types, such as `node_modules`,
-`.next`, `dist`, TypeScript build metadata, framework caches, logs, Rust `target`, Composer or Rust
-`vendor`, Python `.venv`, Swift `.build`, CocoaPods, and Gradle output. Go `vendor` directories are
-kept. Ignored local state and machine configuration stay protected.
+Cleanup runs on an hourly sweep and also when a thread is settled. Settled worktrees drop ignored,
+re-creatable dependencies immediately. Active worktrees wait until the configured inactivity
+window, measured from the last user message or turn, not from metadata updates. Cleanup then
+removes generated output for detected project types, such as `node_modules`, `.next`, `dist`,
+TypeScript build metadata, framework caches, logs, Rust `target`, Composer or Rust `vendor`, Python
+`.venv`, Swift `.build`, CocoaPods, and Gradle output. Go `vendor` directories are kept. Ignored
+local state and machine configuration stay protected. Worktrees that no thread still owns are
+cleaned the same way.
 
 After seven days of inactivity, T3 Code removes the worktree directory only when it has no local
 changes, no remaining protected ignored files, and its commit exists on either the configured

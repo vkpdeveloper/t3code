@@ -1842,19 +1842,30 @@ const make = Effect.gen(function* () {
       case "thread.settled": {
         const thread = yield* projectionSnapshotQuery.getThreadShellById(event.payload.threadId);
         if (
-          Option.isNone(thread) ||
-          thread.value.session == null ||
-          thread.value.session.status === "stopped"
+          Option.isSome(thread) &&
+          thread.value.session != null &&
+          thread.value.session.status !== "stopped"
         ) {
-          return;
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.stop",
+            commandId: CommandId.make(
+              `session-stop-for-settle:${event.commandId ?? event.eventId}`,
+            ),
+            threadId: event.payload.threadId,
+            createdAt: event.occurredAt,
+            onlyIfSettled: true,
+          });
         }
-        yield* orchestrationEngine.dispatch({
-          type: "thread.session.stop",
-          commandId: CommandId.make(`session-stop-for-settle:${event.commandId ?? event.eventId}`),
-          threadId: event.payload.threadId,
-          createdAt: event.occurredAt,
-          onlyIfSettled: true,
-        });
+        if (
+          Option.isSome(worktreeCleanup) &&
+          Option.isSome(thread) &&
+          thread.value.worktreePath != null
+        ) {
+          yield* worktreeCleanup.value.pruneSettledThread({
+            threadId: thread.value.id,
+            worktreePath: thread.value.worktreePath,
+          });
+        }
         return;
       }
     }
