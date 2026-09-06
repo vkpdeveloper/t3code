@@ -2687,7 +2687,7 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("inactive-worktree-cleanup")}
-          description="Removes generated dependencies after inactivity. Safe worktrees are removed after 7 days; chats and branches stay."
+          description="Removes generated dependencies when a chat is settled or inactive. Safe worktrees are removed after 7 days; chats and branches stay."
           resetAction={
             settings.worktreeCleanupAfterDays !==
             DEFAULT_UNIFIED_SETTINGS.worktreeCleanupAfterDays ? (

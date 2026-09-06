@@ -10,6 +10,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -29,7 +30,7 @@ import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const WORKTREE_RETIRE_AFTER_DAYS = 7;
-const SWEEP_INTERVAL = Duration.hours(24);
+const SWEEP_INTERVAL = Duration.hours(1);
 const STATE_FILE_NAME = "worktree-cleanup.json";
 
 const CleanupEntry = Schema.Struct({
@@ -151,7 +152,61 @@ interface WorktreeGroup {
   readonly path: string;
   readonly project: OrchestrationProjectShell;
   readonly threads: ReadonlyArray<OrchestrationThreadShell>;
-  readonly lastUpdatedAt: string;
+  readonly lastActivityAt: string;
+}
+
+function laterIso(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null {
+  if (left == null) return right ?? null;
+  if (right == null) return left;
+  return right > left ? right : left;
+}
+
+/** Last user/agent activity, not metadata churn like title or pin updates. */
+export function threadActivityAt(thread: OrchestrationThreadShell): string {
+  return (
+    laterIso(
+      laterIso(thread.latestUserMessageAt, thread.settledAt),
+      laterIso(
+        laterIso(thread.latestTurn?.requestedAt, thread.latestTurn?.startedAt),
+        thread.latestTurn?.completedAt,
+      ),
+    ) ?? thread.createdAt
+  );
+}
+
+export function worktreeActivityAt(
+  threads: ReadonlyArray<OrchestrationThreadShell>,
+  fallback: string,
+): string {
+  return (
+    threads.reduce<string | null>(
+      (latest, thread) => laterIso(latest, threadActivityAt(thread)),
+      null,
+    ) ?? fallback
+  );
+}
+
+export function worktreeThreadsAreSettled(
+  threads: ReadonlyArray<OrchestrationThreadShell>,
+): boolean {
+  return threads.length > 0 && threads.every((thread) => thread.settledOverride === "settled");
+}
+
+export function shouldPruneWorktreeArtifacts(input: {
+  readonly threads: ReadonlyArray<OrchestrationThreadShell>;
+  readonly lastActivityAt: string;
+  readonly nowMs: number;
+  readonly cleanupAfterDays: number;
+  readonly busy: boolean;
+}): boolean {
+  if (input.busy) return false;
+  if (worktreeThreadsAreSettled(input.threads)) return true;
+  const lastActivityMs = Date.parse(input.lastActivityAt);
+  if (Number.isNaN(lastActivityMs)) return false;
+  return input.nowMs - lastActivityMs >= input.cleanupAfterDays * DAY_MS;
 }
 
 export function groupManagedWorktrees(input: {
@@ -172,11 +227,14 @@ export function groupManagedWorktrees(input: {
     if (!firstThread) return [];
     const project = projects.get(firstThread.projectId);
     if (!project) return [];
-    const lastUpdatedAt = threads.reduce(
-      (latest, thread) => (thread.updatedAt > latest ? thread.updatedAt : latest),
-      threads[0]?.updatedAt ?? project.updatedAt,
-    );
-    return [{ path: worktreePath, project, threads, lastUpdatedAt }];
+    return [
+      {
+        path: worktreePath,
+        project,
+        threads,
+        lastActivityAt: worktreeActivityAt(threads, project.updatedAt),
+      },
+    ];
   });
 }
 
@@ -227,7 +285,8 @@ function worktreeIsBusy(group: WorktreeGroup, runningTerminalThreadIds: Readonly
     (thread) =>
       runningTerminalThreadIds.has(thread.id) ||
       thread.backgroundLiveness != null ||
-      (thread.session !== null && thread.session.status !== "stopped"),
+      thread.session?.status === "starting" ||
+      thread.session?.status === "running",
   );
 }
 
@@ -249,6 +308,10 @@ export class WorktreeCleanup extends Context.Service<
   {
     readonly start: () => Effect.Effect<void, never, import("effect/Scope").Scope>;
     readonly runNow: Effect.Effect<void>;
+    readonly pruneSettledThread: (input: {
+      readonly threadId: string;
+      readonly worktreePath: string;
+    }) => Effect.Effect<void>;
     readonly notices: Effect.Effect<ReadonlyArray<WorktreeCleanupNotice>>;
     readonly noticeChanges: Stream.Stream<ReadonlyArray<WorktreeCleanupNotice>>;
     readonly prepareForTurn: (input: {
@@ -587,12 +650,135 @@ const make = Effect.gen(function* () {
       const previousNotices = new Map(currentState.notices.map((notice) => [notice.id, notice]));
       const notices: WorktreeCleanupNotice[] = [];
 
+      const markArtifactsPruned = (worktreePath: string) => {
+        const previousEntry = entries.get(worktreePath);
+        entries.set(worktreePath, {
+          worktreePath,
+          artifactsPrunedAt: previousEntry?.artifactsPrunedAt ?? nowIso,
+          worktreeRemovedAt: previousEntry?.worktreeRemovedAt ?? null,
+        });
+      };
+
+      const tryRetireWorktree = (group: WorktreeGroup, managedPath: string) =>
+        Effect.gen(function* () {
+          const localBlocker = yield* localRetirementBlocker(managedPath).pipe(
+            Effect.catchCause((cause) => {
+              notices.push(makeNotice(group, "inspection-failed", nowIso, previousNotices));
+              return Effect.logWarning("worktree cleanup could not inspect local state", {
+                worktreePath: group.path,
+                cause,
+              }).pipe(Effect.as("inspection-failed" as const));
+            }),
+          );
+          if (localBlocker !== null) {
+            if (localBlocker !== "inspection-failed") {
+              notices.push(makeNotice(group, localBlocker, nowIso, previousNotices));
+            }
+            return false;
+          }
+
+          const remote = yield* verifiedRemoteStatus(managedPath).pipe(
+            Effect.catchCause((cause) => {
+              notices.push(makeNotice(group, "inspection-failed", nowIso, previousNotices));
+              return Effect.logWarning("worktree cleanup could not inspect upstream state", {
+                worktreePath: group.path,
+                cause,
+              }).pipe(Effect.as(null));
+            }),
+          );
+          if (!remote) return false;
+          if (!remote.hasUpstream) {
+            notices.push(makeNotice(group, "no-upstream", nowIso, previousNotices));
+            return false;
+          }
+          if (remote.aheadCount > 0) {
+            notices.push(makeNotice(group, "unpushed-commits", nowIso, previousNotices));
+            return false;
+          }
+
+          const removed = yield* gitWorkflow
+            .removeWorktree({ cwd: group.project.workspaceRoot, path: managedPath })
+            .pipe(
+              Effect.as(true),
+              Effect.catchCause((cause) => {
+                notices.push(makeNotice(group, "removal-failed", nowIso, previousNotices));
+                return Effect.logWarning("worktree cleanup could not remove safe worktree", {
+                  worktreePath: group.path,
+                  cause,
+                }).pipe(Effect.as(false));
+              }),
+            );
+          if (!removed) return false;
+          entries.set(group.path, {
+            worktreePath: group.path,
+            artifactsPrunedAt: entries.get(group.path)?.artifactsPrunedAt ?? nowIso,
+            worktreeRemovedAt: nowIso,
+          });
+          yield* Effect.logInfo("worktree cleanup retired inactive worktree", {
+            worktreePath: group.path,
+            lastActivityAt: group.lastActivityAt,
+          });
+          return true;
+        });
+
+      const projectForWorktreePath = (worktreePath: string) => {
+        const resolved = path.resolve(worktreePath);
+        const projects = [...active.projects, ...archived.projects];
+        for (const project of projects) {
+          const prefix = path.resolve(
+            path.join(config.worktreesDir, path.basename(project.workspaceRoot)),
+          );
+          if (resolved === prefix || resolved.startsWith(`${prefix}${path.sep}`)) {
+            return project;
+          }
+        }
+        return null;
+      };
+
+      const listOrphanWorktreePaths = (knownPaths: ReadonlySet<string>) =>
+        Effect.gen(function* () {
+          const root = path.resolve(config.worktreesDir);
+          if (!(yield* fileSystem.exists(root))) return [];
+          const knownResolved = new Set(
+            [...knownPaths].map((candidate) => path.resolve(candidate)),
+          );
+          const repoNames = yield* fileSystem
+            .readDirectory(root, { recursive: false })
+            .pipe(Effect.orElseSucceed(() => []));
+          const orphans: string[] = [];
+          for (const repoName of repoNames) {
+            const repoPath = path.join(root, repoName);
+            const repoInfo = yield* fileSystem
+              .stat(repoPath)
+              .pipe(Effect.orElseSucceed(() => null));
+            if (repoInfo?.type !== "Directory") continue;
+            const branchNames = yield* fileSystem
+              .readDirectory(repoPath, { recursive: false })
+              .pipe(Effect.orElseSucceed(() => []));
+            for (const branchName of branchNames) {
+              const candidate = path.join(repoPath, branchName);
+              const managedPath = yield* managedExistingPath(candidate).pipe(
+                Effect.catchCause(() => Effect.succeed(null)),
+              );
+              if (!managedPath || knownResolved.has(path.resolve(managedPath))) continue;
+              orphans.push(managedPath);
+            }
+          }
+          return orphans;
+        });
+
       for (const group of groups) {
-        const lastUpdatedMs = DateTime.toEpochMillis(DateTime.makeUnsafe(group.lastUpdatedAt));
-        const inactiveMs = Math.max(0, nowMs - lastUpdatedMs);
+        const lastActivityMs = Date.parse(group.lastActivityAt);
+        const inactiveMs = Number.isNaN(lastActivityMs) ? 0 : Math.max(0, nowMs - lastActivityMs);
+        const busy = worktreeIsBusy(group, runningTerminalThreadIds);
         if (
-          inactiveMs < cleanupAfterDays * DAY_MS ||
-          worktreeIsBusy(group, runningTerminalThreadIds)
+          !shouldPruneWorktreeArtifacts({
+            threads: group.threads,
+            lastActivityAt: group.lastActivityAt,
+            nowMs,
+            cleanupAfterDays,
+            busy,
+          })
         ) {
           continue;
         }
@@ -604,79 +790,43 @@ const make = Effect.gen(function* () {
 
         const removedArtifactCount = yield* pruneArtifacts(managedPath);
         if (removedArtifactCount > 0) {
-          const previousEntry = entries.get(group.path);
-          entries.set(group.path, {
-            worktreePath: group.path,
-            artifactsPrunedAt: previousEntry?.artifactsPrunedAt ?? nowIso,
-            worktreeRemovedAt: previousEntry?.worktreeRemovedAt ?? null,
-          });
+          markArtifactsPruned(group.path);
         }
 
         if (inactiveMs < WORKTREE_RETIRE_AFTER_DAYS * DAY_MS) continue;
-
-        const localBlocker = yield* localRetirementBlocker(managedPath).pipe(
-          Effect.catchCause((cause) => {
-            notices.push(makeNotice(group, "inspection-failed", nowIso, previousNotices));
-            return Effect.logWarning("worktree cleanup could not inspect local state", {
-              worktreePath: group.path,
-              cause,
-            }).pipe(Effect.as("inspection-failed" as const));
-          }),
-        );
-        if (localBlocker !== null) {
-          if (localBlocker !== "inspection-failed") {
-            notices.push(makeNotice(group, localBlocker, nowIso, previousNotices));
-          }
-          continue;
-        }
-
-        const remote = yield* verifiedRemoteStatus(managedPath).pipe(
-          Effect.catchCause((cause) => {
-            notices.push(makeNotice(group, "inspection-failed", nowIso, previousNotices));
-            return Effect.logWarning("worktree cleanup could not inspect upstream state", {
-              worktreePath: group.path,
-              cause,
-            }).pipe(Effect.as(null));
-          }),
-        );
-        if (!remote) continue;
-        if (!remote.hasUpstream) {
-          notices.push(makeNotice(group, "no-upstream", nowIso, previousNotices));
-          continue;
-        }
-        if (remote.aheadCount > 0) {
-          notices.push(makeNotice(group, "unpushed-commits", nowIso, previousNotices));
-          continue;
-        }
-
-        const removed = yield* gitWorkflow
-          .removeWorktree({ cwd: group.project.workspaceRoot, path: managedPath })
-          .pipe(
-            Effect.as(true),
-            Effect.catchCause((cause) => {
-              notices.push(makeNotice(group, "removal-failed", nowIso, previousNotices));
-              return Effect.logWarning("worktree cleanup could not remove safe worktree", {
-                worktreePath: group.path,
-                cause,
-              }).pipe(Effect.as(false));
-            }),
-          );
-        if (!removed) continue;
-        entries.set(group.path, {
-          worktreePath: group.path,
-          artifactsPrunedAt: entries.get(group.path)?.artifactsPrunedAt ?? nowIso,
-          worktreeRemovedAt: nowIso,
-        });
-        yield* Effect.logInfo("worktree cleanup retired inactive worktree", {
-          worktreePath: group.path,
-          lastUpdatedAt: group.lastUpdatedAt,
-        });
+        yield* tryRetireWorktree(group, managedPath);
       }
 
-      const knownPaths = new Set(groups.map((group) => group.path));
+      const retainedPaths = new Set(groups.map((group) => group.path));
+      const orphanPaths = yield* listOrphanWorktreePaths(retainedPaths);
+      for (const orphanPath of orphanPaths) {
+        retainedPaths.add(orphanPath);
+        const removedArtifactCount = yield* pruneArtifacts(orphanPath);
+        if (removedArtifactCount > 0) {
+          markArtifactsPruned(orphanPath);
+        }
+        const info = yield* fileSystem.stat(orphanPath).pipe(Effect.orElseSucceed(() => null));
+        const mtime = info?.mtime ?? Option.none();
+        if (Option.isNone(mtime)) continue;
+        const lastActivityAt = mtime.value.toISOString();
+        const inactiveMs = Math.max(0, nowMs - mtime.value.getTime());
+        if (inactiveMs < WORKTREE_RETIRE_AFTER_DAYS * DAY_MS) continue;
+        const project = projectForWorktreePath(orphanPath);
+        if (!project) continue;
+        yield* tryRetireWorktree(
+          {
+            path: orphanPath,
+            project,
+            threads: [],
+            lastActivityAt,
+          },
+          orphanPath,
+        );
+      }
+
       const nextState: CleanupState = {
         version: 1,
-        entries: [...entries.values()].filter((entry) => knownPaths.has(entry.worktreePath)),
+        entries: [...entries.values()].filter((entry) => retainedPaths.has(entry.worktreePath)),
         notices,
       };
       if (!cleanupStatesEqual(nextState, currentState)) {
@@ -688,6 +838,75 @@ const make = Effect.gen(function* () {
   const runSweepSafely = runSweep.pipe(
     Effect.catchCause((cause) => Effect.logWarning("worktree cleanup sweep failed", { cause })),
   );
+
+  const pruneSettledThread: WorktreeCleanup["Service"]["pruneSettledThread"] = (input) =>
+    lock
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const cleanupAfterDays = (yield* settings.getSettings).worktreeCleanupAfterDays;
+          if (cleanupAfterDays === null) return;
+
+          const [active, archived, terminalMetadata, currentState, now] = yield* Effect.all([
+            projections.getShellSnapshot(),
+            projections.getArchivedShellSnapshot(),
+            terminals.listMetadata(),
+            Ref.get(stateRef),
+            DateTime.now,
+          ]);
+          const groups = groupManagedWorktrees({
+            projects: [...active.projects, ...archived.projects],
+            threads: [...active.threads, ...archived.threads],
+          });
+          const group = groups.find((candidate) => candidate.path === input.worktreePath);
+          if (!group) return;
+          const thread = group.threads.find((candidate) => candidate.id === input.threadId);
+          if (thread?.settledOverride !== "settled") return;
+          if (group.threads.some((candidate) => candidate.settledOverride !== "settled")) return;
+
+          const runningTerminalThreadIds = new Set(
+            terminalMetadata
+              .filter((terminal) => terminal.status === "running" || terminal.hasRunningSubprocess)
+              .map((terminal) => terminal.threadId),
+          );
+          if (worktreeIsBusy(group, runningTerminalThreadIds)) return;
+
+          const managedPath = yield* managedExistingPath(group.path).pipe(
+            Effect.catchCause(() => Effect.succeed(null)),
+          );
+          if (!managedPath) return;
+          const removedArtifactCount = yield* pruneArtifacts(managedPath);
+          if (removedArtifactCount === 0) return;
+
+          const nowIso = DateTime.formatIso(now);
+          const previousEntry = currentState.entries.find(
+            (entry) => entry.worktreePath === group.path,
+          );
+          const nextState: CleanupState = {
+            version: 1,
+            entries: [
+              ...currentState.entries.filter((entry) => entry.worktreePath !== group.path),
+              {
+                worktreePath: group.path,
+                artifactsPrunedAt: previousEntry?.artifactsPrunedAt ?? nowIso,
+                worktreeRemovedAt: previousEntry?.worktreeRemovedAt ?? null,
+              },
+            ],
+            notices: currentState.notices,
+          };
+          if (!cleanupStatesEqual(nextState, currentState)) {
+            yield* publishState(nextState);
+          }
+        }),
+      )
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("worktree cleanup could not prune settled worktree", {
+            threadId: input.threadId,
+            worktreePath: input.worktreePath,
+            cause,
+          }),
+        ),
+      );
 
   const prepareForTurn: WorktreeCleanup["Service"]["prepareForTurn"] = (input) =>
     lock.withPermits(1)(
@@ -784,11 +1003,25 @@ const make = Effect.gen(function* () {
     );
 
   const start: WorktreeCleanup["Service"]["start"] = () =>
-    forkParked(runSweepSafely.pipe(Effect.repeat(Schedule.spaced(SWEEP_INTERVAL))));
+    Effect.gen(function* () {
+      yield* forkParked(runSweepSafely.pipe(Effect.repeat(Schedule.spaced(SWEEP_INTERVAL))));
+      const settingsChanges = yield* settings.subscribeChanges;
+      let lastCleanupAfterDays = (yield* settings.getSettings).worktreeCleanupAfterDays;
+      yield* forkParked(
+        Stream.runForEach(settingsChanges, (nextSettings) => {
+          if (nextSettings.worktreeCleanupAfterDays === lastCleanupAfterDays) {
+            return Effect.void;
+          }
+          lastCleanupAfterDays = nextSettings.worktreeCleanupAfterDays;
+          return runSweepSafely;
+        }),
+      );
+    });
 
   return WorktreeCleanup.of({
     start,
     runNow: runSweepSafely,
+    pruneSettledThread,
     notices: Ref.get(stateRef).pipe(Effect.map((state) => state.notices)),
     noticeChanges: Stream.fromPubSub(noticePubSub),
     prepareForTurn,

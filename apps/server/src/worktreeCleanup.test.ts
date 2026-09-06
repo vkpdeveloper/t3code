@@ -27,6 +27,8 @@ import {
   artifactDirectoryNamesForEntries,
   artifactFileNamesForEntries,
   groupManagedWorktrees,
+  shouldPruneWorktreeArtifacts,
+  threadActivityAt,
   WorktreeCleanup,
   layer as worktreeCleanupLayer,
 } from "./worktreeCleanup.ts";
@@ -50,6 +52,11 @@ function thread(input: {
   readonly worktreePath: string | null;
   readonly updatedAt: string;
   readonly branch?: string;
+  readonly createdAt?: string;
+  readonly latestUserMessageAt?: string | null;
+  readonly settledOverride?: OrchestrationThreadShell["settledOverride"];
+  readonly settledAt?: string | null;
+  readonly session?: OrchestrationThreadShell["session"];
 }): OrchestrationThreadShell {
   return {
     id: ThreadId.make(input.id),
@@ -64,20 +71,21 @@ function thread(input: {
     branch: input.branch ?? "feat/storage-cleanup",
     worktreePath: input.worktreePath,
     latestTurn: null,
-    createdAt: "2026-08-01T00:00:00.000Z",
+    createdAt: input.createdAt ?? "2026-08-01T00:00:00.000Z",
     updatedAt: input.updatedAt,
     archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: input.updatedAt,
+    settledOverride: input.settledOverride ?? null,
+    settledAt: input.settledAt ?? null,
+    session: input.session ?? null,
+    latestUserMessageAt:
+      input.latestUserMessageAt === undefined ? input.updatedAt : input.latestUserMessageAt,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
   };
 }
 
-it("uses the newest thread update for a shared worktree", () => {
+it("uses the newest thread activity for a shared worktree", () => {
   const groups = groupManagedWorktrees({
     projects: [project],
     threads: [
@@ -100,8 +108,64 @@ it("uses the newest thread update for a shared worktree", () => {
   });
 
   expect(groups).toHaveLength(1);
-  expect(groups[0]?.lastUpdatedAt).toBe("2026-08-05T00:00:00.000Z");
+  expect(groups[0]?.lastActivityAt).toBe("2026-08-05T00:00:00.000Z");
   expect(groups[0]?.threads).toHaveLength(2);
+});
+
+it("ignores metadata updatedAt when computing activity", () => {
+  expect(
+    threadActivityAt(
+      thread({
+        id: "churned",
+        worktreePath: "/worktrees/shared",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        updatedAt: "2026-08-10T00:00:00.000Z",
+        latestUserMessageAt: "2026-08-02T00:00:00.000Z",
+      }),
+    ),
+  ).toBe("2026-08-02T00:00:00.000Z");
+});
+
+it("prunes settled worktrees immediately and waits on active ones", () => {
+  const settled = thread({
+    id: "settled",
+    worktreePath: "/worktrees/shared",
+    updatedAt: "2026-08-10T00:00:00.000Z",
+    settledOverride: "settled",
+    settledAt: "2026-08-10T00:00:00.000Z",
+  });
+  const active = thread({
+    id: "active",
+    worktreePath: "/worktrees/shared",
+    updatedAt: "2026-08-10T00:00:00.000Z",
+  });
+  expect(
+    shouldPruneWorktreeArtifacts({
+      threads: [settled],
+      lastActivityAt: settled.settledAt ?? settled.updatedAt,
+      nowMs: Date.parse("2026-08-10T00:00:00.000Z"),
+      cleanupAfterDays: 2,
+      busy: false,
+    }),
+  ).toBe(true);
+  expect(
+    shouldPruneWorktreeArtifacts({
+      threads: [active],
+      lastActivityAt: active.updatedAt,
+      nowMs: Date.parse("2026-08-10T00:00:00.000Z"),
+      cleanupAfterDays: 2,
+      busy: false,
+    }),
+  ).toBe(false);
+  expect(
+    shouldPruneWorktreeArtifacts({
+      threads: [settled],
+      lastActivityAt: settled.settledAt ?? settled.updatedAt,
+      nowMs: Date.parse("2026-08-10T00:00:00.000Z"),
+      cleanupAfterDays: 2,
+      busy: true,
+    }),
+  ).toBe(false);
 });
 
 it("matches generated directories only when their ecosystem marker is present", () => {
@@ -511,6 +575,170 @@ it.effect("refreshes a persisted notice branch without resetting its creation ti
           reason: "local-files",
         }),
       ]);
+    }).pipe(Effect.provide(worktreeCleanupLayer.pipe(Layer.provide(dependencies))));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+const gitSuccess = {
+  exitCode: ChildProcessSpawner.ExitCode(0),
+  stdout: "",
+  stderr: "",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+};
+
+it.effect("prunes artifacts for a settled worktree without waiting for inactivity", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-worktree-cleanup-settled-test-",
+    });
+    const worktreePath = path.join(baseDir, "worktrees", "project-1", "feature");
+    const nodeModulesPath = path.join(worktreePath, "node_modules", "pkg", "index.js");
+    yield* fileSystem
+      .makeDirectory(path.dirname(nodeModulesPath), { recursive: true })
+      .pipe(Effect.andThen(fileSystem.writeFileString(nodeModulesPath, "generated")));
+    yield* fileSystem.writeFileString(path.join(worktreePath, "package.json"), "{}");
+
+    const now = yield* DateTime.now;
+    const activeProject = { ...project, workspaceRoot: baseDir };
+    const settledThread = thread({
+      id: "settled-thread",
+      worktreePath,
+      updatedAt: DateTime.formatIso(now),
+      settledOverride: "settled",
+      settledAt: DateTime.formatIso(now),
+      session: {
+        threadId: ThreadId.make("settled-thread"),
+        status: "idle",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: DateTime.formatIso(now),
+      },
+    });
+    const snapshot = {
+      snapshotSequence: 1,
+      projects: [activeProject],
+      threads: [settledThread],
+      updatedAt: settledThread.updatedAt,
+    };
+    const emptySnapshot = { ...snapshot, projects: [], threads: [] };
+    const dependencies = Layer.mergeAll(
+      ServerConfig.layerTest(process.cwd(), baseDir).pipe(Layer.provide(NodeServices.layer)),
+      ServerSettings.layerTest({ worktreeCleanupAfterDays: 2 }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getShellSnapshot: () => Effect.succeed(snapshot),
+        getArchivedShellSnapshot: () => Effect.succeed(emptySnapshot),
+      }),
+      Layer.mock(TerminalManager)({ listMetadata: () => Effect.succeed([]) }),
+      Layer.mock(GitVcsDriver)({ execute: () => Effect.succeed(gitSuccess) }),
+      Layer.mock(GitWorkflowService)({}),
+      Layer.mock(ProjectSetupScriptRunner)({}),
+      NodeServices.layer,
+    );
+
+    yield* Effect.gen(function* () {
+      const cleanup = yield* WorktreeCleanup;
+      yield* cleanup.pruneSettledThread({
+        threadId: settledThread.id,
+        worktreePath,
+      });
+      expect(yield* fileSystem.exists(path.join(worktreePath, "node_modules"))).toBe(false);
+    }).pipe(Effect.provide(worktreeCleanupLayer.pipe(Layer.provide(dependencies))));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("does not prune a recently active unsettled worktree", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-worktree-cleanup-active-test-",
+    });
+    const worktreePath = path.join(baseDir, "worktrees", "project-1", "feature");
+    const nodeModulesPath = path.join(worktreePath, "node_modules", "pkg", "index.js");
+    yield* fileSystem
+      .makeDirectory(path.dirname(nodeModulesPath), { recursive: true })
+      .pipe(Effect.andThen(fileSystem.writeFileString(nodeModulesPath, "generated")));
+    yield* fileSystem.writeFileString(path.join(worktreePath, "package.json"), "{}");
+
+    const activeProject = { ...project, workspaceRoot: baseDir };
+    const activeThread = thread({
+      id: "active-thread",
+      worktreePath,
+      updatedAt: DateTime.formatIso(yield* DateTime.now),
+    });
+    const snapshot = {
+      snapshotSequence: 1,
+      projects: [activeProject],
+      threads: [activeThread],
+      updatedAt: activeThread.updatedAt,
+    };
+    const emptySnapshot = { ...snapshot, projects: [], threads: [] };
+    const dependencies = Layer.mergeAll(
+      ServerConfig.layerTest(process.cwd(), baseDir).pipe(Layer.provide(NodeServices.layer)),
+      ServerSettings.layerTest({ worktreeCleanupAfterDays: 2 }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getShellSnapshot: () => Effect.succeed(snapshot),
+        getArchivedShellSnapshot: () => Effect.succeed(emptySnapshot),
+      }),
+      Layer.mock(TerminalManager)({ listMetadata: () => Effect.succeed([]) }),
+      Layer.mock(GitVcsDriver)({ execute: () => Effect.succeed(gitSuccess) }),
+      Layer.mock(GitWorkflowService)({}),
+      Layer.mock(ProjectSetupScriptRunner)({}),
+      NodeServices.layer,
+    );
+
+    yield* Effect.gen(function* () {
+      const cleanup = yield* WorktreeCleanup;
+      yield* cleanup.runNow;
+      expect(yield* fileSystem.exists(path.join(worktreePath, "node_modules"))).toBe(true);
+    }).pipe(Effect.provide(worktreeCleanupLayer.pipe(Layer.provide(dependencies))));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);
+
+it.effect("prunes artifacts in worktrees that no thread still owns", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-worktree-cleanup-orphan-test-",
+    });
+    const worktreePath = path.join(baseDir, "worktrees", "project-1", "feature");
+    const nodeModulesPath = path.join(worktreePath, "node_modules", "pkg", "index.js");
+    yield* fileSystem
+      .makeDirectory(path.dirname(nodeModulesPath), { recursive: true })
+      .pipe(Effect.andThen(fileSystem.writeFileString(nodeModulesPath, "generated")));
+    yield* fileSystem.writeFileString(path.join(worktreePath, "package.json"), "{}");
+
+    const activeProject = { ...project, workspaceRoot: path.join(baseDir, "project-1") };
+    const snapshot = {
+      snapshotSequence: 1,
+      projects: [activeProject],
+      threads: [],
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    };
+    const dependencies = Layer.mergeAll(
+      ServerConfig.layerTest(process.cwd(), baseDir).pipe(Layer.provide(NodeServices.layer)),
+      ServerSettings.layerTest({ worktreeCleanupAfterDays: 2 }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getShellSnapshot: () => Effect.succeed(snapshot),
+        getArchivedShellSnapshot: () => Effect.succeed(snapshot),
+      }),
+      Layer.mock(TerminalManager)({ listMetadata: () => Effect.succeed([]) }),
+      Layer.mock(GitVcsDriver)({ execute: () => Effect.succeed(gitSuccess) }),
+      Layer.mock(GitWorkflowService)({}),
+      Layer.mock(ProjectSetupScriptRunner)({}),
+      NodeServices.layer,
+    );
+
+    yield* Effect.gen(function* () {
+      const cleanup = yield* WorktreeCleanup;
+      yield* cleanup.runNow;
+      expect(yield* fileSystem.exists(path.join(worktreePath, "node_modules"))).toBe(false);
     }).pipe(Effect.provide(worktreeCleanupLayer.pipe(Layer.provide(dependencies))));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
