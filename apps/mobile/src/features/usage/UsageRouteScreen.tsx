@@ -24,7 +24,8 @@ import { useVibeProxyUsage } from "../../state/vibeProxyUsage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import { VibeProxyUsageSection } from "./VibeProxyUsageSection";
-import { UsageLimitsSection, useRefreshLimits } from "./UsageLimitsSection";
+import { UsageLimitsSection } from "./UsageLimitsPooled";
+import { useRefreshLimits } from "./UsageLimitsSection";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
 
@@ -149,7 +150,11 @@ export function UsageRouteScreen() {
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
 
         {showingLimits ? (
-          <UsageLimitsSection now={limits.now} failedLabels={limits.failedLabels} />
+          <UsageLimitsSection
+            now={limits.now}
+            failedLabels={limits.failedLabels}
+            selectedEnvironmentIds={null}
+          />
         ) : (
           <>
             {/* Period and metric together: neither applies to Limits, and

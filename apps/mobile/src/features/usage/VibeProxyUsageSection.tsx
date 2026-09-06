@@ -5,12 +5,13 @@ import type {
   VibeProxyUsageAccount,
 } from "@t3tools/contracts";
 import {
+  collectVibeProxyPools,
   describeMissingConfiguration,
   formatQuotaPercent,
   formatQuotaReset,
+  formatQuotaResetShort,
   formatSnapshotAge,
   formatSuccessRate,
-  groupVibeProxyAccounts,
   resolveVibeProxyUsageStage,
   vibeProxyAccountName,
   vibeProxyAccountStatus,
@@ -20,9 +21,10 @@ import {
   vibeProxyQuotaSummary,
   vibeProxyRecentActivity,
   vibeProxyRequestHealth,
+  type VibeProxyAccountPool,
   type VibeProxyAccountTone,
-  type VibeProxyQuotaState,
-  type VibeProxyQuotaWindowView,
+  type VibeProxyPoolWindow,
+  type VibeProxyProviderKind,
 } from "@t3tools/shared/vibeProxyUsage";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -34,6 +36,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import type { VibeProxyUsageView } from "../../state/vibeProxyUsage";
 import { SettingsSection } from "../settings/components/SettingsSection";
+import { useProviderColors } from "./usageProviders";
 
 const TONE_TEXT_CLASS: Readonly<Record<VibeProxyAccountTone, string>> = {
   ok: "text-success",
@@ -42,20 +45,23 @@ const TONE_TEXT_CLASS: Readonly<Record<VibeProxyAccountTone, string>> = {
   muted: "text-foreground-muted",
 };
 
-const TONE_DOT_CLASS: Readonly<Record<VibeProxyAccountTone, string>> = {
-  ok: "bg-success",
-  warning: "bg-warning",
-  error: "bg-danger-foreground",
-  muted: "bg-foreground-tertiary",
-};
+function poolBarColor(
+  kind: VibeProxyProviderKind,
+  colors: ReturnType<typeof useProviderColors>,
+): string {
+  if (kind === "codex" || kind === "claude" || kind === "grok") return colors[kind];
+  return colors.codex;
+}
 
-const QUOTA_FILL_CLASS: Readonly<Record<VibeProxyQuotaState, string>> = {
-  ok: "bg-success",
-  low: "bg-warning",
-  critical: "bg-danger-foreground",
-  exhausted: "bg-danger-foreground",
-  unknown: "bg-foreground-tertiary",
-};
+function remainingLabel(remainingPercent: number | null): string {
+  return remainingPercent === null ? "Unknown" : formatQuotaPercent(remainingPercent);
+}
+
+function refillRemaining(resetAt: string | null, nowMs: number): string {
+  const label = formatQuotaReset(resetAt, nowMs);
+  if (label === null || label === "Reset due") return "now";
+  return `in ${label.replace(/^Resets in /u, "")}`;
+}
 
 type SettingsUpdateOutcome = { readonly _tag: "Success" } | { readonly _tag: "Failure" };
 
@@ -224,18 +230,20 @@ function AccountsSection(props: {
   readonly settings: VibeProxySettings;
   readonly usage: VibeProxyUsageView;
 }) {
+  const colors = useProviderColors();
+  // Anchored once per mount: a live clock would repaint the page every render.
+  const [nowMs] = useState(() => Date.now());
   const stage = resolveVibeProxyUsageStage({
     settings: props.settings,
     result: props.usage.result,
     isRefreshing: props.usage.isRefreshing,
     transportError: props.usage.error,
   });
-  const groups = useMemo(
-    () => (stage.kind === "accounts" ? groupVibeProxyAccounts(stage.accounts) : []),
+  const pools = useMemo(
+    () => (stage.kind === "accounts" ? collectVibeProxyPools(stage.accounts) : []),
     [stage],
   );
-  const snapshotAge =
-    stage.kind === "accounts" ? formatSnapshotAge(stage.fetchedAt, Date.now()) : null;
+  const snapshotAge = stage.kind === "accounts" ? formatSnapshotAge(stage.fetchedAt, nowMs) : null;
 
   return (
     <SettingsSection title="Accounts" card>
@@ -279,25 +287,183 @@ function AccountsSection(props: {
               {stage.problem} Showing the last values Vibe-Proxy reported.
             </StateNotice>
           ) : null}
-          {groups.length === 0 ? (
+          {pools.length === 0 ? (
             <StateNotice>Vibe-Proxy reported no accounts.</StateNotice>
           ) : (
-            groups.map((group) => (
-              <View key={group.key} className="border-t border-border-subtle">
-                <View className="flex-row items-center gap-2 px-4 py-3">
-                  <ProviderMark provider={group.provider} />
-                  <Text className="text-sm font-t3-medium text-foreground">{group.label}</Text>
-                  <Text className="text-xs text-foreground-tertiary">{group.accounts.length}</Text>
-                </View>
-                {group.accounts.map((account, index) => (
-                  <AccountRow key={account.id} account={account} divided={index > 0} />
-                ))}
-              </View>
+            pools.map((pool) => (
+              <ProviderPool
+                key={pool.key}
+                pool={pool}
+                color={poolBarColor(pool.kind, colors)}
+                nowMs={nowMs}
+              />
             ))
           )}
         </View>
       ) : null}
     </SettingsSection>
+  );
+}
+
+function ProviderPool(props: {
+  readonly pool: VibeProxyAccountPool;
+  readonly color: string;
+  readonly nowMs: number;
+}) {
+  const accountCount =
+    props.pool.windows.reduce((sum, window) => Math.max(sum, window.members.length), 0) ||
+    props.pool.unpooled.length;
+  return (
+    <View className="gap-3 border-t border-border-subtle px-4 py-4">
+      <View className="flex-row items-center gap-2">
+        <ProviderMark provider={props.pool.provider} />
+        <Text className="text-sm font-t3-medium text-foreground">{props.pool.label}</Text>
+        <Text className="text-xs text-foreground-tertiary">{accountCount}</Text>
+      </View>
+      {props.pool.windows.map((window) => (
+        <PoolWindowCard key={window.id} pool={window} color={props.color} nowMs={props.nowMs} />
+      ))}
+      {props.pool.unpooled.map((account) => (
+        <UnpooledAccount key={account.id} account={account} />
+      ))}
+    </View>
+  );
+}
+
+function PoolWindowCard(props: {
+  readonly pool: VibeProxyPoolWindow;
+  readonly color: string;
+  readonly nowMs: number;
+}) {
+  const nextRefill = props.pool.resets.find((reset) => reset.restoresPercent > 0);
+  return (
+    <View className="gap-3 rounded-[24px] border-continuous bg-card p-4">
+      <View className="gap-1">
+        <Text className="text-sm font-t3-medium text-foreground">{props.pool.label}</Text>
+        <View className="flex-row items-baseline gap-1.5">
+          <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
+            {props.pool.remainingPercent === null ? "—" : `${props.pool.remainingPercent}%`}
+          </Text>
+          <Text className="text-sm text-foreground-muted">left</Text>
+        </View>
+      </View>
+      {nextRefill ? (
+        <Text className="text-xs tabular-nums text-foreground-muted">
+          ↻ +{nextRefill.restoresPercent}%{" "}
+          {refillRemaining(nextRefill.member.window.resetAt, props.nowMs)}
+        </Text>
+      ) : null}
+      <View className="flex-row gap-1">
+        {props.pool.members.map((member, index) => {
+          const remaining = member.window.remainingPercent ?? 0;
+          return (
+            <View
+              key={member.account.id}
+              accessibilityLabel={`Segment ${index + 1}, ${vibeProxyAccountName(member.account)}, ${remainingLabel(member.window.remainingPercent)} left${member.account.selected ? ", in use" : ""}`}
+              className="h-7 min-w-0 flex-1 overflow-hidden rounded-md bg-subtle"
+            >
+              <View
+                className="h-full"
+                style={{ width: `${remaining}%`, backgroundColor: props.color, opacity: 0.35 }}
+              />
+              <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
+                <Text className="text-xs font-t3-medium tabular-nums text-foreground">
+                  {index + 1}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <View>
+        {props.pool.members.map((member, index) => {
+          const status = vibeProxyAccountStatus(member.account);
+          const health = vibeProxyRequestHealth(member.account);
+          const activity = vibeProxyRecentActivity(member.account);
+          const resetsIn = formatQuotaResetShort(member.window.resetAt, props.nowMs);
+          return (
+            <View key={member.account.id} className="min-h-[44px] gap-0.5 py-1.5">
+              <View className="flex-row items-center gap-2">
+                <View className="size-5 items-center justify-center overflow-hidden rounded-md bg-subtle-strong">
+                  <Text className="text-xs font-t3-medium tabular-nums text-foreground">
+                    {index + 1}
+                  </Text>
+                </View>
+                <Text
+                  numberOfLines={1}
+                  className="min-w-0 flex-1 text-sm font-t3-medium text-foreground"
+                >
+                  {vibeProxyAccountName(member.account)}
+                </Text>
+                {member.account.selected ? (
+                  <Text className="shrink-0 text-xs font-t3-medium text-success">In use</Text>
+                ) : null}
+                <Text className="text-sm font-t3-medium tabular-nums text-foreground">
+                  {remainingLabel(member.window.remainingPercent)}
+                </Text>
+                {resetsIn ? (
+                  <Text className="text-xs tabular-nums text-foreground-muted">{resetsIn}</Text>
+                ) : null}
+              </View>
+              <Text className="pl-7 text-xs text-foreground-muted">
+                <Text className={TONE_TEXT_CLASS[status.tone]}>{status.label}</Text>
+                {`  ·  ${formatSuccessRate(health.successRate)}`}
+                {health.total > 0 ? ` of ${health.total.toLocaleString()}` : ""}
+                {health.failed > 0 ? `  ·  ${health.failed.toLocaleString()} failed` : ""}
+              </Text>
+              {activity.buckets.length > 0 ? (
+                <Text className="pl-7 text-xs text-foreground-tertiary">
+                  Recent: {activity.success.toLocaleString()} ok, {activity.failed.toLocaleString()}{" "}
+                  failed
+                </Text>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function UnpooledAccount(props: { readonly account: VibeProxyUsageAccount }) {
+  const status = vibeProxyAccountStatus(props.account);
+  const health = vibeProxyRequestHealth(props.account);
+  const quota = vibeProxyQuotaSummary(props.account);
+  const subtitle = vibeProxyAccountSubtitle(props.account);
+  const plan = props.account.planType?.trim() || props.account.accountType?.trim() || null;
+  const activity = vibeProxyRecentActivity(props.account);
+
+  return (
+    <View className="gap-1 rounded-[24px] border-continuous bg-card p-4">
+      <View className="flex-row items-center gap-2">
+        <Text numberOfLines={1} className="min-w-0 flex-1 text-sm font-t3-medium text-foreground">
+          {vibeProxyAccountName(props.account)}
+        </Text>
+        {props.account.selected ? (
+          <Text className="shrink-0 text-xs font-t3-medium text-success">In use</Text>
+        ) : null}
+        {plan ? <Text className="text-xs text-foreground-muted">{plan}</Text> : null}
+      </View>
+      {subtitle ? (
+        <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+          {subtitle}
+        </Text>
+      ) : null}
+      <Text className="text-xs text-foreground-muted">
+        <Text className={TONE_TEXT_CLASS[status.tone]}>{status.label}</Text>
+        {`  ·  ${formatSuccessRate(health.successRate)}`}
+        {health.total > 0 ? ` of ${health.total.toLocaleString()}` : ""}
+        {health.failed > 0 ? `  ·  ${health.failed.toLocaleString()} failed` : ""}
+      </Text>
+      {activity.buckets.length > 0 ? (
+        <Text className="text-xs text-foreground-tertiary">
+          Recent: {activity.success.toLocaleString()} ok, {activity.failed.toLocaleString()} failed
+        </Text>
+      ) : null}
+      {quota.kind !== "windows" ? (
+        <Text className="text-xs text-foreground-muted">{quota.message}</Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -312,109 +478,6 @@ function ProviderMark(props: { readonly provider: string }) {
       <Text className="text-[8px] font-t3-bold text-foreground-muted">
         {vibeProxyProviderInitials(props.provider)}
       </Text>
-    </View>
-  );
-}
-
-function AccountRow(props: { readonly account: VibeProxyUsageAccount; readonly divided: boolean }) {
-  const status = vibeProxyAccountStatus(props.account);
-  const health = vibeProxyRequestHealth(props.account);
-  const activity = vibeProxyRecentActivity(props.account);
-  const quota = vibeProxyQuotaSummary(props.account);
-  const subtitle = vibeProxyAccountSubtitle(props.account);
-  const plan = props.account.planType?.trim() || props.account.accountType?.trim() || null;
-
-  return (
-    <View
-      className={
-        props.divided ? "gap-3 border-t border-border-subtle px-4 py-4" : "gap-3 px-4 py-4"
-      }
-    >
-      <View className="gap-1">
-        <View className="flex-row items-center gap-2">
-          <View className={`size-1.5 rounded-full ${TONE_DOT_CLASS[status.tone]}`} />
-          <Text
-            className="min-w-0 flex-1 text-base font-t3-medium text-foreground"
-            numberOfLines={1}
-          >
-            {vibeProxyAccountName(props.account)}
-          </Text>
-          {props.account.selected ? (
-            <Text className="shrink-0 text-xs font-t3-medium text-success">In use</Text>
-          ) : null}
-          {plan ? <Text className="text-xs text-foreground-muted">{plan}</Text> : null}
-        </View>
-        {subtitle ? (
-          <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : null}
-        <Text className="text-xs text-foreground-muted">
-          <Text className={TONE_TEXT_CLASS[status.tone]}>{status.label}</Text>
-          {`  ·  ${formatSuccessRate(health.successRate)}`}
-          {health.total > 0 ? ` of ${health.total.toLocaleString()}` : ""}
-          {health.failed > 0 ? `  ·  ${health.failed.toLocaleString()} failed` : ""}
-        </Text>
-        {status.detail ? (
-          <Text className="text-xs text-foreground-tertiary">{status.detail}</Text>
-        ) : null}
-        {activity.buckets.length > 0 ? (
-          <Text className="text-xs text-foreground-tertiary">
-            Recent: {activity.success.toLocaleString()} ok, {activity.failed.toLocaleString()}{" "}
-            failed
-          </Text>
-        ) : null}
-      </View>
-
-      {quota.kind === "windows" ? (
-        <View className="gap-3">
-          {quota.windows.map((window) => (
-            <QuotaWindow key={window.id} window={window} />
-          ))}
-        </View>
-      ) : (
-        <Text className="text-xs text-foreground-muted">{quota.message}</Text>
-      )}
-    </View>
-  );
-}
-
-function QuotaWindow(props: { readonly window: VibeProxyQuotaWindowView }) {
-  const { window } = props;
-  const reset = formatQuotaReset(window.resetAt, Date.now());
-  const width = `${Math.round((window.remainingFraction ?? 0) * 1000) / 10}%` as `${number}%`;
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${window.label} remaining`}
-      accessibilityValue={
-        window.remainingPercent === null
-          ? { text: "Unknown" }
-          : { min: 0, max: 100, now: Math.round(window.remainingPercent) }
-      }
-      className="gap-1"
-    >
-      <View className="flex-row items-center justify-between gap-3">
-        <Text className="min-w-0 flex-1 text-xs font-t3-medium text-foreground" numberOfLines={1}>
-          {window.label}
-        </Text>
-        <Text className="text-xs tabular-nums text-foreground-muted">
-          {window.remainingPercent === null
-            ? "Unknown"
-            : formatQuotaPercent(window.remainingPercent)}
-        </Text>
-      </View>
-      <View className="h-1.5 overflow-hidden rounded-full bg-subtle-strong">
-        <View
-          className={`h-full rounded-full ${QUOTA_FILL_CLASS[window.state]}`}
-          style={{ width }}
-        />
-      </View>
-      {reset || window.routing ? (
-        <Text className="text-xs text-foreground-tertiary">
-          {[reset, window.routing ? "Routing" : null].filter(Boolean).join("  ·  ")}
-        </Text>
-      ) : null}
     </View>
   );
 }

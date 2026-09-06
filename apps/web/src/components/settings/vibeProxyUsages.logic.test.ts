@@ -6,9 +6,11 @@ import type {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collectVibeProxyPools,
   describeMissingConfiguration,
   formatQuotaPercent,
   formatQuotaReset,
+  formatQuotaResetShort,
   formatSnapshotAge,
   formatSuccessRate,
   groupVibeProxyAccounts,
@@ -56,6 +58,20 @@ function quotaWindow(overrides: Partial<VibeProxyQuotaWindow> = {}): VibeProxyQu
     hardExhausted: false,
     routing: false,
     ...overrides,
+  };
+}
+
+function quotaCapacity(
+  windows: readonly VibeProxyQuotaWindow[],
+): NonNullable<VibeProxyUsageAccount["quotaCapacity"]> {
+  return {
+    provider: "codex",
+    supported: true,
+    fetchedAt: null,
+    staleAt: null,
+    lastAttemptAt: null,
+    lastError: null,
+    windows,
   };
 }
 
@@ -283,6 +299,64 @@ describe("vibeProxyQuotaSummary", () => {
   });
 });
 
+describe("collectVibeProxyPools", () => {
+  it("pools matching windows across accounts of the same provider", () => {
+    const later = "2026-08-19T18:00:00Z";
+    const sooner = "2026-08-19T14:00:00Z";
+    const pools = collectVibeProxyPools([
+      account({
+        id: "a",
+        provider: "codex",
+        label: "Work",
+        quotaCapacity: quotaCapacity([
+          quotaWindow({ usedPercent: 40, remainingPercent: 60, resetAt: later }),
+          quotaWindow({ id: "7d", label: "Weekly", usedPercent: 10, remainingPercent: 90 }),
+        ]),
+      }),
+      account({
+        id: "b",
+        provider: "codex",
+        label: "Home",
+        selected: true,
+        quotaCapacity: quotaCapacity([
+          quotaWindow({ usedPercent: 20, remainingPercent: 80, resetAt: sooner }),
+        ]),
+      }),
+      account({ id: "c", provider: "claude", label: "Claude" }),
+    ]);
+
+    expect(pools.map((pool) => pool.label)).toEqual(["Codex", "Claude"]);
+    expect(pools[0]!.windows.map((window) => window.id)).toEqual(["5h", "7d"]);
+    expect(pools[0]!.windows[0]!.remainingPercent).toBe(70);
+    expect(pools[0]!.windows[0]!.members.map((member) => member.account.id)).toEqual(["b", "a"]);
+    expect(pools[0]!.windows[0]!.resets[0]).toMatchObject({
+      at: Date.parse(sooner),
+      restoresPercent: 10,
+    });
+    expect(pools[0]!.windows[1]!.members).toHaveLength(1);
+    expect(pools[1]!.windows).toEqual([]);
+    expect(pools[1]!.unpooled.map((entry) => entry.id)).toEqual(["c"]);
+  });
+
+  it("treats unknown remaining as absent from the pool average", () => {
+    const pools = collectVibeProxyPools([
+      account({
+        id: "a",
+        provider: "codex",
+        quotaCapacity: quotaCapacity([quotaWindow({ remainingPercent: 50, usedPercent: 50 })]),
+      }),
+      account({
+        id: "b",
+        provider: "codex",
+        quotaCapacity: quotaCapacity([quotaWindow({ known: false })]),
+      }),
+    ]);
+
+    expect(pools[0]!.windows[0]!.remainingPercent).toBe(50);
+    expect(pools[0]!.windows[0]!.members[1]!.window.state).toBe("unknown");
+  });
+});
+
 describe("formatting", () => {
   it("rounds quota percentages to whole numbers", () => {
     expect(formatQuotaPercent(82.4)).toBe("82%");
@@ -303,6 +377,8 @@ describe("formatting", () => {
     expect(formatQuotaReset("not-a-date", nowMs)).toBe(null);
     expect(formatQuotaReset("2026-08-19T11:00:00Z", nowMs)).toBe("Reset due");
     expect(formatQuotaReset("2026-08-19T12:00:30Z", nowMs)).toBe("Resets in under a minute");
+    expect(formatQuotaResetShort("2026-08-19T14:00:00Z", nowMs)).toBe("↻ 2h");
+    expect(formatQuotaResetShort("2026-08-19T11:00:00Z", nowMs)).toBe("↻ now");
     expect(formatQuotaReset("2026-08-19T12:45:00Z", nowMs)).toBe("Resets in 45m");
     expect(formatQuotaReset("2026-08-19T14:30:00Z", nowMs)).toBe("Resets in 2h 30m");
     expect(formatQuotaReset("2026-08-19T15:00:00Z", nowMs)).toBe("Resets in 3h");

@@ -58,9 +58,11 @@ when you reopen the conversation or connect from another device.
 
 ## Track subscription limits
 
-**Usage → Limits** shows quota use and reset times for Codex and Claude subscriptions. It also
-compares quota consumed with time elapsed in each window, so you can judge your pace before the
-next reset.
+**Usage → Limits** pools every subscription account it can see per provider, so with several Codex
+or Claude logins the page answers "can I keep going" before "on which account". Each window is a
+bar of equal-width segments, one per account, filled by quota still open. Who resets next sits at
+the left edge. Open a segment for the remaining share, reset time, and how much of the pool that
+reset hands back.
 
 If a window looks stale, refresh Limits to re-check every provider and hub.
 
@@ -83,6 +85,6 @@ integration, enter the server's base URL, and save its management key. The conne
 stores the key and never returns it to the client.
 
 The page refreshes account limits whenever you open it. The last successful result remains visible
-while a refresh runs or when Vibe-Proxy is temporarily unreachable. Each account shows its provider,
-status, quota windows, reset times, and recent request health when available. The account selected
-for routing is marked **In use**.
+while a refresh runs or when Vibe-Proxy is temporarily unreachable. Accounts for the same provider
+share one remaining-quota bar per window. Open a segment for that account's status, reset time, and
+recent request health. The account selected for routing is marked **In use**.
