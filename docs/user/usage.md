@@ -83,6 +83,6 @@ integration, enter the server's base URL, and save its management key. The conne
 stores the key and never returns it to the client.
 
 The page refreshes account limits whenever you open it. The last successful result remains visible
-while a refresh runs or when Vibe-Proxy is temporarily unreachable. Each account shows its provider,
-status, quota windows, reset times, and recent request health when available. The account selected
-for routing is marked **In use**.
+while a refresh runs or when Vibe-Proxy is temporarily unreachable. Accounts for the same provider
+share one remaining-quota bar per window. Open a segment for that account's status, reset time, and
+recent request health. The account selected for routing is marked **In use**.

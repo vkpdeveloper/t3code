@@ -347,6 +347,125 @@ export function vibeProxyQuotaSummary(account: VibeProxyUsageAccount): VibeProxy
   return { kind: "windows", windows: capacity.windows.map(vibeProxyQuotaWindowView) };
 }
 
+export interface VibeProxyPoolMember {
+  readonly account: VibeProxyUsageAccount;
+  readonly window: VibeProxyQuotaWindowView;
+}
+
+export interface VibeProxyPoolReset {
+  readonly member: VibeProxyPoolMember;
+  readonly at: number;
+  readonly restoresPercent: number;
+}
+
+export interface VibeProxyPoolWindow {
+  readonly id: string;
+  readonly label: string;
+  readonly members: readonly VibeProxyPoolMember[];
+  /** Mean remaining across known members, or null when every member is unknown. */
+  readonly remainingPercent: number | null;
+  readonly resets: readonly VibeProxyPoolReset[];
+}
+
+export interface VibeProxyAccountPool {
+  readonly key: string;
+  readonly provider: string;
+  readonly kind: VibeProxyProviderKind;
+  readonly label: string;
+  readonly windows: readonly VibeProxyPoolWindow[];
+  /** Accounts in this provider group with no drawable quota windows. */
+  readonly unpooled: readonly VibeProxyUsageAccount[];
+}
+
+function resetMillis(resetAt: string | null): number | null {
+  if (resetAt === null) return null;
+  const at = Date.parse(resetAt);
+  return Number.isNaN(at) ? null : at;
+}
+
+/**
+ * Accounts of the same provider pooled into one remaining-quota bar per
+ * window. Equal widths are honest: every credential contributes the same
+ * share of the pool, whatever its plan. Members are ordered by who resets
+ * next so the left edge is the next refill.
+ */
+export function collectVibeProxyPools(
+  accounts: readonly VibeProxyUsageAccount[],
+): readonly VibeProxyAccountPool[] {
+  return groupVibeProxyAccounts(accounts).map((group) => {
+    const byWindow = new Map<string, VibeProxyPoolMember[]>();
+    const windowOrder: string[] = [];
+    const unpooled: VibeProxyUsageAccount[] = [];
+
+    for (const account of group.accounts) {
+      const quota = vibeProxyQuotaSummary(account);
+      if (quota.kind !== "windows") {
+        unpooled.push(account);
+        continue;
+      }
+      for (const window of quota.windows) {
+        const key = window.id;
+        const existing = byWindow.get(key);
+        if (existing) existing.push({ account, window });
+        else {
+          byWindow.set(key, [{ account, window }]);
+          windowOrder.push(key);
+        }
+      }
+    }
+
+    const windows = windowOrder.map((key) => {
+      const unordered = byWindow.get(key)!;
+      const members = [...unordered].sort(
+        (left, right) =>
+          (resetMillis(left.window.resetAt) ?? Number.POSITIVE_INFINITY) -
+          (resetMillis(right.window.resetAt) ?? Number.POSITIVE_INFINITY),
+      );
+      const knownRemaining = members.flatMap((member) =>
+        member.window.remainingPercent === null ? [] : [member.window.remainingPercent],
+      );
+      const remainingPercent =
+        knownRemaining.length === 0
+          ? null
+          : Math.round(
+              knownRemaining.reduce((sum, value) => sum + value, 0) / knownRemaining.length,
+            );
+      const resets = members
+        .flatMap((member) => {
+          const at = resetMillis(member.window.resetAt);
+          const used = member.window.usedPercent;
+          return at === null
+            ? []
+            : [
+                {
+                  member,
+                  at,
+                  restoresPercent: Math.round((used ?? 0) / members.length),
+                },
+              ];
+        })
+        .sort((left, right) => left.at - right.at);
+
+      return {
+        id: members[0]!.window.id,
+        label: members[0]!.window.label,
+        members,
+        remainingPercent,
+        resets,
+      };
+    });
+
+    return {
+      key: group.key,
+      provider: group.provider,
+      kind: group.kind,
+      label: group.label,
+      windows,
+      unpooled,
+    };
+  });
+}
+
 /** Whole percent with no trailing zeros, e.g. `82%`. */
 export function formatQuotaPercent(value: number): string {
   return `${Math.round(clampPercent(value))}%`;
@@ -387,6 +506,14 @@ export function formatQuotaReset(resetAt: string | null, nowMs: number): string 
   const days = Math.floor(hours / 24);
   const remainderHours = hours % 24;
   return remainderHours === 0 ? `Resets in ${days}d` : `Resets in ${days}d ${remainderHours}h`;
+}
+
+/** `↻ 2h`, or null when there is no parseable reset. */
+export function formatQuotaResetShort(resetAt: string | null, nowMs: number): string | null {
+  const label = formatQuotaReset(resetAt, nowMs);
+  if (label === null) return null;
+  if (label === "Reset due") return "↻ now";
+  return label.replace(/^Resets in /u, "↻ ");
 }
 
 /** "Updated 4m ago" line under the accounts header. */
