@@ -1,4 +1,9 @@
 import {
+  AutomationId,
+  EventId,
+  TurnId,
+  CheckpointRef,
+  type OrchestrationEvent,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ProviderInstanceId,
@@ -149,6 +154,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
   const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
   const mergedPullRequests = yield* PubSub.unbounded<PullRequestMergeEvent>();
+  const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
   const commands = yield* Ref.make<ReadonlyArray<AutoSettleCommand>>([]);
   const branchCalls = yield* Ref.make<
     ReadonlyArray<{ readonly cwd: string; readonly branch: string }>
@@ -236,6 +242,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       readEvents: () => Stream.empty,
       dispatch,
       streamDomainEvents: Stream.empty,
+      subscribeDomainEvents: PubSub.subscribe(domainEvents).pipe(
+        Effect.map((subscription) => Stream.fromSubscription(subscription)),
+      ),
       latestSequence: Effect.succeed(0),
     }),
     Layer.succeed(ServerSettingsService, serverSettings),
@@ -257,6 +266,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     summaryRecovery,
     invalidatedCwds,
     updateSettings,
+    publishEvent: (event: OrchestrationEvent) => PubSub.publish(domainEvents, event),
     publishMerge: PubSub.publish(mergedPullRequests, {
       projectId: PROJECT_ID,
       repository: "owner/repository",
@@ -856,3 +866,77 @@ describe("ThreadSettlementReactor", () => {
     ),
   );
 });
+
+it.effect(
+  "settles a completed automation on its completion event without querying source control",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const thread = makeThread("automation", {
+          automationId: AutomationId.make("automation-1"),
+          branch: "main",
+          latestUserMessageAt: NOW,
+          latestTurn: {
+            turnId: TurnId.make("automation-turn"),
+            state: "running",
+            requestedAt: NOW,
+            startedAt: NOW,
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread]),
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: null,
+            sidebarAutoSettleOnMerge: false,
+          },
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* startHarness(reactor, fixture.activation, fixture.snapshotReads);
+          assert.deepStrictEqual(yield* Ref.get(fixture.commands), []);
+          yield* Ref.set(
+            fixture.snapshots,
+            makeSnapshot([
+              {
+                ...thread,
+                latestTurn: { ...thread.latestTurn!, state: "completed", completedAt: NOW },
+              },
+            ]),
+          );
+          yield* fixture.publishEvent({
+            sequence: 2,
+            eventId: EventId.make("automation-completed"),
+            type: "thread.turn-diff-completed",
+            aggregateKind: "thread",
+            aggregateId: thread.id,
+            occurredAt: NOW,
+            commandId: null,
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            payload: {
+              threadId: thread.id,
+              turnId: thread.latestTurn!.turnId,
+              checkpointTurnCount: 1,
+              checkpointRef: CheckpointRef.make("refs/t3/checkpoint"),
+              status: "ready",
+              files: [],
+              assistantMessageId: null,
+              completedAt: NOW,
+            },
+          });
+          yield* Queue.take(fixture.snapshotReads);
+          yield* reactor.drain;
+          const commands = yield* Ref.get(fixture.commands);
+          assert.strictEqual(commands.length, 1);
+          assert.strictEqual(commands[0]?.threadId, thread.id);
+          assert.strictEqual(commands[0]?.settledAt, NOW);
+          assert.deepStrictEqual(yield* Ref.get(fixture.branchCalls), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+);

@@ -28,3 +28,32 @@ describe("nextAutomationRunAt", () => {
     expect(next.toISOString()).toBe("2026-03-09T06:30:00.000Z");
   });
 });
+
+describe("advanced cron schedules", () => {
+  it.each([
+    ["*/15 * * * *", "Asia/Kolkata", "2026-09-03T10:44:30Z", "2026-09-03T10:45:00.000Z"],
+    ["0 9 * * 1-5", "Asia/Kolkata", "2026-09-04T10:00:00Z", "2026-09-07T03:30:00.000Z"],
+    ["0 9 1 * *", "UTC", "2026-09-03T10:00:00Z", "2026-10-01T09:00:00.000Z"],
+    ["0 9 * * *", "America/New_York", "2026-03-07T14:00:00Z", "2026-03-08T13:00:00.000Z"],
+    ["0 9 * * *", "America/New_York", "2026-10-31T13:00:00Z", "2026-11-01T14:00:00.000Z"],
+  ])(
+    "resolves %s in %s strictly after the supplied instant",
+    (expression, timeZone, after, expected) => {
+      expect(
+        nextAutomationRunAt({ kind: "cron", expression, timeZone }, new Date(after)).toISOString(),
+      ).toBe(expected);
+    },
+  );
+
+  it.each(["nonsense", "61 * * * *", "0 0 31 2 *"])(
+    "rejects invalid or impossible cron %s",
+    (expression) => {
+      expect(() =>
+        nextAutomationRunAt(
+          { kind: "cron", expression, timeZone: "UTC" },
+          new Date("2026-09-01T00:00:00Z"),
+        ),
+      ).toThrow();
+    },
+  );
+});

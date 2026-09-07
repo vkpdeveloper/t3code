@@ -19,6 +19,8 @@ import { AutomationRunHistory } from "./AutomationRunHistory";
 
 function formatSchedule(automation: Automation): string {
   switch (automation.schedule.kind) {
+    case "cron":
+      return `${automation.schedule.expression} (${automation.schedule.timeZone})`;
     case "hourly":
       return `Every hour at :${String(automation.schedule.minute).padStart(2, "0")}`;
     case "daily":

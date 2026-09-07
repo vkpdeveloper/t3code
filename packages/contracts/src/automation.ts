@@ -1,3 +1,5 @@
+import * as Cron from "effect/Cron";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 import {
@@ -27,7 +29,20 @@ const AutomationTimeZone = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 const AutomationLocalTime = Schema.String.check(Schema.isPattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/));
 const AutomationMinute = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 59 }));
 
+export const AutomationCronExpression = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(256),
+  Schema.makeFilter(
+    (value) => value.split(/\s+/).length === 5 && Result.isSuccess(Cron.parse(value)),
+    { message: "Enter a valid five-field cron expression (minute hour day month weekday)." },
+  ),
+);
+
 export const AutomationSchedule = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("cron"),
+    expression: AutomationCronExpression,
+    timeZone: AutomationTimeZone,
+  }),
   Schema.Struct({
     kind: Schema.Literal("hourly"),
     minute: AutomationMinute,

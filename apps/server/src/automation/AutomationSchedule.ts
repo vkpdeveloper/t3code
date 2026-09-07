@@ -1,4 +1,5 @@
 // @effect-diagnostics globalDate:off -- Intl time-zone arithmetic needs native Date for DST-safe local calendar conversion.
+import * as Cron from "effect/Cron";
 import type { AutomationSchedule, AutomationWeekday } from "@t3tools/contracts";
 
 const WEEKDAYS: ReadonlyArray<AutomationWeekday> = [
@@ -87,6 +88,10 @@ function parseTime(value: string): readonly [number, number] {
 export function nextAutomationRunAt(schedule: AutomationSchedule, after: Date): Date {
   // This also validates the IANA time zone before any scheduler state is persisted.
   zonedParts(after, schedule.timeZone);
+
+  if (schedule.kind === "cron") {
+    return Cron.next(Cron.parseUnsafe(schedule.expression, schedule.timeZone), after);
+  }
 
   if (schedule.kind === "hourly") {
     const firstMinute = Math.floor(after.getTime() / 60_000) * 60_000 + 60_000;

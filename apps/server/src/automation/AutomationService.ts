@@ -336,7 +336,8 @@ export const layer = Layer.effect(
         yield* validateProject(input.projectId);
         const id = AutomationId.make(yield* uuid);
         const createdAt = yield* nowIso;
-        const nextRunAt = input.enabled ? yield* writeNextRun(input.schedule, createdAt) : null;
+        const scheduledAt = yield* writeNextRun(input.schedule, createdAt);
+        const nextRunAt = input.enabled ? scheduledAt : null;
         yield* sql`
           INSERT INTO automations (
             automation_id, name, prompt, project_id, schedule_json, model_selection_json,
@@ -355,7 +356,8 @@ export const layer = Layer.effect(
         yield* getOne(input.id);
         yield* validateProject(input.projectId);
         const updatedAt = yield* nowIso;
-        const nextRunAt = input.enabled ? yield* writeNextRun(input.schedule, updatedAt) : null;
+        const scheduledAt = yield* writeNextRun(input.schedule, updatedAt);
+        const nextRunAt = input.enabled ? scheduledAt : null;
         yield* sql`
           UPDATE automations SET
             name = ${input.name}, prompt = ${input.prompt}, project_id = ${input.projectId},

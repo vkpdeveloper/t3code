@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  AutomationId,
   ProviderInstanceId,
   ThreadId,
   ProjectId,
@@ -192,5 +193,46 @@ describe("resolveAutoSettlementAt", () => {
         }),
       ),
     ).toBe(true);
+  });
+});
+
+describe("automation settlement", () => {
+  const completed = makeThread({
+    automationId: AutomationId.make("automation-1"),
+    latestUserMessageAt: NOW,
+    latestTurn: {
+      turnId: TurnId.make("automation-turn"),
+      state: "completed",
+      requestedAt: NOW,
+      startedAt: NOW,
+      completedAt: NOW,
+      assistantMessageId: null,
+    },
+  });
+
+  it("settles successful runs immediately even when inactivity and merge settlement are disabled", () => {
+    expect(
+      resolveAutoSettlementAt({
+        thread: completed,
+        pullRequest: null,
+        now: NOW,
+        autoSettleAfterDays: null,
+        autoSettleOnMerge: false,
+      }),
+    ).toBe(NOW);
+    expect(decide({ ...completed, automationId: undefined }, null, { days: null })).toBe(false);
+  });
+
+  it.each<Partial<OrchestrationThreadShell>>([
+    { hasPendingApprovals: true },
+    { hasPendingUserInput: true },
+    { hasActionableProposedPlan: true },
+    { settledOverride: "active" },
+    { archivedAt: NOW },
+    { latestTurn: null },
+    { latestTurn: { ...completed.latestTurn!, state: "error" } },
+    { latestTurn: { ...completed.latestTurn!, state: "interrupted" } },
+  ])("keeps protected and unsuccessful automation runs active: %j", (overrides) => {
+    expect(decide({ ...completed, ...overrides })).toBe(false);
   });
 });

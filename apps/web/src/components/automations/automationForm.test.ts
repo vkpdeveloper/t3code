@@ -50,6 +50,7 @@ describe("automation editor", () => {
   });
 
   it.each<AutomationSchedule>([
+    { kind: "cron", expression: "*/15 9-17 * * 1-5", timeZone: "Asia/Kolkata" },
     { kind: "hourly", minute: 47, timeZone: "America/New_York" },
     { kind: "daily", time: "23:15", timeZone: "Europe/London" },
     { kind: "weekdays", time: "08:30", timeZone: "Asia/Kolkata" },
@@ -91,4 +92,40 @@ describe("automation editor", () => {
     });
     expect(automationInputFromForm(form)).toBeNull();
   });
+});
+
+it("preserves reasoning and speed when saving an advanced schedule", () => {
+  const modelSelection = {
+    ...automation.modelSelection,
+    options: [
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "priority" },
+    ],
+  };
+  expect(
+    automationInputFromForm({
+      ...automationFormFromAutomation({ ...automation, modelSelection }),
+      scheduleKind: "cron",
+      cron: " 0 9 * * 1-5 ",
+    }),
+  ).toMatchObject({ modelSelection, schedule: { kind: "cron", expression: "0 9 * * 1-5" } });
+});
+
+it.each(["", "61 * * * *", "0 0 9 * * *", "not cron"])(
+  "rejects malformed or second-level cron %s",
+  (cron) => {
+    expect(
+      automationInputFromForm({
+        ...automationFormFromAutomation(automation),
+        scheduleKind: "cron",
+        cron,
+      }),
+    ).toBeNull();
+  },
+);
+
+it("uses Asia/Kolkata for the client's legacy Calcutta time zone name", () => {
+  expect(defaultAutomationForm(automation.modelSelection, "Asia/Calcutta").timeZone).toBe(
+    "Asia/Kolkata",
+  );
 });

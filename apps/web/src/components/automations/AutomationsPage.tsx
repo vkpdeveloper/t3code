@@ -1,9 +1,12 @@
+import * as Schema from "effect/Schema";
+import { createModelSelection } from "@t3tools/shared/model";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
+  AutomationCronExpression,
   DEFAULT_SERVER_SETTINGS,
   type Automation,
   type AutomationSchedule,
@@ -49,6 +52,8 @@ import {
   defaultAutomationForm,
   type AutomationFormState,
 } from "./automationForm";
+import { TraitsPicker, shouldRenderTraitsControls } from "../chat/TraitsPicker";
+import { AutomationTimeZonePicker } from "./AutomationTimeZonePicker";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import {
@@ -72,6 +77,8 @@ import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadc
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 
+const isCronExpression = Schema.is(AutomationCronExpression);
+
 function messageFromUnknown(value: unknown): string {
   return value instanceof Error && value.message.trim() !== ""
     ? value.message
@@ -80,6 +87,8 @@ function messageFromUnknown(value: unknown): string {
 
 function scheduleLabel(schedule: AutomationSchedule): string {
   switch (schedule.kind) {
+    case "cron":
+      return `${schedule.expression} (${schedule.timeZone})`;
     case "hourly":
       return `Every hour at :${String(schedule.minute).padStart(2, "0")}`;
     case "daily":
@@ -103,6 +112,8 @@ function dateLabel(value: string | null): string {
 
 function scheduleKindLabel(kind: AutomationSchedule["kind"]): string {
   switch (kind) {
+    case "cron":
+      return "Advanced";
     case "hourly":
       return "Every hour";
     case "daily":
@@ -196,6 +207,22 @@ export function AutomationsPage() {
     }
     return options;
   }, [form.modelSelection, providerInstanceEntries, settings]);
+  const invalidCron = form.scheduleKind === "cron" && !isCronExpression(form.cron.trim());
+  const selectedProvider = providerInstanceEntries.find(
+    (entry) => entry.instanceId === form.modelSelection?.instanceId,
+  );
+  const traitsInput =
+    selectedProvider && form.modelSelection
+      ? {
+          provider: selectedProvider.driverKind,
+          instanceId: selectedProvider.instanceId,
+          models: selectedProvider.models,
+          model: form.modelSelection.model,
+          modelOptions: form.modelSelection.options,
+          prompt: form.prompt,
+          planModeEnabled: settings.planModeEnabled,
+        }
+      : null;
   const openEditor = (automation: Automation | null) => {
     if (environmentId === null) return;
     setEditor({ environmentId, automation });
@@ -531,7 +558,7 @@ export function AutomationsPage() {
           }
         }}
       >
-        <DialogPopup className="w-full sm:max-w-xl">
+        <DialogPopup className="w-full sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{editingAutomation ? "Edit automation" : "New automation"}</DialogTitle>
           </DialogHeader>
@@ -541,26 +568,16 @@ export function AutomationsPage() {
                 {error}
               </div>
             ) : null}
-            <div className="grid gap-1.5">
-              <Label htmlFor="automation-name">Name</Label>
-              <Input
-                id="automation-name"
-                placeholder="Daily project check"
-                value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="automation-prompt">Instructions</Label>
-              <Textarea
-                id="automation-prompt"
-                placeholder="Review the project and summarize anything that needs attention."
-                rows={5}
-                value={form.prompt}
-                onChange={(event) => setForm({ ...form, prompt: event.target.value })}
-              />
-            </div>
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-1.5">
+                <Label htmlFor="automation-name">Name</Label>
+                <Input
+                  id="automation-name"
+                  placeholder="Daily project check"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </div>
               <div className="grid gap-1.5">
                 <Label>Project</Label>
                 <AutomationProjectPicker
@@ -579,35 +596,16 @@ export function AutomationsPage() {
                   }
                 />
               </div>
-              <div className="grid gap-1.5">
-                <Label>Model</Label>
-                {form.modelSelection ? (
-                  <ProviderModelPicker
-                    activeInstanceId={form.modelSelection.instanceId}
-                    instanceEntries={providerInstanceEntries}
-                    lockedProvider={null}
-                    model={form.modelSelection.model}
-                    modelOptionsByInstance={modelOptionsByInstance}
-                    triggerAriaLabel="Choose model"
-                    triggerClassName="h-10 w-full max-w-none px-3"
-                    triggerVariant="outline"
-                    onInstanceModelChange={(instanceId, model) =>
-                      setForm({
-                        ...form,
-                        modelSelection:
-                          form.modelSelection?.instanceId === instanceId &&
-                          form.modelSelection.model === model
-                            ? form.modelSelection
-                            : { instanceId, model },
-                      })
-                    }
-                  />
-                ) : (
-                  <Button className="h-10 w-full justify-start" disabled variant="outline">
-                    No model available
-                  </Button>
-                )}
-              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="automation-prompt">Instructions</Label>
+              <Textarea
+                id="automation-prompt"
+                placeholder="Review the project and summarize anything that needs attention."
+                rows={5}
+                value={form.prompt}
+                onChange={(event) => setForm({ ...form, prompt: event.target.value })}
+              />
             </div>
             {addingProject ? (
               <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
@@ -654,6 +652,90 @@ export function AutomationsPage() {
                 </div>
               </div>
             ) : null}
+            <div className="grid items-end gap-3 sm:grid-cols-2 md:grid-cols-[1fr_1.3fr_1fr_1.5fr]">
+              <div className="grid gap-1.5">
+                <Label>Permissions</Label>
+                <Select
+                  value={form.runtimeMode}
+                  onValueChange={(runtimeMode) =>
+                    setForm({ ...form, runtimeMode: runtimeMode as RuntimeMode })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue>{runtimeModeLabel(form.runtimeMode)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup>
+                    <SelectItem value="auto">Automatic</SelectItem>
+                    <SelectItem value="full-access">Full access</SelectItem>
+                    <SelectItem value="auto-accept-edits">Auto-accept edits</SelectItem>
+                    <SelectItem value="approval-required">Ask for approval</SelectItem>
+                  </SelectPopup>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Model</Label>
+                {form.modelSelection ? (
+                  <ProviderModelPicker
+                    activeInstanceId={form.modelSelection.instanceId}
+                    instanceEntries={providerInstanceEntries}
+                    lockedProvider={null}
+                    model={form.modelSelection.model}
+                    modelOptionsByInstance={modelOptionsByInstance}
+                    triggerAriaLabel="Choose model"
+                    triggerClassName="h-10 w-full max-w-none px-3"
+                    triggerVariant="outline"
+                    onInstanceModelChange={(instanceId, model) =>
+                      setForm({
+                        ...form,
+                        modelSelection:
+                          form.modelSelection?.instanceId === instanceId &&
+                          form.modelSelection.model === model
+                            ? form.modelSelection
+                            : { instanceId, model },
+                      })
+                    }
+                  />
+                ) : (
+                  <Button className="h-10 w-full justify-start" disabled variant="outline">
+                    No model available
+                  </Button>
+                )}
+              </div>
+              <div className="grid min-w-0 gap-1.5">
+                <Label>Reasoning / speed</Label>
+                {traitsInput && shouldRenderTraitsControls(traitsInput) ? (
+                  <TraitsPicker
+                    {...traitsInput}
+                    onPromptChange={(prompt) => setForm((current) => ({ ...current, prompt }))}
+                    triggerVariant="outline"
+                    triggerClassName="h-10 w-full max-w-none justify-between px-3"
+                    onModelOptionsChange={(options) =>
+                      setForm((current) => ({
+                        ...current,
+                        modelSelection: current.modelSelection
+                          ? createModelSelection(
+                              current.modelSelection.instanceId,
+                              current.modelSelection.model,
+                              options,
+                            )
+                          : null,
+                      }))
+                    }
+                  />
+                ) : (
+                  <Button className="h-10 justify-start font-normal" disabled variant="outline">
+                    Not supported
+                  </Button>
+                )}
+              </div>
+              <div className="grid min-w-0 gap-1.5">
+                <Label>Time zone</Label>
+                <AutomationTimeZonePicker
+                  value={form.timeZone}
+                  onChange={(timeZone) => setForm({ ...form, timeZone })}
+                />
+              </div>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label>Schedule</Label>
@@ -674,13 +756,31 @@ export function AutomationsPage() {
                     <SelectItem value="daily">Daily</SelectItem>
                     <SelectItem value="weekdays">Weekdays</SelectItem>
                     <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="cron">Advanced</SelectItem>
                   </SelectPopup>
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label>{form.scheduleKind === "hourly" ? "Minute" : "Time"}</Label>
-                {form.scheduleKind === "hourly" ? (
+                <Label htmlFor="automation-time">
+                  {form.scheduleKind === "cron"
+                    ? "Cron expression"
+                    : form.scheduleKind === "hourly"
+                      ? "Minute"
+                      : "Time"}
+                </Label>
+                {form.scheduleKind === "cron" ? (
                   <Input
+                    id="automation-time"
+                    aria-describedby="automation-cron-help"
+                    aria-invalid={invalidCron}
+                    className="font-mono"
+                    placeholder="0 9 * * 1-5"
+                    value={form.cron}
+                    onChange={(event) => setForm({ ...form, cron: event.target.value })}
+                  />
+                ) : form.scheduleKind === "hourly" ? (
+                  <Input
+                    id="automation-time"
                     max={59}
                     min={0}
                     type="number"
@@ -689,6 +789,7 @@ export function AutomationsPage() {
                   />
                 ) : (
                   <Input
+                    id="automation-time"
                     type="time"
                     value={form.time}
                     onChange={(event) => setForm({ ...form, time: event.target.value })}
@@ -696,6 +797,18 @@ export function AutomationsPage() {
                 )}
               </div>
             </div>
+            {form.scheduleKind === "cron" ? (
+              <p
+                id="automation-cron-help"
+                className={
+                  invalidCron ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+                }
+              >
+                {invalidCron ? "Enter a valid five-field cron expression. " : ""}
+                Minute, hour, day of month, month, weekday. For example, 0 9 * * 1-5 runs at 09:00
+                on weekdays.
+              </p>
+            ) : null}
             {form.scheduleKind === "weekly" ? (
               <div className="grid gap-1.5">
                 <Label>Day</Label>
@@ -731,34 +844,6 @@ export function AutomationsPage() {
                 </Select>
               </div>
             ) : null}
-            <div className="grid gap-1.5">
-              <Label htmlFor="automation-time-zone">Time zone</Label>
-              <Input
-                id="automation-time-zone"
-                value={form.timeZone}
-                placeholder="Asia/Kolkata"
-                onChange={(event) => setForm({ ...form, timeZone: event.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Permissions</Label>
-              <Select
-                value={form.runtimeMode}
-                onValueChange={(runtimeMode) =>
-                  setForm({ ...form, runtimeMode: runtimeMode as RuntimeMode })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue>{runtimeModeLabel(form.runtimeMode)}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="auto">Automatic</SelectItem>
-                  <SelectItem value="full-access">Full access</SelectItem>
-                  <SelectItem value="auto-accept-edits">Auto-accept edits</SelectItem>
-                  <SelectItem value="approval-required">Ask for approval</SelectItem>
-                </SelectPopup>
-              </Select>
-            </div>
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="automation-enabled">Enabled</Label>
               <Switch
@@ -776,7 +861,7 @@ export function AutomationsPage() {
                 form.name.trim() === "" ||
                 form.prompt.trim() === "" ||
                 form.modelSelection === null ||
-                form.timeZone.trim() === ""
+                automationInputFromForm(form) === null
               }
               onClick={() => void submit()}
             >
