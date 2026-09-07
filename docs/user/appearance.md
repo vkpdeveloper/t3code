@@ -14,6 +14,15 @@ The main sidebar, right panel, and terminal drawer open and close immediately by
 in your operating system. Moving between threads always snaps to the selected thread's panel state
 without replaying its transitions.
 
+## Background images
+
+On web and desktop, open **Settings → Appearance → Background** to choose a preset or upload a
+JPEG, PNG, or WebP image up to 20 MB. Preview it, adjust brightness, blur, gradient, and fit, then select
+**Apply background**. Fill screen crops without stretching; Fit image keeps the whole image visible.
+The gradient fades toward your theme color at the bottom of the window.
+Choose **None** and apply to turn the background off. Remove upload and apply to delete your saved image.
+Backgrounds stay on the current device or browser and do not sync between environments or to mobile.
+
 ## Custom themes
 
 On web and desktop, choose **Create theme** to adjust a palette, or import a T3 Code or VS Code

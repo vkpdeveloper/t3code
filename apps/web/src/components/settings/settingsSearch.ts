@@ -70,6 +70,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  */
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: "workspace-background",
+    title: "Background",
+    to: "/settings/appearance",
+    searchTerms: [
+      "wallpaper image upload brightness blur gradient landscape nature anime games fit screen",
+    ],
+  },
+  {
     id: "agentic-operator",
     title: "Enable Operator",
     to: "/settings/agentic-operator",

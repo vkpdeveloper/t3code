@@ -7863,7 +7863,10 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      data-workspace-background-surface
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+    >
       {rightPanelControlsAtRoot ? panelLayoutControls : null}
       <div
         className={cn(
