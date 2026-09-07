@@ -33,3 +33,12 @@ and Smoky mountains are published under the [Unsplash License](https://unsplash.
 - [Alpine lake](<https://commons.wikimedia.org/wiki/File:Boathouse_on_a_mountain_lake_(Unsplash).jpg>), Luca Bravo.
 - [Lake at dusk](https://unsplash.com/photos/misty-mountains-over-a-calm-lake-at-dusk-_jxol17cVcQ), Sawyer Bergeron.
 - [Smoky mountains](https://unsplash.com/photos/znPa4dg4rT8), Brice Cooper.
+
+## Additional Spider-Man artwork
+
+- [Miles Morales, inverted city](https://hdqwalls.com/wallpaper/3840x2160/miles-morales-upside-down-4k), HDQWalls, artist not identified.
+- [Miles Morales, upside down](https://hdqwalls.com/wallpaper/3840x2160/spiderman-miles-morales-2021-upside-down), HDQWalls, artist not identified.
+- [Peter Parker, Iron Spider](https://hdqwalls.com/wallpaper/3840x2160/spiderman-far-from-home-movie), imizuri, credited by HDQWalls.
+- [Peter Parker, No Way Home](https://hdqwalls.com/wallpaper/3840x2160/2022-spiderman-no-way-home-4k), Bosslogic, credited by HDQWalls.
+- [Spider-Gwen, city swing](https://hdqwalls.com/wallpaper/3840x2160/spider-gwen-4k-art-2020), jojowong, credited by HDQWalls.
+- [Miles and Gwen](https://hdqwalls.com/wallpaper/3840x2160/gwen-stacy-and-miles-morales-talking), HDQWalls, artist not identified.
