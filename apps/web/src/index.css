@@ -2074,3 +2074,51 @@ code {
     transform: scaleX(0.9);
   }
 }
+
+/* One static image beneath the shell, with opaque controls above it. */
+.workspace-background-layer {
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--background);
+}
+.workspace-background-layer img {
+  width: 100%;
+  height: 100%;
+}
+html[data-workspace-background] [data-slot="sidebar-wrapper"] {
+  isolation: isolate;
+  background: transparent;
+}
+html[data-workspace-background] [data-slot="sidebar-inset"],
+html[data-workspace-background] [data-workspace-background-surface] {
+  background: transparent;
+}
+html[data-workspace-background] [data-slot="sidebar-inner"],
+html[data-workspace-background] [data-app-sidebar],
+html[data-workspace-background] [data-chat-header] {
+  background: color-mix(in srgb, var(--background) 65%, transparent);
+}
+.background-preset {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-align: left;
+}
+.background-preset[aria-pressed="true"] {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.background-preset:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.background-preset-label {
+  display: block;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}

@@ -20,6 +20,7 @@ import {
   usePanelAnimationSettings,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
+import { WorkspaceBackgroundLayer } from "./WorkspaceBackground";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -226,6 +227,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         defaultOpen
         style={sidebarProviderStyle}
       >
+        <WorkspaceBackgroundLayer />
         <ProjectProjectionRetention />
         <Sidebar
           side="left"

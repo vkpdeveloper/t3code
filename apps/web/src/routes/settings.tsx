@@ -73,7 +73,10 @@ function SettingsContentLayout() {
       className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate"
       data-settings-page-layout
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
+      <div
+        data-workspace-background-surface
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground"
+      >
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb pathname={location.pathname} />
