@@ -1,4 +1,4 @@
-import { CommandId } from "@t3tools/contracts";
+import { CommandId, type ThreadId } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -42,6 +42,7 @@ export const make = Effect.gen(function* () {
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
+    automationThreadId?: ThreadId,
   ) {
     const snapshot = yield* snapshots.getShellSnapshot();
     const now = DateTime.formatIso(yield* DateTime.now);
@@ -50,7 +51,12 @@ export const make = Effect.gen(function* () {
     // the merged pull request: most threads carry no link and settle from
     // their branch lookup, which would otherwise wait for the next minute's
     // sweep on a possibly stale cached answer.
-    const candidates = snapshot.threads.filter((thread) => isAutoSettlementCandidate(thread, now));
+    const candidates = snapshot.threads.filter(
+      (thread) =>
+        (automationThreadId === undefined ||
+          (thread.id === automationThreadId && thread.automationId != null)) &&
+        isAutoSettlementCandidate(thread, now),
+    );
     // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
     const lookupCwdByThreadId = new Map<string, string>();
     yield* Effect.forEach(
@@ -58,7 +64,12 @@ export const make = Effect.gen(function* () {
       (thread) =>
         Effect.gen(function* () {
           const project = projects.get(thread.projectId);
-          if (project === undefined || thread.linkedPullRequest != null) return;
+          if (
+            thread.automationId != null ||
+            project === undefined ||
+            thread.linkedPullRequest != null
+          )
+            return;
           const worktreeExists =
             thread.worktreePath !== null &&
             (yield* fileSystem.exists(thread.worktreePath).pipe(Effect.orElseSucceed(() => false)));
@@ -85,6 +96,7 @@ export const make = Effect.gen(function* () {
       });
     }
     const lookupKey = (thread: (typeof candidates)[number]) => {
+      if (thread.automationId != null) return JSON.stringify(["automation", thread.id]);
       if (thread.linkedPullRequest != null) {
         return JSON.stringify([
           "linked",
@@ -104,6 +116,7 @@ export const make = Effect.gen(function* () {
     const pullRequestFor = Effect.fn("ThreadSettlementReactor.pullRequestFor")(function* (
       thread: (typeof candidates)[number],
     ) {
+      if (thread.automationId != null) return null;
       if (thread.linkedPullRequest != null) {
         // The event carries the merged state, so only the threads linked to
         // that exact pull request settle from it. Every other linked thread
@@ -201,8 +214,11 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const runSweep = (mergedPullRequest: PullRequestService.PullRequestMergeEvent | null) =>
-    sweep(mergedPullRequest).pipe(
+  const runSweep = (
+    mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
+    automationThreadId?: ThreadId,
+  ) =>
+    sweep(mergedPullRequest, automationThreadId).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
@@ -211,11 +227,14 @@ export const make = Effect.gen(function* () {
             }),
       ),
     );
-  const worker = yield* makeDrainableWorker(() => runSweep(null));
+  const worker = yield* makeDrainableWorker((threadId: ThreadId | undefined) =>
+    runSweep(null, threadId),
+  );
 
   const start: ThreadSettlementReactor["Service"]["start"] = Effect.fn(
     "ThreadSettlementReactor.start",
   )(function* () {
+    const domainEvents = yield* engine.subscribeDomainEvents;
     const settingsChanges = yield* settingsService.subscribeChanges;
     const mergedPullRequests = yield* pullRequests.subscribeMerges;
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
@@ -241,6 +260,14 @@ export const make = Effect.gen(function* () {
       }),
     );
     yield* forkParked(Stream.runForEach(mergedPullRequests, runSweep));
+    yield* forkParked(
+      Stream.runForEach(domainEvents, (event) =>
+        event.type === "thread.turn-diff-completed" ||
+        (event.type === "thread.session-set" && event.payload.session.status === "ready")
+          ? worker.enqueue(event.payload.threadId)
+          : Effect.void,
+      ),
+    );
   });
 
   return { start, drain: worker.drain } satisfies ThreadSettlementReactor["Service"];
