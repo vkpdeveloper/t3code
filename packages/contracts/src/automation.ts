@@ -123,7 +123,7 @@ export type AutomationUpdateInput = typeof AutomationUpdateInput.Type;
 export const AutomationIdInput = Schema.Struct({ id: AutomationId });
 export type AutomationIdInput = typeof AutomationIdInput.Type;
 
-export class AutomationOperationError extends Schema.TaggedErrorClass<AutomationOperationError>()(
+export class AutomationOperationError extends Schema.TaggedError<AutomationOperationError>()(
   "AutomationOperationError",
   { message: Schema.String },
 ) {}

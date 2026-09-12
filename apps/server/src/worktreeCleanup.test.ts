@@ -68,6 +68,7 @@ function thread(input: {
     },
     runtimeMode: "full-access",
     interactionMode: "default",
+    pullRequests: [],
     branch: input.branch ?? "feat/storage-cleanup",
     worktreePath: input.worktreePath,
     latestTurn: null,

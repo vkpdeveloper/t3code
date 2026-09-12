@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
-import * as NodeOs from "node:os";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -21,7 +21,7 @@ describe("imageStore", () => {
   });
 
   it("writes and copies files under the images directory", () => {
-    const imagesDir = NodeFS.mkdtempSync(NodePath.join(NodeOs.tmpdir(), "t3-images-"));
+    const imagesDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-images-"));
     const imageId = createGeneratedImageId(".jpg");
     expect(imageId).toBeTruthy();
     const written = writeGeneratedImage({

@@ -25,7 +25,7 @@ import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 
-export class OperatorError extends Schema.TaggedErrorClass<OperatorError>()("OperatorError", {
+export class OperatorError extends Schema.TaggedError<OperatorError>()("OperatorError", {
   operation: Schema.String,
   reason: Schema.Literals([
     "disabled",

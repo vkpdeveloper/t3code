@@ -33,6 +33,23 @@ const T3_CODE_THREAD_REFERENCE_INSTRUCTIONS = `
 The user may reference another T3 Code task with a \`t3-thread\` link. Do not treat it as a web URL and do not guess what the old task contains. Use the read-only \`t3_thread_read\` tool from the \`t3-code\` MCP server. Pass the final thread id or the complete link. Read only the context needed for the current request, and follow \`nextCursor\` when more transcript context is necessary.
 `;
 
+const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `
+
+## T3 Code devices
+
+The \`t3-code\` MCP server also exposes \`device_*\` tools for iOS Simulators and Android Emulators on this environment. For mobile verification, call \`device_list\`, then \`device_open\` so the user can watch the device in their Device panel; its result explains how to drive the device. Driving happens through the \`agent-device\` CLI, which is on PATH. Keep the host config and session flags returned by \`device_open\` on every command so concurrent devices stay independent: prefer \`agent-device snapshot -i\` refs over coordinates, and use \`device_screenshot\` when you need to see the screen. Do not call simctl, adb, xcrun, or serve-sim directly while these tools are present. If \`device_list\` reports a platform as unavailable, say so instead of trying another route.
+`;
+
+export interface T3CodeToolAvailability {
+  readonly browser: boolean;
+  readonly device: boolean;
+}
+
+const normalizeAvailability = (
+  availability: boolean | T3CodeToolAvailability,
+): T3CodeToolAvailability =>
+  typeof availability === "boolean" ? { browser: availability, device: false } : availability;
+
 /**
  * Every block here describes tools served by the same `t3-code` MCP server, so
  * they are all omitted when it isn't attached. Describing tools that aren't in
@@ -41,13 +58,15 @@ The user may reference another T3 Code task with a \`t3-thread\` link. Do not tr
  * it in would talk it out of the only browser automation it still has.
  */
 const t3CodeToolInstructions = (
-  browserToolsAvailable: boolean,
+  availability: boolean | T3CodeToolAvailability,
   imageGenerationAvailable = false,
 ): string => {
+  const tools = normalizeAvailability(availability);
   const sections = [
-    ...(browserToolsAvailable ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS] : []),
+    ...(tools.browser ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS] : []),
+    ...(tools.device ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
     ...(imageGenerationAvailable ? [T3_CODE_IMAGE_GENERATION_INSTRUCTIONS] : []),
-    ...(browserToolsAvailable || imageGenerationAvailable
+    ...(tools.browser || tools.device || imageGenerationAvailable
       ? [T3_CODE_THREAD_REFERENCE_INSTRUCTIONS]
       : []),
   ];
@@ -55,7 +74,7 @@ const t3CodeToolInstructions = (
 };
 
 const codexPlanModeDeveloperInstructions = (
-  browserToolsAvailable: boolean,
+  browserToolsAvailable: boolean | T3CodeToolAvailability,
   imageGenerationAvailable = false,
 ): string => `<collaboration_mode># Plan Mode (Conversational)
 
@@ -189,7 +208,7 @@ ${t3CodeToolInstructions(browserToolsAvailable, imageGenerationAvailable)}
 </collaboration_mode>`;
 
 const codexDefaultModeDeveloperInstructions = (
-  browserToolsAvailable: boolean,
+  browserToolsAvailable: boolean | T3CodeToolAvailability,
   imageGenerationAvailable = false,
 ): string => `<collaboration_mode># Collaboration Mode: Default
 
@@ -218,7 +237,7 @@ export function buildCodexDeveloperInstructions(
    * it from the session's actual MCP configuration rather than re-reading the
    * setting, so the prompt cannot claim tools the turn doesn't have.
    */
-  browserToolsAvailable = true,
+  browserToolsAvailable: boolean | T3CodeToolAvailability = true,
   imageGenerationAvailable = false,
 ): string {
   const base =

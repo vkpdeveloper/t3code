@@ -1145,9 +1145,6 @@ const handleSessionUpdate = ({
   readonly params: EffectAcpSchema.SessionNotification;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
-    if (params.update.sessionUpdate === "config_option_update") {
-      yield* Ref.set(configOptionsRef, params.update.configOptions);
-    }
     const parsed = parseSessionUpdateEvent(params);
     if (parsed.modeId) {
       yield* Ref.update(modeStateRef, (current) =>

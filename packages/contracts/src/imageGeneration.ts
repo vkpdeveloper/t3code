@@ -99,7 +99,7 @@ export const GenerateImageResult = Schema.Struct({
 });
 export type GenerateImageResult = typeof GenerateImageResult.Type;
 
-export class ImageGenerationUnavailableError extends Schema.TaggedErrorClass<ImageGenerationUnavailableError>()(
+export class ImageGenerationUnavailableError extends Schema.TaggedError<ImageGenerationUnavailableError>()(
   "ImageGenerationUnavailableError",
   {
     reason: Schema.Literals([

@@ -891,6 +891,7 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
 
   switch (upd.sessionUpdate) {
     case "config_option_update": {
+      configOptions = upd.configOptions;
       events.push({
         _tag: "ConfigOptionsUpdated",
         configOptions: upd.configOptions,
@@ -914,10 +915,6 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
           modeId,
         });
       }
-      break;
-    }
-    case "config_option_update": {
-      configOptions = upd.configOptions;
       break;
     }
     case "session_info_update": {

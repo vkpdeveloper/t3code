@@ -916,7 +916,16 @@ describe("AcpSessionRuntime", () => {
         { id: "context", currentValue: "272k" },
         { id: "fast", currentValue: "false" },
       ]);
-      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 6)));
+      // Config-option updates also surface as events; the metadata this test
+      // asserts on is the standard ACP stream around them.
+      const notes = Array.from(
+        yield* Stream.runCollect(
+          Stream.take(
+            Stream.filter(runtime.getEvents(), (note) => note._tag !== "ConfigOptionsUpdated"),
+            6,
+          ),
+        ),
+      );
       expect(notes.map((note) => note._tag)).toEqual([
         "SessionInfoUpdated",
         "UsageUpdated",

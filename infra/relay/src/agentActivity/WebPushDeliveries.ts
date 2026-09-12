@@ -25,7 +25,7 @@ export interface WebPushNotificationPayload {
   readonly silent: boolean;
 }
 
-export class WebPushDeliveryError extends Schema.TaggedErrorClass<WebPushDeliveryError>()(
+export class WebPushDeliveryError extends Schema.TaggedError<WebPushDeliveryError>()(
   "WebPushDeliveryError",
   {
     userId: Schema.String,

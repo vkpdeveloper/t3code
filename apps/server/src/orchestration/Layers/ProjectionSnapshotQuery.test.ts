@@ -122,6 +122,43 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
 
       yield* sql`
+        INSERT INTO projection_thread_pull_requests (
+          thread_id,
+          host,
+          repository,
+          number,
+          url,
+          source,
+          linked_at,
+          snapshot_json,
+          stack_json
+        )
+        VALUES
+          (
+            'thread-1',
+            'github.com',
+            'pingdotgg/t3code',
+            41,
+            'https://github.com/pingdotgg/t3code/pull/41',
+            'created',
+            '2026-02-24T00:00:02.500Z',
+            '{"state":"merged","title":"Groundwork","headBranch":"feat/groundwork","baseBranch":"main","isDraft":false,"updatedAt":"2026-02-24T00:00:02.600Z","syncedAt":"2026-02-24T00:00:02.700Z"}',
+            NULL
+          ),
+          (
+            'thread-1',
+            'github.com',
+            'pingdotgg/t3code',
+            42,
+            'https://github.com/pingdotgg/t3code/pull/42',
+            'manual',
+            '2026-02-24T00:00:03.000Z',
+            NULL,
+            NULL
+          )
+      `;
+
+      yield* sql`
         INSERT INTO projection_thread_messages (
           message_id,
           thread_id,
@@ -317,12 +354,38 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           operatorWorkspacePath: null,
           operatorWorkspaceBranch: null,
           operatorWaitStartedAt: null,
-          linkedPullRequest: {
-            projectId: asProjectId("project-1"),
-            repository: "pingdotgg/t3code",
-            number: 42,
-            url: "https://github.com/pingdotgg/t3code/pull/42",
-          },
+          automationId: null,
+          automationRunId: null,
+          usageLimitWait: null,
+          pullRequests: [{
+              host: "github.com",
+              repository: "pingdotgg/t3code",
+              number: 41,
+              url: "https://github.com/pingdotgg/t3code/pull/41",
+              source: "created",
+              linkedAt: "2026-02-24T00:00:02.500Z",
+              snapshot: {
+                state: "merged",
+                title: "Groundwork",
+                headBranch: "feat/groundwork",
+                baseBranch: "main",
+                isDraft: false,
+                updatedAt: "2026-02-24T00:00:02.600Z",
+                syncedAt: "2026-02-24T00:00:02.700Z",
+              },
+              stack: null,
+            }, {
+              host: "github.com",
+              repository: "pingdotgg/t3code",
+              number: 42,
+              url: "https://github.com/pingdotgg/t3code/pull/42",
+              source: "manual",
+              linkedAt: "2026-02-24T00:00:03.000Z",
+              snapshot: null,
+              stack: null,
+            }],
+          branchPullRequest: null,
+          activeOrderKey: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -451,12 +514,38 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           operatorWorkspacePath: null,
           operatorWorkspaceBranch: null,
           operatorWaitStartedAt: null,
-          linkedPullRequest: {
-            projectId: asProjectId("project-1"),
-            repository: "pingdotgg/t3code",
-            number: 42,
-            url: "https://github.com/pingdotgg/t3code/pull/42",
-          },
+          automationId: null,
+          automationRunId: null,
+          usageLimitWait: null,
+          pullRequests: [{
+              host: "github.com",
+              repository: "pingdotgg/t3code",
+              number: 41,
+              url: "https://github.com/pingdotgg/t3code/pull/41",
+              source: "created",
+              linkedAt: "2026-02-24T00:00:02.500Z",
+              snapshot: {
+                state: "merged",
+                title: "Groundwork",
+                headBranch: "feat/groundwork",
+                baseBranch: "main",
+                isDraft: false,
+                updatedAt: "2026-02-24T00:00:02.600Z",
+                syncedAt: "2026-02-24T00:00:02.700Z",
+              },
+              stack: null,
+            }, {
+              host: "github.com",
+              repository: "pingdotgg/t3code",
+              number: 42,
+              url: "https://github.com/pingdotgg/t3code/pull/42",
+              source: "manual",
+              linkedAt: "2026-02-24T00:00:03.000Z",
+              snapshot: null,
+              stack: null,
+            }],
+          branchPullRequest: null,
+          activeOrderKey: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -585,6 +674,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       if (context._tag === "Some") {
         assert.deepEqual(context.value, {
           id: ThreadId.make("thread-1"),
+          projectId: asProjectId("project-1"),
           title: "Thread 1",
           session: snapshot.threads[0]?.session,
         });
