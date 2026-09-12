@@ -11,7 +11,7 @@ import {
   parseKeybindingWhenExpression,
 } from "@t3tools/shared/keybindings";
 
-import { resolveModModifier } from "../../keybindings";
+import { resolveModModifier, shortcutKeyFromEvent } from "../../keybindings";
 import { getShortcutRuntime, type ShortcutRuntime } from "../../shortcutRuntime";
 
 export type KeybindingSource = "Default" | "Custom" | "Project";
@@ -292,7 +292,7 @@ function titleCaseCommandSegment(segment: string): string {
   return words.join(" ");
 }
 
-export function normalizeShortcutKeyToken(key: string): string | null {
+function normalizeShortcutKeyToken(key: string): string | null {
   const normalized = key.toLowerCase();
   if (
     normalized === "meta" ||
@@ -323,18 +323,18 @@ export function normalizeShortcutKeyToken(key: string): string | null {
 }
 
 export function keybindingFromKeyboardEvent(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+  event: Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
   platform: string,
   runtime: ShortcutRuntime = getShortcutRuntime(),
 ): string | null {
-  const keyToken = normalizeShortcutKeyToken(event.key);
+  const keyToken = normalizeShortcutKeyToken(shortcutKeyFromEvent(event));
   if (!keyToken) return null;
 
+  const parts: string[] = [];
   // Capture must mirror matching: whichever physical modifier `mod` currently
   // resolves to becomes "mod", so a binding recorded in the browser still
   // works in the desktop app (and vice versa) instead of being pinned to the
   // literal key that happened to be pressed.
-  const parts: string[] = [];
   if (resolveModModifier(platform, runtime) === "meta") {
     if (event.metaKey) parts.push("mod");
     if (event.ctrlKey) parts.push("ctrl");

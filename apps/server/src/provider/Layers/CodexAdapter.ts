@@ -72,7 +72,11 @@ import {
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
-import { codexRateLimitsToUpdate } from "./codexUsageLimits.ts";
+import {
+  type CodexRateLimitSnapshot,
+  codexRateLimitsToUpdate,
+  codexUsageLimitMessage,
+} from "./codexUsageLimits.ts";
 const isCodexAppServerProcessExitedError = Schema.is(CodexErrors.CodexAppServerProcessExitedError);
 const isCodexAppServerTransportError = Schema.is(CodexErrors.CodexAppServerTransportError);
 const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
@@ -625,9 +629,6 @@ function toTurnStatus(
       return "completed";
   }
 }
-
-type CodexRateLimitSnapshot =
-  EffectCodexSchema.V2AccountRateLimitsUpdatedNotification["rateLimits"];
 
 const USAGE_LIMIT_RESET_FALLBACK_MS = 5 * 60 * 1_000;
 
@@ -2335,7 +2336,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(mcpSession
             ? {
                 environment: {
-                  ...(options?.environment ?? process.env),
+                  ...McpProviderSession.withAgentDeviceEnvironment(
+                    options?.environment ?? process.env,
+                    mcpSession,
+                  ),
                   T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
                 },
                 appServerArgs: [
@@ -2351,6 +2355,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : {}),
         };
         const turnTokenUsage = makeCodexTurnTokenUsageState();
+        // Codex reports a usage-limit stop as OpenAI's own sentence, which on a
+        // Business workspace blames credits for a window that ran out. The
+        // snapshot naming that window arrives in its own notification, before or
+        // after the stop and often sparse, so keep the session's merged view of
+        // it and read it when a turn fails on the limit.
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
@@ -2418,37 +2427,78 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
             }
 
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId, latestRateLimits).map(
-              (runtimeEvent) => {
-                if (runtimeEvent.type === "turn.completed" && runtimeEvent.turnId) {
-                  return {
-                    ...runtimeEvent,
-                    payload: {
-                      ...runtimeEvent.payload,
-                      tokenUsage: completeCodexTurnTokenUsage(
-                        turnTokenUsage,
-                        String(runtimeEvent.turnId),
-                        runtimeEvent.payload.state === "completed",
-                      ),
-                    },
-                  } satisfies ProviderRuntimeEvent;
-                }
-                if (runtimeEvent.type === "turn.aborted" && runtimeEvent.turnId) {
-                  return {
-                    ...runtimeEvent,
-                    payload: {
-                      ...runtimeEvent.payload,
-                      tokenUsage: completeCodexTurnTokenUsage(
-                        turnTokenUsage,
-                        String(runtimeEvent.turnId),
-                        false,
-                      ),
-                    },
-                  } satisfies ProviderRuntimeEvent;
-                }
-                return runtimeEvent;
-              },
-            );
+            if (event.method === "error") {
+              const errorPayload = readPayload(
+                EffectCodexSchema.V2ErrorNotification,
+                event.payload,
+              );
+              // The failed `turn/completed` repeats this sentence and is answered
+              // below; relaying both would show the limit twice.
+              if (errorPayload?.error.codexErrorInfo === "usageLimitExceeded") return;
+            }
+
+            let usageLimitError: ProviderRuntimeEvent | undefined;
+            let usageLimitMessage: string | undefined;
+            if (event.method === "turn/completed") {
+              const completedPayload = readPayload(
+                EffectCodexSchema.V2TurnCompletedNotification,
+                event.payload,
+              );
+              const turnError =
+                completedPayload?.turn.status === "failed"
+                  ? completedPayload.turn.error
+                  : undefined;
+              if (turnError?.codexErrorInfo === "usageLimitExceeded") {
+                usageLimitMessage = codexUsageLimitMessage(latestRateLimits, event.createdAt);
+                usageLimitError = {
+                  ...runtimeEventBase(event, event.threadId),
+                  type: "runtime.error",
+                  payload: {
+                    message: usageLimitMessage,
+                    class: "provider_error",
+                    ...(turnError.message ? { detail: turnError.message } : {}),
+                  },
+                };
+              }
+            }
+
+            const mappedEvents = mapToRuntimeEvents(
+              event,
+              event.threadId,
+              latestRateLimits,
+            ).map((runtimeEvent) => {
+              if (runtimeEvent.type === "turn.completed" && runtimeEvent.turnId) {
+                return {
+                  ...runtimeEvent,
+                  payload: {
+                    ...runtimeEvent.payload,
+                    ...(usageLimitMessage ? { errorMessage: usageLimitMessage } : {}),
+                    tokenUsage: completeCodexTurnTokenUsage(
+                      turnTokenUsage,
+                      String(runtimeEvent.turnId),
+                      runtimeEvent.payload.state === "completed",
+                    ),
+                  },
+                } satisfies ProviderRuntimeEvent;
+              }
+              if (runtimeEvent.type === "turn.aborted" && runtimeEvent.turnId) {
+                return {
+                  ...runtimeEvent,
+                  payload: {
+                    ...runtimeEvent.payload,
+                    tokenUsage: completeCodexTurnTokenUsage(
+                      turnTokenUsage,
+                      String(runtimeEvent.turnId),
+                      false,
+                    ),
+                  },
+                } satisfies ProviderRuntimeEvent;
+              }
+              return runtimeEvent;
+            });
+            const runtimeEvents = usageLimitError
+              ? [usageLimitError, ...mappedEvents]
+              : mappedEvents;
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -2585,14 +2635,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
-  const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = Effect.fn("compactThread")(
-    function* (threadId) {
-      const session = yield* requireSession(threadId);
-      yield* session.runtime.compactThread.pipe(
-        Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/compact/start", cause)),
-      );
-    },
-  );
+  const compactThread = Effect.fn("compactThread")(function* (threadId: ThreadId) {
+    const session = yield* requireSession(threadId);
+    yield* session.runtime.compactThread.pipe(
+      Effect.mapError((cause) => mapCodexRuntimeError(threadId, "thread/compact/start", cause)),
+    );
+  });
 
   const readThread: CodexAdapterShape["readThread"] = (threadId) =>
     requireSession(threadId).pipe(
@@ -2739,7 +2787,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
-    compactThread,
+    compaction: { type: "native", start: compactThread },
     interruptTurn,
     readThread,
     rollbackThread,

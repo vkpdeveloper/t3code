@@ -35,14 +35,11 @@ export const T3_CHAT_THEME_LABEL = "T3 Chat";
 export const VERCEL_DARK_THEME_ID = "vercel-dark" as const;
 export const VERCEL_DARK_THEME_LABEL = "Vercel Dark";
 export const DEFAULT_THEME_PREFERENCE = VERCEL_DARK_THEME_ID;
-export const GROVE_THEME_ID = "grove" as const;
+const GROVE_THEME_ID = "grove" as const;
 export const GROVE_THEME_LABEL = "Grove";
 export const OCEAN_THEME_ID = "ocean" as const;
-export const OCEAN_THEME_LABEL = "Ocean";
-export const EMBER_THEME_ID = "ember" as const;
-export const EMBER_THEME_LABEL = "Ember";
-export const IRIS_THEME_ID = "iris" as const;
-export const IRIS_THEME_LABEL = "Iris";
+const EMBER_THEME_ID = "ember" as const;
+const IRIS_THEME_ID = "iris" as const;
 export const THEME_FILE_VERSION = 1 as const;
 export const CUSTOM_THEMES_STORAGE_KEY = "t3code:themes:v1";
 export const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "t3code:theme-follow-system";
@@ -1271,7 +1268,7 @@ export function themeIdFromName(name: string): string {
   return normalized || "custom-theme";
 }
 
-export class ThemeLibraryStorageError extends Schema.TaggedErrorClass<ThemeLibraryStorageError>()(
+export class ThemeLibraryStorageError extends Schema.TaggedError<ThemeLibraryStorageError>()(
   "ThemeLibraryStorageError",
   {
     storageKey: Schema.String,

@@ -22,7 +22,7 @@ export interface WebPushTarget {
   readonly preferences: RelayWebPushPreferences;
 }
 
-export class WebPushSubscriptionPersistenceError extends Schema.TaggedErrorClass<WebPushSubscriptionPersistenceError>()(
+export class WebPushSubscriptionPersistenceError extends Schema.TaggedError<WebPushSubscriptionPersistenceError>()(
   "WebPushSubscriptionPersistenceError",
   {
     operation: Schema.Literals(["register", "unregister", "list", "invalidate"]),

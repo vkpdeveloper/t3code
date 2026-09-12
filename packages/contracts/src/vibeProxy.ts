@@ -90,7 +90,7 @@ export const VibeProxyUsageResult = Schema.Struct({
 });
 export type VibeProxyUsageResult = typeof VibeProxyUsageResult.Type;
 
-export class VibeProxyUsageReadError extends Schema.TaggedErrorClass<VibeProxyUsageReadError>()(
+export class VibeProxyUsageReadError extends Schema.TaggedError<VibeProxyUsageReadError>()(
   "VibeProxyUsageReadError",
   {
     operation: Schema.Literals(["read-cache", "write-cache"]),

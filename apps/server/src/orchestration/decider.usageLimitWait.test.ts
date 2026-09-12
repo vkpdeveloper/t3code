@@ -48,6 +48,7 @@ function makeReadModel(
         modelSelection: MODEL_SELECTION,
         runtimeMode: "full-access",
         interactionMode: "default",
+        pullRequests: [],
         branch: null,
         worktreePath: null,
         latestTurn: {

@@ -141,8 +141,10 @@ describe("buildInitialGrokProviderSnapshot", () => {
       expect(snapshot.status).toBe("warning");
       expect(snapshot.version).toBeNull();
       expect(snapshot.message).toContain("Checking Grok");
+      // The fork hides client controls Grok does not support.
       expect(snapshot.requiresNewThreadForModelChange).toBe(false);
       expect(snapshot.showInteractionModeToggle).toBe(false);
+      expect(snapshot.supportsConversationRollback).toBe(false);
     }),
   );
 });
@@ -524,7 +526,7 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
           const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-grok-authenticated-" });
           const grokPath = path.join(dir, "grok");
-          const mockAgentPath = path.join(process.cwd(), "apps/server/scripts/acp-mock-agent.ts");
+          const mockAgentPath = NodePath.resolve(__dirname, "../../../scripts/acp-mock-agent.ts");
           yield* fs.writeFileString(grokPath, mockGrokWrapperScript(mockAgentPath));
           yield* fs.chmod(grokPath, 0o755);
 
@@ -553,7 +555,7 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
           const path = yield* Path.Path;
           const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-grok-unauthenticated-" });
           const grokPath = path.join(dir, "grok");
-          const mockAgentPath = path.join(process.cwd(), "apps/server/scripts/acp-mock-agent.ts");
+          const mockAgentPath = NodePath.resolve(__dirname, "../../../scripts/acp-mock-agent.ts");
           yield* fs.writeFileString(
             grokPath,
             mockGrokWrapperScript(mockAgentPath, { T3_ACP_FAIL_AUTHENTICATION: "1" }),

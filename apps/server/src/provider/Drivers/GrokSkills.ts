@@ -176,7 +176,7 @@ const discoverGrokSkillsFromFilesystem = Effect.fn("discoverGrokSkills")(functio
   return [...skillsByName.values()].sort((left, right) => left.name.localeCompare(right.name));
 });
 
-class GrokSkillsProbeError extends Schema.TaggedErrorClass<GrokSkillsProbeError>()(
+class GrokSkillsProbeError extends Schema.TaggedError<GrokSkillsProbeError>()(
   "GrokSkillsProbeError",
   {
     stage: Schema.Literals(["spawn", "timeout", "exit", "decode"]),

@@ -26,7 +26,7 @@ import {
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
 } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -38,13 +38,8 @@ import { formatShortcutLabel, resolveModModifier } from "../../keybindings";
 import { getShortcutRuntime } from "../../shortcutRuntime";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { cn, isMacPlatform } from "../../lib/utils";
-import {
-  primaryServerAvailableEditorsAtom,
-  primaryServerKeybindingsAtom,
-  primaryServerKeybindingsConfigPathAtom,
-  serverEnvironment,
-} from "../../state/server";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { serverEnvironment } from "../../state/server";
+import { useSettingsScope } from "./SettingsScopeContext";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -52,7 +47,6 @@ import { Kbd, KbdGroup } from "../ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Switch } from "../ui/switch";
 import { Toggle } from "../ui/toggle";
 import { toastManager } from "../ui/toast";
 import {
@@ -75,24 +69,8 @@ import {
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Switch } from "../ui/switch";
 import { useAtomCommand } from "../../state/use-atom-command";
-
-function keybindingPartLabel(part: string, platform: string): string {
-  const isMac = isMacPlatform(platform);
-  // `mod` follows the runtime, so a browser session on macOS renders ⌃ here
-  // and the matcher listens for Control to match.
-  if (part === "mod") {
-    if (resolveModModifier(platform, getShortcutRuntime()) === "ctrl") {
-      return isMac ? "⌃" : "Ctrl";
-    }
-    return "⌘";
-  }
-  if (part === "shift") return "⇧";
-  if (part === "alt") return isMac ? "⌥" : "Alt";
-  if (part === "ctrl") return isMac ? "⌃" : "Ctrl";
-  if (part === "meta") return isMac ? "⌘" : "Meta";
-  return part.length === 1 ? part.toUpperCase() : part;
-}
 
 function KeybindingPill({ value }: { value: string }) {
   // Keys dedupe repeated parts; a literal "+" in a shortcut splits into empty strings.
@@ -1327,6 +1305,25 @@ function KeybindingsList(props: KeybindingsListProps) {
   );
 }
 
+/** Shown in the browser build only; the desktop app receives every shortcut. */
+
+function keybindingPartLabel(part: string, platform: string): string {
+  const isMac = isMacPlatform(platform);
+  // `mod` follows the runtime, so a browser session on macOS renders ⌃ here
+  // and the matcher listens for Control to match.
+  if (part === "mod") {
+    if (resolveModModifier(platform, getShortcutRuntime()) === "ctrl") {
+      return isMac ? "⌃" : "Ctrl";
+    }
+    return "⌘";
+  }
+  if (part === "shift") return "⇧";
+  if (part === "alt") return isMac ? "⌥" : "Alt";
+  if (part === "ctrl") return isMac ? "⌃" : "Ctrl";
+  if (part === "meta") return isMac ? "⌘" : "Meta";
+  return part.length === 1 ? part.toUpperCase() : part;
+}
+
 /**
  * Browser-only. macOS browsers reserve nearly every Cmd shortcut before the
  * page sees a keydown, so `mod` resolves to Ctrl there by default. The copy
@@ -1361,11 +1358,27 @@ function BrowserModKeyFlipRow() {
   );
 }
 
+/** Shown in the browser build only; the desktop app receives every shortcut. */
+function BrowserKeybindingNotice() {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2.5 text-[12px] leading-[1.45] text-muted-foreground sm:px-4">
+      <TriangleAlertIcon className="size-3.5 shrink-0 text-warning" aria-hidden />
+      <span>
+        Some shortcuts may be claimed by the browser before T3 Code sees them. Use the desktop app
+        for better keybinding support.
+      </span>
+    </div>
+  );
+}
+
 export function KeybindingsSettingsPanel() {
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const keybindingsConfigPath = useAtomValue(primaryServerKeybindingsConfigPathAtom);
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
-  const primaryEnvironment = usePrimaryEnvironment();
+  // The representative environment supplies the displayed bindings; edits
+  // fan out to every connected environment in the selection, so one
+  // shortcut change reaches each machine the user runs T3 Code on.
+  const { environment: primaryEnvironment, connectedEnvironments } = useSettingsScope();
+  const keybindings = primaryEnvironment?.serverConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
+  const keybindingsConfigPath = primaryEnvironment?.serverConfig?.keybindingsConfigPath ?? null;
+  const availableEditors = primaryEnvironment?.serverConfig?.availableEditors ?? [];
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
@@ -1438,17 +1451,19 @@ export function KeybindingsSettingsPanel() {
         ...(input.replace ? { replace: input.replace } : {}),
       };
       void (async () => {
-        const result = await upsertKeybinding({
-          environmentId: primaryEnvironment.environmentId,
-          input: payload,
-        });
+        const results = await Promise.all(
+          connectedEnvironments.map((target) =>
+            upsertKeybinding({ environmentId: target.environmentId, input: payload }),
+          ),
+        );
         setSavingCommand(null);
-        if (result._tag === "Success") {
+        const failed = results.find((result) => result._tag === "Failure");
+        if (!failed) {
           setIsAddingBinding(false);
           return;
         }
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
+        if (!isAtomCommandInterrupted(failed)) {
+          const error = squashAtomCommandFailure(failed);
           toastManager.add({
             title: "Unable to save keybinding",
             description: error instanceof Error ? error.message : "The keybinding was not saved.",
@@ -1457,7 +1472,7 @@ export function KeybindingsSettingsPanel() {
         }
       })();
     },
-    [primaryEnvironment, upsertKeybinding],
+    [connectedEnvironments, primaryEnvironment, upsertKeybinding],
   );
 
   const removeKeybinding = useCallback(
@@ -1465,12 +1480,17 @@ export function KeybindingsSettingsPanel() {
       if (!primaryEnvironment) return;
       setSavingCommand(row.command);
       void (async () => {
-        const result = await removeKeybindingMutation({
-          environmentId: primaryEnvironment.environmentId,
-          input: rowKeybindingTarget(row),
-        });
+        const results = await Promise.all(
+          connectedEnvironments.map((target) =>
+            removeKeybindingMutation({
+              environmentId: target.environmentId,
+              input: rowKeybindingTarget(row),
+            }),
+          ),
+        );
         setSavingCommand(null);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const result = results.find((entry) => entry._tag === "Failure") ?? results[0];
+        if (result?._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
           toastManager.add({
             title: "Unable to remove keybinding",
@@ -1480,7 +1500,7 @@ export function KeybindingsSettingsPanel() {
         }
       })();
     },
-    [primaryEnvironment, removeKeybindingMutation],
+    [connectedEnvironments, primaryEnvironment, removeKeybindingMutation],
   );
 
   const resetKeybinding = useCallback(
@@ -1572,7 +1592,7 @@ export function KeybindingsSettingsPanel() {
           </div>
         }
       >
-        {!isElectron ? <BrowserModKeyFlipRow /> : null}
+        {!isElectron ? <BrowserModKeyFlipRow /> : <BrowserKeybindingNotice />}
 
         <KeybindingsList {...listProps} />
       </SettingsSection>

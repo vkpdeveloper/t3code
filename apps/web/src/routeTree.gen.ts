@@ -19,7 +19,9 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsUsagesRouteImport } from './routes/settings.usages'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
+import { Route as SettingsSnapShotRouteImport } from './routes/settings.snap-shot'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
+import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings.notifications'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsIntegrationsRouteImport } from './routes/settings.integrations'
@@ -84,9 +86,19 @@ const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
   path: '/source-control',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsSnapShotRoute = SettingsSnapShotRouteImport.update({
+  id: '/snap-shot',
+  path: '/snap-shot',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsProjectsRoute = SettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsNotificationsRoute = SettingsNotificationsRouteImport.update({
@@ -181,7 +193,9 @@ export interface FileRoutesByFullPath {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/usages': typeof SettingsUsagesRoute
   '/$environmentId/$threadId': typeof ChatEnvironmentIdThreadIdRoute
@@ -206,7 +220,9 @@ export interface FileRoutesByTo {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/usages': typeof SettingsUsagesRoute
   '/': typeof ChatIndexRoute
@@ -234,7 +250,9 @@ export interface FileRoutesById {
   '/settings/integrations': typeof SettingsIntegrationsRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/providers': typeof SettingsProvidersRoute
+  '/settings/snap-shot': typeof SettingsSnapShotRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/settings/usages': typeof SettingsUsagesRoute
   '/_chat/': typeof ChatIndexRoute
@@ -263,7 +281,9 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/notifications'
+    | '/settings/projects'
     | '/settings/providers'
+    | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/usages'
     | '/$environmentId/$threadId'
@@ -288,7 +308,9 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/notifications'
+    | '/settings/projects'
     | '/settings/providers'
+    | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/usages'
     | '/'
@@ -315,7 +337,9 @@ export interface FileRouteTypes {
     | '/settings/integrations'
     | '/settings/keybindings'
     | '/settings/notifications'
+    | '/settings/projects'
     | '/settings/providers'
+    | '/settings/snap-shot'
     | '/settings/source-control'
     | '/settings/usages'
     | '/_chat/'
@@ -407,11 +431,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsSourceControlRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/snap-shot': {
+      id: '/settings/snap-shot'
+      path: '/snap-shot'
+      fullPath: '/settings/snap-shot'
+      preLoaderRoute: typeof SettingsSnapShotRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/providers': {
       id: '/settings/providers'
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof SettingsProvidersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/projects': {
+      id: '/settings/projects'
+      path: '/projects'
+      fullPath: '/settings/projects'
+      preLoaderRoute: typeof SettingsProjectsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/notifications': {
@@ -541,7 +579,9 @@ interface SettingsRouteChildren {
   SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsNotificationsRoute: typeof SettingsNotificationsRoute
+  SettingsProjectsRoute: typeof SettingsProjectsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
+  SettingsSnapShotRoute: typeof SettingsSnapShotRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsUsagesRoute: typeof SettingsUsagesRoute
 }
@@ -556,7 +596,9 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsIntegrationsRoute: SettingsIntegrationsRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsNotificationsRoute: SettingsNotificationsRoute,
+  SettingsProjectsRoute: SettingsProjectsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
+  SettingsSnapShotRoute: SettingsSnapShotRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsUsagesRoute: SettingsUsagesRoute,
 }

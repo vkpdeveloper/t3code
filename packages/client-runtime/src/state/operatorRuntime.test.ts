@@ -24,6 +24,7 @@ function operatorThread(
     },
     runtimeMode: "full-access",
     interactionMode: "default",
+    pullRequests: [],
     branch: "feat/operator-test",
     worktreePath: "/worktrees/operator-test",
     latestTurn: null,

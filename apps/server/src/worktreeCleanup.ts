@@ -290,7 +290,7 @@ function worktreeIsBusy(group: WorktreeGroup, runningTerminalThreadIds: Readonly
   );
 }
 
-export class WorktreePreparationError extends Schema.TaggedErrorClass<WorktreePreparationError>()(
+export class WorktreePreparationError extends Schema.TaggedError<WorktreePreparationError>()(
   "WorktreePreparationError",
   {
     worktreePath: Schema.String,
@@ -1006,7 +1006,14 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* forkParked(runSweepSafely.pipe(Effect.repeat(Schedule.spaced(SWEEP_INTERVAL))));
       const settingsChanges = yield* settings.subscribeChanges;
-      let lastCleanupAfterDays = (yield* settings.getSettings).worktreeCleanupAfterDays;
+      const initialSettings = yield* settings.getSettings.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("worktree cleanup could not read initial settings", { cause }).pipe(
+            Effect.as(null),
+          ),
+        ),
+      );
+      let lastCleanupAfterDays = initialSettings?.worktreeCleanupAfterDays ?? null;
       yield* forkParked(
         Stream.runForEach(settingsChanges, (nextSettings) => {
           if (nextSettings.worktreeCleanupAfterDays === lastCleanupAfterDays) {

@@ -1,11 +1,7 @@
 export * from "./catalog.ts";
 export * as Connectivity from "./connectivity.ts";
 export * as CredentialStore from "./credentialStore.ts";
-export {
-  ConnectionDriver,
-  type ConnectionDriverProgress,
-  type EnvironmentConnectionLease,
-} from "./driver.ts";
+export { type ConnectionDriverProgress, type EnvironmentConnectionLease } from "./driver.ts";
 export * from "./errors.ts";
 export * as Connection from "./layer.ts";
 export * from "./model.ts";
@@ -15,14 +11,6 @@ export {
   type PairingConnectionInput,
   type SavedConnectionRenameInput,
   type SshConnectionInput,
-  prepareBearerConnectionUpdate,
-  preparePairingRegistration,
-  prepareSavedConnectionRename,
-  prepareSshRegistration,
-  registerPairingConnection,
-  registerSshConnection,
-  renameSavedConnection,
-  updateBearerConnection,
 } from "./onboarding.ts";
 export * from "./presentation.ts";
 export * as ProfileStore from "./profileStore.ts";
@@ -31,6 +19,5 @@ export {
   EnvironmentRegistry,
   PlatformEnvironmentRemovalError,
 } from "./registry.ts";
-export { ConnectionResolver } from "./resolver.ts";
 export { EnvironmentSupervisor, type EnvironmentSupervisorOptions } from "./supervisor.ts";
 export * as Wakeups from "./wakeups.ts";

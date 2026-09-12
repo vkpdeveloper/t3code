@@ -9,18 +9,6 @@ import {
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
 import { isMacPlatform } from "./lib/utils";
-import { getShortcutRuntime, type ShortcutRuntime } from "./shortcutRuntime";
-
-/**
- * Resolves the abstract `mod` token to a concrete modifier.
- *
- * Only `mod` flips. An explicit `cmd+k` or `ctrl+k` in a keybinding config is
- * a deliberate choice and is matched and rendered literally in every runtime.
- */
-export function resolveModModifier(platform: string, runtime: ShortcutRuntime): "meta" | "ctrl" {
-  if (!isMacPlatform(platform)) return "ctrl";
-  return runtime === "desktop" ? "meta" : "ctrl";
-}
 
 export interface ShortcutEventLike {
   type?: string;
@@ -57,30 +45,59 @@ interface ResolvedShortcutLabelOptions extends ShortcutMatchOptions {
   platform?: string;
 }
 
+import { getShortcutRuntime, type ShortcutRuntime } from "./shortcutRuntime";
+
+/**
+ * Resolves the abstract `mod` token to a concrete modifier.
+ *
+ * Only `mod` flips. An explicit `cmd+k` or `ctrl+k` in a keybinding config is
+ * a deliberate choice and is matched and rendered literally in every runtime.
+ */
+export function resolveModModifier(platform: string, runtime: ShortcutRuntime): "meta" | "ctrl" {
+  if (!isMacPlatform(platform)) return "ctrl";
+  return runtime === "desktop" ? "meta" : "ctrl";
+}
+
 const TERMINAL_WORD_BACKWARD = "\u001bb";
 const TERMINAL_WORD_FORWARD = "\u001bf";
 const TERMINAL_LINE_START = "\u0001";
 const TERMINAL_LINE_END = "\u0005";
 const TERMINAL_DELETE_TO_LINE_START = "\u0015";
-const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
-  BracketLeft: ["["],
-  BracketRight: ["]"],
-  Digit0: ["0"],
-  Digit1: ["1"],
-  Digit2: ["2"],
-  Digit3: ["3"],
-  Digit4: ["4"],
-  Digit5: ["5"],
-  Digit6: ["6"],
-  Digit7: ["7"],
-  Digit8: ["8"],
-  Digit9: ["9"],
+const EVENT_CODE_SHORTCUT_KEYS: Readonly<Record<string, string>> = {
+  Backquote: "`",
+  Backslash: "\\",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Comma: ",",
+  Digit0: "0",
+  Digit1: "1",
+  Digit2: "2",
+  Digit3: "3",
+  Digit4: "4",
+  Digit5: "5",
+  Digit6: "6",
+  Digit7: "7",
+  Digit8: "8",
+  Digit9: "9",
+  Equal: "=",
+  Minus: "-",
+  Period: ".",
+  Quote: "'",
+  Semicolon: ";",
+  Slash: "/",
 };
 
 function normalizeEventKey(key: string): string {
   const normalized = key.toLowerCase();
   if (normalized === "esc") return "escape";
   return normalized;
+}
+
+export function shortcutKeyFromEvent(event: Pick<ShortcutEventLike, "key" | "code">): string {
+  const layoutKey = normalizeEventKey(event.key);
+  if (/^[a-z]$/.test(layoutKey)) return layoutKey;
+  const physicalKey = event.code ? EVENT_CODE_SHORTCUT_KEYS[event.code] : undefined;
+  return physicalKey ?? layoutKey;
 }
 
 function resolveEventKeys(event: ShortcutEventLike): Set<string> {
@@ -95,12 +112,7 @@ function resolveEventKeys(event: ShortcutEventLike): Set<string> {
   if (letterCode && !/^[a-z]$/.test(layoutKey)) {
     keys.add(letterCode.toLowerCase());
   }
-  const aliases = event.code ? EVENT_CODE_KEY_ALIASES[event.code] : undefined;
-  if (!aliases) return keys;
-
-  for (const alias of aliases) {
-    keys.add(alias);
-  }
+  keys.add(shortcutKeyFromEvent(event));
   return keys;
 }
 
@@ -172,7 +184,7 @@ function matchesWhenClause(
   return evaluateWhenNode(whenAst, context);
 }
 
-function shortcutConflictKey(
+export function shortcutConflictKey(
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
   runtime = getShortcutRuntime(),
@@ -180,7 +192,6 @@ function shortcutConflictKey(
   const useMetaForMod = resolveModModifier(platform, runtime) === "meta";
   const metaKey = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
   const ctrlKey = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
-
   return [
     shortcut.key,
     metaKey ? "meta" : "",
@@ -247,7 +258,7 @@ export function resolveShortcutCommand(
   return null;
 }
 
-function formatShortcutKeyLabel(key: string): string {
+export function formatShortcutKeyLabel(key: string): string {
   if (key === " ") return "Space";
   if (key.length === 1) return key.toUpperCase();
   if (key === "escape") return "Esc";
@@ -261,7 +272,7 @@ function formatShortcutKeyLabel(key: string): string {
 export function formatShortcutLabel(
   shortcut: KeybindingShortcut,
   platform = navigator.platform,
-  runtime = getShortcutRuntime(),
+  runtime: ShortcutRuntime = getShortcutRuntime(),
 ): string {
   const keyLabel = formatShortcutKeyLabel(shortcut.key);
   const useMetaForMod = resolveModModifier(platform, runtime) === "meta";
@@ -287,17 +298,17 @@ export function formatShortcutLabel(
 
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
-  command: KeybindingCommand,
+  command: KeybindingCommand | null,
   options?: string | ResolvedShortcutLabelOptions,
 ): string | null {
+  if (command === null) return null;
   const resolvedOptions =
     typeof options === "string"
       ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
       : options;
   const platform = resolvePlatform(resolvedOptions);
-  const runtime = resolveRuntime(resolvedOptions);
   const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
-  return shortcut ? formatShortcutLabel(shortcut, platform, runtime) : null;
+  return shortcut ? formatShortcutLabel(shortcut, platform) : null;
 }
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
@@ -405,14 +416,6 @@ export function isDiffToggleShortcut(
   options?: ShortcutMatchOptions,
 ): boolean {
   return matchesCommandShortcut(event, keybindings, "diff.toggle", options);
-}
-
-export function isPreviewRefreshShortcut(
-  event: ShortcutEventLike,
-  keybindings: ResolvedKeybindingsConfig,
-  options?: ShortcutMatchOptions,
-): boolean {
-  return matchesCommandShortcut(event, keybindings, "preview.refresh", options);
 }
 
 export function isOpenFavoriteEditorShortcut(
