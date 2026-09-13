@@ -7,7 +7,7 @@ orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with six entries:
+[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with eight entries:
 
 | Driver kind   | Driver source                                 |
 | ------------- | --------------------------------------------- |
@@ -15,6 +15,8 @@ orchestration layer does not know which one is behind a thread.
 | `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]           |
 | `cursor`      | [`Drivers/CursorDriver.ts`][cursor]           |
 | `grok`        | [`Drivers/GrokDriver.ts`][grok]               |
+| `devin`       | [`Drivers/DevinDriver.ts`][devin]             |
+| `amp`         | [`Drivers/AmpDriver.ts`][amp]                 |
 | `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode]       |
 | `antigravity` | [`Drivers/AntigravityDriver.ts`][antigravity] |
 
@@ -62,6 +64,28 @@ probes hang or surprise the user. A failed `initialize` degrades to `warning` wi
 list instead of persisting `error` over a working install. The built-in `grok-build` slug is the
 CLI's product name, not an ACP model id. `applyGrokAcpModelSelection` treats it as "keep the
 session's current model" and never sends it in `session/set_model`.
+
+## Devin ACP session and models
+
+The Devin driver runs `devin acp`, a stock ACP agent, so the shared runtime handles streaming,
+tool calls, permissions, usage, and titles. Three Devin decisions live in
+[`DevinAcpSupport`][devin-support]:
+
+- The runtime is started without an `authMethodId`, so it never sends ACP `authenticate`. Devin's
+  only auth method is `devin-browser`, which starts a browser PKCE flow on every call even when the
+  CLI already holds credentials. Sessions rely on `devin auth login` credentials instead, and the
+  health check reports a logged-out CLI before any session is opened.
+- Modes are mapped explicitly. The generic alias resolver would send Supervised (`approval-required`) to Devin's
+  read-only Ask mode. Devin has no ask-before-edit mode over ACP, so Supervised and
+  Auto-accept edits both use Code, Auto uses Smart, and Full access uses Bypass Permissions.
+- The model catalog is read only from the session's `model` config option. `devin models list`
+  prints the full catalog including models the account cannot use, while the session advertises
+  exactly what a prompt would accept. The health check opens a throwaway session for this and
+  deletes it with `session/delete` so probes do not accumulate in `devin ls`.
+
+Devin sends ask-user-question as an ACP form elicitation under `elicitation/create` and
+`_session/elicitation` rather than `session/elicitation`; the adapter registers both as extension
+requests and maps the JSON-schema form onto T3 user-input questions.
 
 ## Antigravity ownership and protocol
 
@@ -402,6 +426,9 @@ Several Grok Build notifications do not yet have a truthful adapter-only mapping
 [claude]: ../../apps/server/src/provider/Drivers/ClaudeDriver.ts
 [cursor]: ../../apps/server/src/provider/Drivers/CursorDriver.ts
 [grok]: ../../apps/server/src/provider/Drivers/GrokDriver.ts
+[devin]: ../../apps/server/src/provider/Drivers/DevinDriver.ts
+[devin-support]: ../../apps/server/src/provider/acp/DevinAcpSupport.ts
+[amp]: ../../apps/server/src/provider/Drivers/AmpDriver.ts
 [opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
 [antigravity]: ../../apps/server/src/provider/Drivers/AntigravityDriver.ts
 [antigravity-adapter]: ../../apps/server/src/provider/Layers/AntigravityAdapter.ts
