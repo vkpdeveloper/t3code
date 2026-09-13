@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   CheckIcon,
   ChevronRightIcon,
+  CodeXmlIcon,
   CopyIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
@@ -20,6 +21,7 @@ import {
   PresentationIcon,
   SparklesIcon,
   TriangleAlertIcon,
+  WorkflowIcon,
   WrapTextIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -133,6 +135,7 @@ import { GitHubIcon } from "./Icons";
 import { createIncrementalHighlightedDocument } from "../lib/incrementalHighlighting";
 import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
+import { MermaidDiagram, useMermaidSvg } from "./MarkdownMermaid";
 import { useTheme } from "../hooks/useTheme";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import {
@@ -898,12 +901,14 @@ function MarkdownCodeBlock({
   language,
   fenceTitle,
   theme,
+  headerActions,
   children,
 }: {
   code: string;
   language: string;
   fenceTitle: string | null;
   theme: "light" | "dark";
+  headerActions?: ReactNode;
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
@@ -965,6 +970,7 @@ function MarkdownCodeBlock({
           />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {headerActions}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1004,6 +1010,126 @@ function MarkdownCodeBlock({
       </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * Mermaid fences render as diagrams once the block has finished streaming.
+ * While streaming (or when the diagram fails to parse) the source shows as a
+ * regular highlighted code block, so a half-written diagram never flashes
+ * errors and a broken one still shows what the agent wrote.
+ */
+function MarkdownMermaidCodeBlock({
+  code,
+  className,
+  fenceTitle,
+  theme,
+  themeName,
+  isStreaming,
+  sourceFallback,
+}: {
+  code: string;
+  className: string | undefined;
+  fenceTitle: string | null;
+  theme: "light" | "dark";
+  themeName: DiffThemeName;
+  isStreaming: boolean;
+  sourceFallback: ReactNode;
+}) {
+  const [showSource, setShowSource] = useState(false);
+  const source = (
+    <RenderErrorBoundary resetKeys={[code, themeName, isStreaming]} fallback={sourceFallback}>
+      <Suspense fallback={sourceFallback}>
+        <SuspenseShikiCodeBlock
+          className={className}
+          code={code}
+          themeName={themeName}
+          isStreaming={isStreaming}
+        />
+      </Suspense>
+    </RenderErrorBoundary>
+  );
+
+  if (isStreaming) {
+    return (
+      <MarkdownCodeBlock code={code} language="mermaid" fenceTitle={fenceTitle} theme={theme}>
+        {source}
+      </MarkdownCodeBlock>
+    );
+  }
+
+  return (
+    <RenderedMermaidCodeBlock
+      code={code}
+      fenceTitle={fenceTitle}
+      theme={theme}
+      showSource={showSource}
+      onToggleSource={() => setShowSource((value) => !value)}
+      source={source}
+    />
+  );
+}
+
+function RenderedMermaidCodeBlock({
+  code,
+  fenceTitle,
+  theme,
+  showSource,
+  onToggleSource,
+  source,
+}: {
+  code: string;
+  fenceTitle: string | null;
+  theme: "light" | "dark";
+  showSource: boolean;
+  onToggleSource: () => void;
+  source: ReactNode;
+}) {
+  const diagram = useMermaidSvg(code, theme);
+  const canToggle = diagram.status === "ready";
+  const toggleLabel = showSource ? "Show diagram" : "Show source";
+  const showDiagram = canToggle && !showSource;
+
+  return (
+    <MarkdownCodeBlock
+      code={code}
+      language="mermaid"
+      fenceTitle={fenceTitle}
+      theme={theme}
+      headerActions={
+        canToggle ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
+                  aria-pressed={showSource}
+                  onClick={onToggleSource}
+                  aria-label={toggleLabel}
+                />
+              }
+            >
+              {showSource ? (
+                <WorkflowIcon className="size-3" />
+              ) : (
+                <CodeXmlIcon className="size-3" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{toggleLabel}</TooltipPopup>
+          </Tooltip>
+        ) : null
+      }
+    >
+      {showDiagram ? <MermaidDiagram svg={diagram.svg} /> : source}
+      {diagram.status === "error" ? (
+        <div className="chat-markdown-mermaid-error border-t border-border/70 px-3 py-1.5 text-[0.6875rem] text-muted-foreground dark:border-transparent">
+          Diagram failed to render: {diagram.message}
+        </div>
+      ) : null}
+    </MarkdownCodeBlock>
   );
 }
 
@@ -3139,6 +3265,19 @@ const CHAT_MARKDOWN_COMPONENTS = {
 
     const language = extractFenceLanguage(codeBlock.className);
     const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+    if (language === "mermaid") {
+      return (
+        <MarkdownMermaidCodeBlock
+          code={codeBlock.code}
+          className={codeBlock.className}
+          fenceTitle={fenceTitle}
+          theme={resolvedTheme}
+          themeName={diffThemeName}
+          isStreaming={isStreaming}
+          sourceFallback={<pre {...props}>{children}</pre>}
+        />
+      );
+    }
     return (
       <MarkdownCodeBlock
         code={codeBlock.code}
