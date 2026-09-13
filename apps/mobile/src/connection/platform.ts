@@ -23,7 +23,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import Constants from "expo-constants";
 import * as Network from "expo-network";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
@@ -88,7 +88,7 @@ const connectivityLayer = Connectivity.layer({
 
 const wakeupsLayer = Wakeups.layer({
   changes: Stream.merge(
-    Stream.callback<"application-active-probe" | "application-active-reconnect">((queue) =>
+    Stream.callback<ReturnType<typeof mobileApplicationActiveWakeup>>((queue) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           let backgroundedAtMs = AppState.currentState === "background" ? Date.now() : null;
@@ -98,7 +98,10 @@ const wakeupsLayer = Wakeups.layer({
               return;
             }
             if (state === "active") {
-              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()));
+              Queue.offerUnsafe(
+                queue,
+                mobileApplicationActiveWakeup(backgroundedAtMs, Date.now(), Platform.OS),
+              );
               backgroundedAtMs = null;
             }
           });

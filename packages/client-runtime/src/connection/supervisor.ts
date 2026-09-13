@@ -380,7 +380,10 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "ConnectRequested":
           break;
         case "Wakeup":
-          if (next.reason === "application-active-reconnect") {
+          if (
+            next.reason === "application-active-reconnect" ||
+            next.reason === "android-application-resume"
+          ) {
             return true;
           }
           if (next.reason === "credentials-changed" && target._tag === "RelayConnectionTarget") {
@@ -412,18 +415,18 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             return false;
           }
           if (next.reason === "application-active-reconnect") {
-            // Mobile operating systems commonly suspend sockets without
-            // delivering a close event. A long background resume deliberately
-            // replaces that lease and starts a fresh attempt without backoff.
+            // iOS still replaces sockets after a long suspension.
             return true;
           }
-          if (next.reason === "application-active" || next.reason === "application-active-probe") {
+          if (ConnectionWakeups.isApplicationActiveWakeup(next.reason)) {
+            // A background suspension does not prove the socket died. Keep a
+            // healthy lease and only reconnect when its bounded probe fails.
             const probe = yield* lease.session.probe.pipe(
               Effect.timeoutOrElse({
                 duration:
-                  next.reason === "application-active-probe"
-                    ? MOBILE_CONNECTION_PROBE_TIMEOUT
-                    : CONNECTION_PROBE_TIMEOUT,
+                  next.reason === "application-active"
+                    ? CONNECTION_PROBE_TIMEOUT
+                    : MOBILE_CONNECTION_PROBE_TIMEOUT,
                 orElse: () =>
                   Effect.fail(
                     new ConnectionTransientError({

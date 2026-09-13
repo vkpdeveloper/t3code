@@ -115,9 +115,10 @@ export function presentAgentStatus(
 
   // Counts and colors belong in the identity so connection and appearance
   // changes refresh the native notification even when the rows stay fixed.
-  const summaryIdentity = input.statusNotificationEnabled
-    ? `${input.onlineCount}/${input.totalCount}\u0000${input.liveUpdatesEnabled}\u0000${JSON.stringify(input.theme)}\u0000${aggregate.identity}`
-    : null;
+  const summaryIdentity =
+    input.statusNotificationEnabled && input.totalCount > 0
+      ? `${input.onlineCount}/${input.totalCount}\u0000${input.liveUpdatesEnabled}\u0000${JSON.stringify(input.theme)}\u0000${aggregate.identity}`
+      : null;
 
   let presentedIdentity = previous.presentedIdentity;
   if (summaryIdentity === null) {

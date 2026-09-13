@@ -197,6 +197,17 @@ describe("presentAgentStatus", () => {
     expect(backgrounded.effects).toEqual([]);
   });
 
+  it("only keeps the service running while there are paired machines", () => {
+    const empty = input([], { environmentLabels: new Map(), onlineCount: 0, totalCount: 0 });
+    expect(presentAgentStatus(INITIAL_AGENT_STATUS_PRESENTER_STATE, empty).effects).toEqual([]);
+
+    const paired = presentAgentStatus(INITIAL_AGENT_STATUS_PRESENTER_STATE, input([]));
+    expect(paired.effects).toMatchObject([{ type: "update-summary", summary: { rows: [] } }]);
+    const removed = presentAgentStatus(paired.state, empty);
+    expect(removed.effects).toEqual([{ type: "stop-summary" }]);
+    expect(presentAgentStatus(removed.state, empty).effects).toEqual([]);
+  });
+
   it("stops the summary once when the status notification is switched off", () => {
     const seeded = presentAgentStatus(
       INITIAL_AGENT_STATUS_PRESENTER_STATE,

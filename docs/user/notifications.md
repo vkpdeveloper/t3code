@@ -16,10 +16,10 @@ Turning off **Web Push** unsubscribes that browser. Opening a notification retur
 
 ## Android agent status
 
-On Android, **Settings → Notifications** has two device-local switches:
+On Android, **Settings → Notifications** has device-local controls:
 
-- **Agent Status** keeps one silent, ongoing notification for active agents across your paired machines. Rows that need approval or input come first, followed by running agents from oldest to newest. Each row shows the thread title, machine, project, and elapsed time. A footer appears only when a paired machine is offline. T3 Code stays connected in the background while this setting is on. Tapping the notification opens the task when one agent is active, or Home when several are.
-- **Live Updates** (Android 16 QPR1 and later) lets Agent Status use the system Live Update design with a status-bar chip. Turn it off to keep the compact T3 layout, which matches the system notification style and marks each agent with a phase-colored dot.
+- **Stay connected** keeps connections to your paired machines active when you switch apps or lock the screen, even when no agents are running. It is on by default unless you previously turned off Agent Status. A silent ongoing notification shows agent activity and opens the task when one agent is active, or Home otherwise. Turn it off to reduce background battery use.
+- **Live Updates** (Android 16 QPR1 and later) lets the ongoing notification use the system Live Update design with a status-bar chip. Turn it off to keep the compact T3 layout, which matches the system notification style and marks each agent with a phase-colored dot.
 - **Agent Alerts** posts a local notification when an agent finishes, fails, or needs approval or input. A newer alert for the same thread replaces the older one, and starting work again clears it. Alerts only fire while T3 Code is not on screen. Tapping one opens the thread.
 
 The T3 layout shows the first agent when collapsed, with a count of the others. Expand it to see up to six agent rows.
