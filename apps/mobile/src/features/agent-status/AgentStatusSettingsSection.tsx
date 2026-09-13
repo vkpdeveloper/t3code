@@ -23,7 +23,7 @@ function AndroidAgentStatusSettingsSection() {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const loaded = AsyncResult.isSuccess(preferences);
-  const statusEnabled = loaded && preferences.value.agentStatusNotificationEnabled === true;
+  const statusEnabled = loaded && preferences.value.agentStatusNotificationEnabled !== false;
   const alertsEnabled = loaded && preferences.value.agentAlertsEnabled === true;
   const liveUpdatesEnabled = loaded && preferences.value.agentStatusLiveUpdatesEnabled !== false;
   const [promotedNotificationsAvailable, setPromotedNotificationsAvailable] = useState(
@@ -79,8 +79,8 @@ function AndroidAgentStatusSettingsSection() {
       <SettingsSection title="Notifications">
         <SettingsSwitchRow
           icon="bolt.circle"
-          label="Agent Status"
-          subtitle="Ongoing summary of agents working across your machines"
+          label="Stay connected"
+          subtitle="Keep connections active in the background with an ongoing notification"
           disabled={!loaded}
           value={statusEnabled}
           onValueChange={(value) => toggle("agentStatusNotificationEnabled", value)}
@@ -105,8 +105,8 @@ function AndroidAgentStatusSettingsSection() {
         />
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">
-        Agent Status keeps T3 Code connected in the background while agents run. Everything stays on
-        this device: no push service is involved.
+        Stay connected works even when no agents are running. Turn it off to reduce background
+        battery use.
       </Text>
     </View>
   );

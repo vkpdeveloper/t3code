@@ -46,9 +46,9 @@ export interface Preferences {
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
   /**
-   * Android only. Keeps a silent ongoing notification listing every running
-   * agent across paired machines, backed by a foreground service so the
-   * sockets stay open while the app is backgrounded.
+   * Android only. Enabled by default. Keeps paired machines connected through
+   * a foreground service, including when idle, with an ongoing agent-status
+   * notification. An explicit false disables background keep-alive.
    */
   readonly agentStatusNotificationEnabled?: boolean;
   /**

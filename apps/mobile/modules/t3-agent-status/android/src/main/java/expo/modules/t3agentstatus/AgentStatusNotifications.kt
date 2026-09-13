@@ -192,7 +192,7 @@ object AgentStatusNotifications {
     if (approvals == 1) return "1 agent needs approval"
     if (approvals > 1) return "$approvals agents need approval"
     return when (rows.size) {
-      0 -> "No agents running"
+      0 -> "Keeping T3 Code connected"
       1 -> "1 agent working"
       else -> "${rows.size} agents working"
     }

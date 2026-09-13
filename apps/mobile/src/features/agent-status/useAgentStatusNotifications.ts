@@ -143,7 +143,8 @@ export function useAgentStatusNotifications(): void {
     return { accentColor: colors["--color-primary"] };
   }, [themeAppearance, themeId]);
   const statusEnabled =
-    AsyncResult.isSuccess(preferences) && preferences.value.agentStatusNotificationEnabled === true;
+    AsyncResult.isSuccess(preferences) &&
+    preferences.value.agentStatusNotificationEnabled !== false;
   const alertsEnabled =
     AsyncResult.isSuccess(preferences) && preferences.value.agentAlertsEnabled === true;
   const liveUpdatesEnabled =
