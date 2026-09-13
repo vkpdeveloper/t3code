@@ -1,3 +1,9 @@
+import {
+  AmpRoutingInput,
+  AmpRoutingActionInput,
+  AmpRoutingSnapshot,
+  AmpRoutingError,
+} from "./amp.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -294,6 +300,8 @@ export const WS_METHODS = {
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
   providerAuthStart: "provider.auth.start",
+  ampRoutingRead: "provider.amp.routing.read",
+  ampRoutingAction: "provider.amp.routing.action",
   providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
   providerAuthCancel: "provider.auth.cancel",
@@ -508,6 +516,17 @@ const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
 });
 
 const ProviderSetupRpcError = Schema.Union([ProviderSetupError, EnvironmentAuthorizationError]);
+
+const WsAmpRoutingReadRpc = Rpc.make(WS_METHODS.ampRoutingRead, {
+  payload: AmpRoutingInput,
+  success: AmpRoutingSnapshot,
+  error: Schema.Union([AmpRoutingError, EnvironmentAuthorizationError]),
+});
+const WsAmpRoutingActionRpc = Rpc.make(WS_METHODS.ampRoutingAction, {
+  payload: AmpRoutingActionInput,
+  success: AmpRoutingSnapshot,
+  error: Schema.Union([AmpRoutingError, EnvironmentAuthorizationError]),
+});
 
 const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeResetCredit, {
   payload: ProviderConsumeResetCreditInput,
@@ -1355,6 +1374,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
+  WsAmpRoutingReadRpc,
+  WsAmpRoutingActionRpc,
   WsProviderConsumeResetCreditRpc,
   WsProviderAuthStartRpc,
   WsProviderAuthCompleteRpc,

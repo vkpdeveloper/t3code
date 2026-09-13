@@ -1,3 +1,4 @@
+import { AmpRoutingPanel } from "./AmpRoutingPanel";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
@@ -915,7 +916,14 @@ export function EnvironmentProviderSettings({
         onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}
         readOnly={readOnly}
         setup={
-          mode === "editor" && row.driver === "antigravity" ? (
+          mode === "editor" && row.driver === "amp" ? (
+            <AmpRoutingPanel
+              environmentId={environmentId}
+              instanceId={row.instanceId}
+              readOnly={readOnly}
+              enabled={resolveProviderInstanceEnabled(row.instance)}
+            />
+          ) : mode === "editor" && row.driver === "antigravity" ? (
             <ProviderSetupSection
               environmentId={environmentId}
               environmentLabel={environmentLabel}

@@ -735,6 +735,34 @@ export const CursorSettings = makeProviderSettingsSchema(
 );
 export type CursorSettings = typeof CursorSettings.Type;
 
+export const AmpSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("amp").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        providerSettingsForm: { placeholder: "amp", clearWhenEmpty: "omit" },
+      }),
+    ),
+    settingsFile: Schema.String.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Amp settings file",
+        providerSettingsForm: { placeholder: "Use Amp's settings" },
+      }),
+    ),
+    customModels: Schema.Array(CustomModelSetting).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  { order: ["binaryPath", "settingsFile"] },
+);
+export type AmpSettings = typeof AmpSettings.Type;
+
 export const GrokSettings = makeProviderSettingsSchema(
   {
     // Off by default (like Cursor and OpenCode): the binding is not yet

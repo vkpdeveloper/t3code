@@ -74,6 +74,7 @@ computer.
 | Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                        |
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                           |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
+| Amp         | Install the Amp CLI and run `amp login`, then add an Amp instance in provider settings.      |
 | Antigravity | Install and sign in with Google from T3 Code's provider settings.                            |
 
 Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set its
@@ -94,7 +95,7 @@ base URL. Mark secret values as sensitive; after saving, T3 Code does not displa
 their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
-[Claude](./providers-claude.md), [OpenCode](./providers-opencode.md), and
+[Amp](./providers-amp.md), [Claude](./providers-claude.md), [OpenCode](./providers-opencode.md), and
 [Antigravity](./providers-antigravity.md).
 
 ### Grok reasoning controls
@@ -119,7 +120,7 @@ Provider auth is required before you start a session with that provider, not bef
 T3 Code. You can install T3 Code, open it, and add providers afterwards. A provider that is not
 authenticated shows its status and setup instructions in **Settings**.
 
-For multi-account setups, see [Codex](./providers-codex.md), [Claude](./providers-claude.md), and
+For multi-account setups, see [Codex](./providers-codex.md), [Amp](./providers-amp.md), [Claude](./providers-claude.md), and
 [Antigravity](./providers-antigravity.md#accounts-and-removal).
 
 ### Transient provider failures

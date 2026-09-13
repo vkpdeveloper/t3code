@@ -1,3 +1,4 @@
+import type { AmpRoutingAction, AmpRoutingSnapshot, AmpRoutingError } from "@t3tools/contracts";
 /**
  * ProviderDriver / ProviderInstance — driver SPI as plain values.
  *
@@ -86,6 +87,13 @@ export interface ProviderInstance {
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
   readonly auth?: ProviderAuthController;
+  readonly ampRouting?: {
+    read: (workspace: boolean) => Effect.Effect<AmpRoutingSnapshot, AmpRoutingError>;
+    act: (
+      workspace: boolean,
+      operation: AmpRoutingAction,
+    ) => Effect.Effect<AmpRoutingSnapshot, AmpRoutingError>;
+  };
 }
 
 export interface ProviderContinuationIdentity {
