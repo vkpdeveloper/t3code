@@ -28,7 +28,7 @@
 - [Image generation](./user/image-generation.md)
 - [Running in the background](./user/background-service.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) ·
-  [Grok Build](./user/providers-grok.md) · [OpenCode](./user/providers-opencode.md) ·
+  [Amp](./user/providers-amp.md) · [Grok Build](./user/providers-grok.md) · [OpenCode](./user/providers-opencode.md) ·
   [Antigravity](./user/providers-antigravity.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)

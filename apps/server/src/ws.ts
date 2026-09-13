@@ -1,3 +1,4 @@
+import { AmpRoutingError } from "@t3tools/contracts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -1894,6 +1895,24 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.ampRoutingRead]: (input) =>
+          Effect.gen(function* () {
+            const instance = yield* providerInstances.getInstance(input.instanceId);
+            if (!instance?.enabled || !instance.ampRouting)
+              return yield* new AmpRoutingError({
+                detail: "Enable an Amp provider instance first.",
+              });
+            return yield* instance.ampRouting.read(input.workspace);
+          }),
+        [WS_METHODS.ampRoutingAction]: (input) =>
+          Effect.gen(function* () {
+            const instance = yield* providerInstances.getInstance(input.instanceId);
+            if (!instance?.enabled || !instance.ampRouting)
+              return yield* new AmpRoutingError({
+                detail: "Enable an Amp provider instance first.",
+              });
+            return yield* instance.ampRouting.act(input.workspace, input.operation);
+          }),
         [WS_METHODS.providerConsumeResetCredit]: (input) =>
           observeRpcEffect(
             WS_METHODS.providerConsumeResetCredit,

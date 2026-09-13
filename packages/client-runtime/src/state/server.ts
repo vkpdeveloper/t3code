@@ -1063,6 +1063,14 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     configProjection,
     welcome,
+    ampRoutingRead: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:amp:routing-read",
+      tag: WS_METHODS.ampRoutingRead,
+    }),
+    ampRoutingAction: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:amp:routing-action",
+      tag: WS_METHODS.ampRoutingAction,
+    }),
     consumeResetCredit: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:consume-reset-credit",
       tag: WS_METHODS.providerConsumeResetCredit,

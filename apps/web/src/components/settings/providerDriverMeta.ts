@@ -1,4 +1,5 @@
 import {
+  AmpSettings,
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
@@ -9,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
 import {
+  AmpIcon,
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
@@ -44,6 +46,12 @@ export interface ProviderClientDefinition {
 }
 
 const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+  {
+    value: ProviderDriverKind.make("amp"),
+    label: "Amp",
+    icon: AmpIcon,
+    settingsSchema: AmpSettings,
+  },
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
