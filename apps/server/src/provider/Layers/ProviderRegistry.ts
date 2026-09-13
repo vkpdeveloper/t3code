@@ -103,12 +103,20 @@ export function upsertProviderWorkspaceSnapshot(
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
   const isCodex = provider.driver === ProviderDriverKind.make("codex");
-  if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make("opencode")) {
+  // Devin's catalog is whatever the ACP session's model option lists for the
+  // account, so a successful probe must also drop the pre-probe fallback entry.
+  const isDevin = provider.driver === ProviderDriverKind.make("devin");
+  if (
+    !isAntigravity &&
+    !isCodex &&
+    !isDevin &&
+    provider.driver !== ProviderDriverKind.make("opencode")
+  ) {
     return true;
   }
 
   if (
-    (isAntigravity || isCodex) &&
+    (isAntigravity || isCodex || isDevin) &&
     (!provider.enabled || provider.auth.status === "unauthenticated")
   ) {
     return false;
