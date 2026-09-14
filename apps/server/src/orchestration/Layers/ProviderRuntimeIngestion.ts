@@ -925,10 +925,13 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed(new Set<MessageId>()),
   });
 
-  const bufferedAssistantTextByMessageId = yield* Cache.make<MessageId, string>({
+  const bufferedAssistantTextByMessageId = yield* Cache.make<
+    MessageId,
+    { text: string; startedAt: string }
+  >({
     capacity: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
     timeToLive: BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
-    lookup: () => Effect.succeed(""),
+    lookup: () => Effect.succeed({ text: "", startedAt: "" }),
   });
 
   const assistantSegmentStateByTurnKey = yield* Cache.make<string, AssistantSegmentState>({
@@ -1106,31 +1109,34 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const appendBufferedAssistantText = (messageId: MessageId, delta: string) =>
+  const appendBufferedAssistantText = (messageId: MessageId, delta: string, startedAt: string) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
-      Effect.flatMap((existingText) =>
+      Effect.flatMap((existingEntry) =>
         Effect.gen(function* () {
-          const nextText = Option.match(existingText, {
-            onNone: () => delta,
-            onSome: (text) => `${text}${delta}`,
-          });
-          if (nextText.length <= MAX_BUFFERED_ASSISTANT_CHARS) {
-            yield* Cache.set(bufferedAssistantTextByMessageId, messageId, nextText);
-            return "";
+          const existing = Option.getOrUndefined(existingEntry);
+          const nextEntry = {
+            text: `${existing?.text ?? ""}${delta}`,
+            // The reply speed estimate anchors on createdAt, so a buffered
+            // message must remember when its first text actually arrived.
+            startedAt: existing?.startedAt || startedAt,
+          };
+          if (nextEntry.text.length <= MAX_BUFFERED_ASSISTANT_CHARS) {
+            yield* Cache.set(bufferedAssistantTextByMessageId, messageId, nextEntry);
+            return undefined;
           }
 
           // Safety valve: flush full buffered text as an assistant delta to cap memory.
           yield* Cache.invalidate(bufferedAssistantTextByMessageId, messageId);
-          return nextText;
+          return nextEntry;
         }),
       ),
     );
 
   const takeBufferedAssistantText = (messageId: MessageId) =>
     Cache.getOption(bufferedAssistantTextByMessageId, messageId).pipe(
-      Effect.flatMap((existingText) =>
+      Effect.flatMap((existingEntry) =>
         Cache.invalidate(bufferedAssistantTextByMessageId, messageId).pipe(
-          Effect.as(Option.getOrElse(existingText, () => "")),
+          Effect.as(Option.getOrElse(existingEntry, () => ({ text: "", startedAt: "" }))),
         ),
       ),
     );
@@ -1165,8 +1171,8 @@ const make = Effect.gen(function* () {
     commandTag: string;
   }) =>
     Effect.gen(function* () {
-      const bufferedText = yield* takeBufferedAssistantText(input.messageId);
-      if (!hasRenderableAssistantText(bufferedText)) {
+      const buffered = yield* takeBufferedAssistantText(input.messageId);
+      if (!hasRenderableAssistantText(buffered.text)) {
         return false;
       }
 
@@ -1175,8 +1181,9 @@ const make = Effect.gen(function* () {
         commandId: yield* providerCommandId(input.event, input.commandTag),
         threadId: input.threadId,
         messageId: input.messageId,
-        delta: bufferedText,
+        delta: buffered.text,
         ...(input.turnId ? { turnId: input.turnId } : {}),
+        ...(buffered.startedAt ? { startedAt: buffered.startedAt } : {}),
         createdAt: input.createdAt,
       });
       return true;
@@ -1227,10 +1234,10 @@ const make = Effect.gen(function* () {
     hasProjectedMessage?: boolean;
   }) =>
     Effect.gen(function* () {
-      const bufferedText = yield* takeBufferedAssistantText(input.messageId);
+      const buffered = yield* takeBufferedAssistantText(input.messageId);
       const text =
-        bufferedText.length > 0
-          ? bufferedText
+        buffered.text.length > 0
+          ? buffered.text
           : (input.fallbackText?.trim().length ?? 0) > 0
             ? input.fallbackText!
             : "";
@@ -1244,6 +1251,9 @@ const make = Effect.gen(function* () {
           messageId: input.messageId,
           delta: text,
           ...(input.turnId ? { turnId: input.turnId } : {}),
+          ...(buffered.text.length > 0 && buffered.startedAt
+            ? { startedAt: buffered.startedAt }
+            : {}),
           createdAt: input.createdAt,
         });
       }
@@ -1657,11 +1667,9 @@ const make = Effect.gen(function* () {
             eventTurnId !== undefined &&
             (yield* serverSettingsService.getSettings).autoContinueAfterUsageLimitReset
           ) {
-            const modelSelection = (
-              yield* projectionSnapshotQuery
-                .getThreadShellById(event.threadId)
-                .pipe(Effect.map(Option.getOrUndefined))
-            )?.modelSelection;
+            const modelSelection = (yield* projectionSnapshotQuery
+              .getThreadShellById(event.threadId)
+              .pipe(Effect.map(Option.getOrUndefined)))?.modelSelection;
             if (modelSelection === undefined) {
               return;
             }
@@ -1726,15 +1734,16 @@ const make = Effect.gen(function* () {
               : "buffered",
         );
         if (assistantDeliveryMode === "buffered") {
-          const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
-          if (spillChunk.length > 0) {
+          const spill = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta, now);
+          if (spill !== undefined) {
             yield* orchestrationEngine.dispatch({
               type: "thread.message.assistant.delta",
               commandId: yield* providerCommandId(event, "assistant-delta-buffer-spill"),
               threadId: thread.id,
               messageId: assistantMessageId,
-              delta: spillChunk,
+              delta: spill.text,
               ...(turnId ? { turnId } : {}),
+              startedAt: spill.startedAt,
               createdAt: now,
             });
           }
@@ -2014,11 +2023,9 @@ const make = Effect.gen(function* () {
 
       if (event.type === "session.configured") {
         const modelSelection = event.payload.config.modelSelection;
-        const currentModelSelection = (
-          yield* projectionSnapshotQuery
-            .getThreadShellById(event.threadId)
-            .pipe(Effect.map(Option.getOrUndefined))
-        )?.modelSelection;
+        const currentModelSelection = (yield* projectionSnapshotQuery
+          .getThreadShellById(event.threadId)
+          .pipe(Effect.map(Option.getOrUndefined)))?.modelSelection;
         if (
           isModelSelection(modelSelection) &&
           modelSelection.instanceId === currentModelSelection?.instanceId &&
