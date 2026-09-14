@@ -6,6 +6,8 @@
  * `model` config option. That option is the only source of truth for the picker:
  * `devin models list` prints the whole catalog including models the account
  * cannot use, while the session only advertises what a prompt would accept.
+ * Devin fills the option in shortly after `session/new`, so the probe keeps the
+ * session open until the catalog has settled (see `awaitDevinModelCatalog`).
  *
  * @module provider/Layers/DevinProvider
  */
@@ -44,7 +46,7 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
 import {
-  buildDevinModelsFromConfigOptions,
+  awaitDevinModelCatalog,
   deleteDevinAcpSession,
   DEVIN_DEFAULT_MODEL_SLUG,
   makeDevinAcpRuntime,
@@ -61,9 +63,10 @@ const DEVIN_PRESENTATION = {
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] });
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
-// One local `initialize` plus `session/new`. Session setup boots the user's MCP
-// servers, so it is slower than a bare initialize.
-const DEVIN_ACP_DISCOVERY_TIMEOUT_MS = 20_000;
+// One local `initialize` plus `session/new`, then the wait for Devin's catalog
+// push. Session setup boots the user's MCP servers, so it is slower than a bare
+// initialize.
+const DEVIN_ACP_DISCOVERY_TIMEOUT_MS = 30_000;
 const DEVIN_ACP_DISCOVERY_FAILED_MESSAGE =
   "Devin CLI is installed but ACP model discovery failed. Model options may be incomplete.";
 
@@ -153,8 +156,8 @@ const runDevinCliCommand = (
   });
 
 /**
- * Opens a throwaway ACP session, reads the model catalog from its config options,
- * then deletes the session so it does not linger in `devin ls`.
+ * Opens a throwaway ACP session, waits for its model catalog to settle, then
+ * deletes the session so it does not linger in `devin ls`.
  */
 export const discoverDevinModelsViaAcp = (
   devinSettings: DevinSettings,
@@ -171,7 +174,9 @@ export const discoverDevinModelsViaAcp = (
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
-    const models = buildDevinModelsFromConfigOptions(yield* acp.getConfigOptions);
+    // Devin's placeholder catalog has a single entry. A free account legitimately
+    // ends up with one model too, so it waits out the timeout and keeps that one.
+    const models = yield* awaitDevinModelCatalog(acp, (candidates) => candidates.length > 1);
     yield* deleteDevinAcpSession(acp, started.sessionId);
     return models;
   }).pipe(Effect.scoped);

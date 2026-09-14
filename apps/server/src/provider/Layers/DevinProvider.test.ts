@@ -137,4 +137,26 @@ describe("checkDevinProviderStatus", () => {
       expect(snapshot.slashCommands.map((command) => command.name)).toContain("compact");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  // Real sleeps: the probe polls the wall clock while waiting for the catalog push.
+  it.live("waits for the catalog Devin pushes after session/new", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-provider-")),
+      );
+      const binaryPath = writeFakeDevin(dir, {
+        T3_FAKE_DEVIN_AUTH_OUTPUT: LOGGED_IN_OUTPUT,
+        T3_ACP_LATE_MODEL_CATALOG: "1",
+      });
+      const snapshot = yield* checkDevinProviderStatus(
+        decodeDevinSettings({ enabled: true, binaryPath }),
+        process.env,
+        dir,
+      );
+      expect(snapshot.status).toBe("ready");
+      // The placeholder answer lists one model; the pushed catalog lists the rest.
+      expect(snapshot.models.length).toBeGreaterThan(1);
+      expect(snapshot.models.filter((model) => model.isDefault).length).toBe(1);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
