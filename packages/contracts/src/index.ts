@@ -1,5 +1,7 @@
 export * from "./baseSchemas.ts";
 export * from "./assistantCitations.ts";
+export * from "./composerContext.ts";
+export * from "./composerContextClipboard.ts";
 export * from "./background.ts";
 export * from "./automation.ts";
 export * from "./auth.ts";
@@ -44,5 +46,6 @@ export * from "./resourceTelemetry.ts";
 export * from "./usage.ts";
 export * from "./vibeProxy.ts";
 export * from "./rpc.ts";
+export * from "./worktreeSetup.ts";
 
 export * from "./amp.ts";

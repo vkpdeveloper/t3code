@@ -13,6 +13,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import { modelChangeRequiresNewThread } from "@t3tools/shared/model";
 import * as Cache from "effect/Cache";
@@ -1387,7 +1388,10 @@ const make = Effect.gen(function* () {
         break;
       }
       resolvedQueuedMessages.push({
-        text: message.text,
+        text: projectComposerContextForProvider({
+          text: message.text,
+          records: message.context?.records ?? [],
+        }),
         ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       });
     }
@@ -1650,7 +1654,13 @@ const make = Effect.gen(function* () {
     };
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: queuedTurnInput.messageText ?? event.payload.promptOverride ?? message.text,
+      messageText:
+        queuedTurnInput.messageText !== undefined
+          ? queuedTurnInput.messageText
+          : projectComposerContextForProvider({
+              text: event.payload.promptOverride ?? message.text,
+              records: message.context?.records ?? [],
+            }),
       ...(resolvedQueuedMessages.length > 0
         ? { attachments: queuedTurnInput.attachments }
         : event.payload.promptOverride === undefined && message.attachments !== undefined

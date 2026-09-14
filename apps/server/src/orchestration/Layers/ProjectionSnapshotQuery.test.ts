@@ -1,17 +1,23 @@
 import {
   type AgentSessionImportSource,
+  ChatAttachment,
+  ComposerContextId,
   CheckpointRef,
   EventId,
   MessageId,
   ProjectId,
   ThreadId,
+  type ThreadPullRequestLink,
+  ThreadLinkedPullRequest,
   TurnId,
   ProviderInstanceId,
+  OrchestrationMessageContext,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -31,6 +37,67 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+const encodeChatAttachments = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Array(ChatAttachment)),
+);
+const encodeThreadLinkedPullRequest = Schema.encodeSync(
+  Schema.fromJsonString(ThreadLinkedPullRequest),
+);
+const encodeMessageContext = Schema.encodeEffect(
+  Schema.fromJsonString(OrchestrationMessageContext),
+);
+
+it.effect("reads project shells without loading threads or resolving excluded projects", () => {
+  const resolved: string[] = [];
+  const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
+    Layer.provide(ThreadPlanProgress.layer),
+    Layer.provide(
+      Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
+        resolve: (root) =>
+          Effect.sync(() => {
+            resolved.push(root);
+            return null;
+          }),
+      }),
+    ),
+    Layer.provideMerge(SqlitePersistenceMemory),
+  );
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const query = yield* ProjectionSnapshotQuery;
+    yield* sql`INSERT INTO projection_projects
+      (project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at)
+      VALUES
+      ('p1', 'First', '/first', '[]', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
+      ('p2', 'Second', '/second', '[]', '2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z', NULL),
+      ('p3', 'Deleted', '/deleted', '[]', '2026-09-03T00:00:00Z', '2026-09-03T00:00:00Z', '2026-09-04T00:00:00Z')`;
+    const expected = (yield* query.getShellSnapshot()).projects;
+    resolved.length = 0;
+    yield* sql`INSERT INTO projection_threads
+      (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
+      VALUES ('t1', 'p1', 'Thread', 'invalid-json', 'full-access', 'default', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')`;
+
+    const counter = makeSqlStatementCounter();
+    const projects = yield* query.getProjectShells().pipe(Effect.withTracer(counter.tracer));
+    assert.deepStrictEqual(projects, expected);
+    assert.strictEqual(counter.count(), 1);
+    assert.deepStrictEqual(resolved.toSorted(), ["/first", "/second"]);
+    resolved.length = 0;
+    yield* sql`UPDATE projection_projects SET scripts_json = 'invalid-json' WHERE project_id IN ('p1', 'p3')`;
+    assert.deepStrictEqual(yield* query.getProjectShells([asProjectId("p2")]), [expected[1]!]);
+    assert.deepStrictEqual(resolved, ["/second"]);
+    resolved.length = 0;
+    const beforeEmpty = counter.count();
+    assert.deepStrictEqual(
+      yield* query.getProjectShells([]).pipe(Effect.withTracer(counter.tracer)),
+      [],
+    );
+    assert.strictEqual(counter.count(), beforeEmpty);
+    assert.deepStrictEqual(yield* query.getProjectShells([asProjectId("p3")]), []);
+    assert.deepStrictEqual(resolved, []);
+  }).pipe(Effect.provide(layer));
+});
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -357,7 +424,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           automationId: null,
           automationRunId: null,
           usageLimitWait: null,
-          pullRequests: [{
+          pullRequests: [
+            {
               host: "github.com",
               repository: "pingdotgg/t3code",
               number: 41,
@@ -374,7 +442,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
                 syncedAt: "2026-02-24T00:00:02.700Z",
               },
               stack: null,
-            }, {
+            },
+            {
               host: "github.com",
               repository: "pingdotgg/t3code",
               number: 42,
@@ -383,7 +452,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               linkedAt: "2026-02-24T00:00:03.000Z",
               snapshot: null,
               stack: null,
-            }],
+            },
+          ],
           branchPullRequest: null,
           activeOrderKey: null,
           latestTurn: {
@@ -517,7 +587,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           automationId: null,
           automationRunId: null,
           usageLimitWait: null,
-          pullRequests: [{
+          pullRequests: [
+            {
               host: "github.com",
               repository: "pingdotgg/t3code",
               number: 41,
@@ -534,7 +605,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
                 syncedAt: "2026-02-24T00:00:02.700Z",
               },
               stack: null,
-            }, {
+            },
+            {
               host: "github.com",
               repository: "pingdotgg/t3code",
               number: 42,
@@ -543,7 +615,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               linkedAt: "2026-02-24T00:00:03.000Z",
               snapshot: null,
               stack: null,
-            }],
+            },
+          ],
           branchPullRequest: null,
           activeOrderKey: null,
           latestTurn: {
@@ -696,6 +769,159 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(changedContext.value.session?.providerName, "claudeAgent");
         assert.equal(changedContext.value.session?.providerInstanceId, "claude-secondary");
         assert.equal(changedContext.value.session?.lastError, "Starting another session");
+      }
+    }),
+  );
+
+  it.effect("reads one turn-start message without decoding unrelated history", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-turn-start-read");
+      const messageId = MessageId.make("message-turn-start-read");
+      const createdAt = "2026-09-05T00:00:00.000Z";
+      const attachments = [
+        {
+          type: "file" as const,
+          id: "notes",
+          name: "notes.txt",
+          mimeType: "text/plain",
+          sizeBytes: 8,
+        },
+      ];
+      const attachmentsJson = yield* encodeChatAttachments(attachments);
+      const messageContext: OrchestrationMessageContext = {
+        version: 1,
+        records: [
+          {
+            version: 1,
+            contextId: ComposerContextId.make("notes-context"),
+            kind: "file",
+            label: "notes.txt",
+            attachmentId: "notes",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            sizeBytes: 8,
+          },
+        ],
+      };
+      const contextJson = yield* encodeMessageContext(messageContext);
+      yield* sql`
+        WITH RECURSIVE history(n) AS (
+          VALUES (1) UNION ALL SELECT n + 1 FROM history WHERE n < 2000
+        )
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, turn_id, role, text, attachments_json, context_json,
+          is_streaming, created_at, updated_at
+        )
+        SELECT 'turn-start-history:' || n, ${threadId}, 'old-turn:' || n, 'assistant',
+          'Unrelated assistant output', 'not-json', 'not-json', 0, ${createdAt}, ${createdAt}
+        FROM history
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, attachments_json, context_json, is_streaming, created_at, updated_at
+        ) VALUES (${messageId}, ${threadId}, 'user', 'Read these notes',
+          ${attachmentsJson}, ${contextJson}, 0, ${createdAt}, ${createdAt})
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at
+        ) VALUES ('turn-start-unrelated-user', 'thread-turn-start-unrelated', 'user', 'Unrelated prompt',
+          'not-json', 0, ${createdAt}, ${createdAt})
+      `;
+
+      const counter = makeSqlStatementCounter();
+      const context = yield* query
+        .getTurnStartMessage({ threadId, messageId })
+        .pipe(Effect.withTracer(counter.tracer));
+      assert.equal(counter.count(), 1);
+      assert.deepEqual(
+        context,
+        Option.some({
+          message: {
+            id: messageId,
+            role: "user",
+            text: "Read these notes",
+            turnId: null,
+            streaming: false,
+            createdAt,
+            updatedAt: createdAt,
+            attachments,
+            context: messageContext,
+          },
+          hasOtherUserMessages: false,
+        }),
+      );
+      assert.equal(
+        (yield* query.getTurnStartMessage({
+          threadId: ThreadId.make("thread-turn-start-unrelated"),
+          messageId,
+        }))._tag,
+        "None",
+      );
+      assert.equal(
+        (yield* query.getTurnStartMessage({ threadId, messageId: MessageId.make("missing") }))._tag,
+        "None",
+      );
+    }).pipe(
+      Effect.ensuring(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`
+            DELETE FROM projection_thread_messages
+            WHERE thread_id IN ('thread-turn-start-read', 'thread-turn-start-unrelated')
+          `;
+        }).pipe(Effect.orDie),
+      ),
+    ),
+  );
+
+  it.effect("keeps compaction and queued-message eligibility in the turn-start query", () =>
+    Effect.gen(function* () {
+      const query = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-turn-start-eligibility");
+      const messageId = MessageId.make("message-turn-start-eligibility");
+      const createdAt = "2026-09-05T00:00:00.000Z";
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, is_streaming, created_at, updated_at
+        ) VALUES (${messageId}, ${threadId}, 'user', 'Start a turn', 0, ${createdAt}, ${createdAt})
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id, thread_id, role, text, attachments_json, is_streaming, created_at, updated_at
+        ) VALUES ('turn-start-other-user', ${threadId}, 'user', '/compact', NULL, 0,
+          '2026-09-05T00:00:01.000Z', '2026-09-05T00:00:01.000Z')
+      `;
+
+      for (const { text, attachments, hasOtherUserMessages } of [
+        { text: "/compact", attachments: null, hasOtherUserMessages: false },
+        {
+          text: "\t\n\r /CoMpAcT\u00a0\u2028\ufeff",
+          attachments: "[ ]",
+          hasOtherUserMessages: false,
+        },
+        { text: "/compact keep recent errors", attachments: "[]", hasOtherUserMessages: true },
+        { text: "", attachments: null, hasOtherUserMessages: true },
+        { text: "Queued prompt", attachments: null, hasOtherUserMessages: true },
+        {
+          text: "/compact",
+          attachments:
+            '[{"type":"file","id":"notes","name":"notes.txt","mimeType":"text/plain","sizeBytes":8}]',
+          hasOtherUserMessages: true,
+        },
+      ]) {
+        yield* sql`
+          UPDATE projection_thread_messages SET text = ${text}, attachments_json = ${attachments}
+          WHERE message_id = 'turn-start-other-user'
+        `;
+        const context = yield* query.getTurnStartMessage({ threadId, messageId });
+        assert.equal(context._tag, "Some");
+        if (context._tag === "Some") {
+          assert.equal(context.value.hasOtherUserMessages, hasOtherUserMessages);
+        }
       }
     }),
   );
