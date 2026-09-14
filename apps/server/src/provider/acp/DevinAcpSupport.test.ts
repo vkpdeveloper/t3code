@@ -13,6 +13,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import {
   applyDevinAcpModelSelection,
+  awaitDevinModelCatalog,
   buildDevinAcpSpawnInput,
   buildDevinModelsFromConfigOptions,
   DEVIN_DEFAULT_MODEL_SLUG,
@@ -171,12 +172,64 @@ describe("buildDevinModelsFromConfigOptions", () => {
   });
 });
 
+/** A `model` option listing exactly `slugs`, with the first one current. */
+function modelCatalogOption(
+  slugs: ReadonlyArray<string>,
+): ReadonlyArray<EffectAcpSchema.SessionConfigOption> {
+  return [
+    {
+      id: "model",
+      name: "Model",
+      category: "model",
+      type: "select",
+      currentValue: slugs[0] ?? "",
+      options: slugs.map((slug) => ({ value: slug, name: slug })),
+    },
+  ];
+}
+
+describe("awaitDevinModelCatalog", () => {
+  // Real sleeps: the poll loop waits on the wall clock between reads.
+  it.live("returns the catalog once it satisfies the predicate", () =>
+    Effect.gen(function* () {
+      // Devin's `session/new` answer, then the real catalog on the third read.
+      let reads = 0;
+      const runtime = {
+        getConfigOptions: Effect.sync(() => {
+          reads += 1;
+          return reads < 3
+            ? modelCatalogOption(["swe-1-6-slow"])
+            : modelCatalogOption(["swe-1-6-slow", "claude-opus-5-medium"]);
+        }),
+      };
+      const models = yield* awaitDevinModelCatalog(runtime, (candidates) => candidates.length > 1);
+      expect(models.map((model) => model.slug)).toEqual(["swe-1-6-slow", "claude-opus-5-medium"]);
+      expect(reads).toBe(3);
+    }),
+  );
+
+  it.live("falls back to the current catalog when the timeout elapses", () =>
+    Effect.gen(function* () {
+      const runtime = { getConfigOptions: Effect.succeed(modelCatalogOption(["swe-1-6-slow"])) };
+      const models = yield* awaitDevinModelCatalog(
+        runtime,
+        (candidates) => candidates.length > 1,
+        "50 millis",
+      );
+      expect(models.map((model) => model.slug)).toEqual(["swe-1-6-slow"]);
+    }),
+  );
+});
+
 describe("applyDevinAcpModelSelection", () => {
   it.effect("keeps the session model for the default slug and empty input", () =>
     Effect.gen(function* () {
       const calls: Array<string> = [];
       const runtime = {
         setModel: (model: string) => Effect.sync(() => void calls.push(model)),
+        getConfigOptions: Effect.succeed(
+          modelCatalogOption(["swe-2-high", "claude-opus-5-medium"]),
+        ),
       };
       for (const model of [DEVIN_DEFAULT_MODEL_SLUG, "", "  ", undefined, null]) {
         yield* applyDevinAcpModelSelection({ runtime, model, mapError: (cause) => cause });
@@ -226,6 +279,47 @@ describe("makeDevinAcpRuntime", () => {
       expect(methods).toContain("initialize");
       expect(methods).toContain("session/new");
       expect(methods).not.toContain("authenticate");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("selects a model that only arrives with Devin's late catalog push", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-acp-support-")),
+      );
+      const requestLogPath = NodePath.join(dir, "requests.ndjson");
+      yield* Effect.promise(() => NodeFSP.writeFile(requestLogPath, "", "utf8"));
+      const binaryPath = writeFakeCli({
+        directory: dir,
+        name: "fake-devin",
+        env: { T3_ACP_REQUEST_LOG_PATH: requestLogPath, T3_ACP_LATE_MODEL_CATALOG: "1" },
+        source: execScriptSource({ scriptPath: mockAgentPath, expectedArgs: ["acp"] }),
+      });
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const runtime = yield* makeDevinAcpRuntime({
+        devinSettings: { binaryPath },
+        childProcessSpawner,
+        cwd: dir,
+        clientInfo: { name: "t3-devin-test", version: "0.0.0" },
+      });
+      yield* runtime.start();
+      // `session/new` only advertised the current model; selecting another one
+      // must wait for the pushed catalog instead of failing local validation.
+      expect(buildDevinModelsFromConfigOptions(yield* runtime.getConfigOptions)).toHaveLength(1);
+      yield* applyDevinAcpModelSelection({
+        runtime,
+        model: "composer-2",
+        mapError: (cause) => cause,
+      });
+
+      const raw = yield* Effect.promise(() => NodeFSP.readFile(requestLogPath, "utf8"));
+      const requests = raw
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { method: string; params?: { value?: string } });
+      expect(
+        requests.find((request) => request.method === "session/set_config_option")?.params?.value,
+      ).toBe("composer-2");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

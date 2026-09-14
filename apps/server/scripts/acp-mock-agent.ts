@@ -22,6 +22,9 @@ const emitThoughtChunks = process.env.T3_ACP_EMIT_THOUGHT_CHUNKS === "1";
 const emitUsageUpdate = process.env.T3_ACP_EMIT_USAGE_UPDATE === "1";
 const emitSessionInfoUpdate = process.env.T3_ACP_EMIT_SESSION_INFO_UPDATE === "1";
 const emitConfigOptionUpdate = process.env.T3_ACP_EMIT_CONFIG_OPTION_UPDATE === "1";
+// Devin answers `session/new` with a one-entry model option and pushes the full
+// catalog as a `config_option_update` afterwards.
+const emitLateModelCatalog = process.env.T3_ACP_LATE_MODEL_CATALOG === "1";
 const emitPromptUsage = process.env.T3_ACP_EMIT_PROMPT_USAGE === "1";
 const emitXAiPromptMetadata = process.env.T3_ACP_EMIT_XAI_PROMPT_METADATA === "1";
 const emitXAiModelChanged = process.env.T3_ACP_EMIT_XAI_MODEL_CHANGED === "1";
@@ -288,6 +291,20 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
   ];
 }
 
+/** The model option as Devin first reports it: only the session's current model. */
+function placeholderModelCatalog(): ReadonlyArray<AcpSchema.SessionConfigOption> {
+  return configOptions().map((option) =>
+    option.category === "model" && option.type === "select"
+      ? {
+          ...option,
+          options: option.options
+            .flatMap((entry) => ("value" in entry ? [entry] : entry.options))
+            .filter((entry) => entry.value === option.currentValue),
+        }
+      : option,
+  );
+}
+
 function modelConfigOptionsFor(modelId: string): ReadonlyArray<AcpSchema.SessionConfigOption> {
   const previousModelId = currentModelId;
   try {
@@ -398,6 +415,8 @@ function modelState(): AcpSchema.SessionModelState {
 
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
+  // Background emissions outlive the handler that scheduled them.
+  const programScope = yield* Effect.scope;
   const resumeRelease = yield* Deferred.make<void>();
   const nativeCancelRequested = yield* Deferred.make<void>();
   const nativeCancelRelease = yield* Deferred.make<void>();
@@ -476,11 +495,22 @@ const program = Effect.gen(function* () {
       if (antigravityProfile) {
         yield* publishAntigravityCommands(sessionId);
       }
+      if (emitLateModelCatalog) {
+        yield* Effect.sleep("300 millis").pipe(
+          Effect.andThen(
+            agent.client.sessionUpdate({
+              sessionId,
+              update: { sessionUpdate: "config_option_update", configOptions: configOptions() },
+            }),
+          ),
+          Effect.forkIn(programScope),
+        );
+      }
       return {
         sessionId,
         modes: modeState(),
         models: modelState(),
-        configOptions: configOptions(),
+        configOptions: emitLateModelCatalog ? placeholderModelCatalog() : configOptions(),
       };
     }),
   );
