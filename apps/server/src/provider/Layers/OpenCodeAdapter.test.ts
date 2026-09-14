@@ -1872,10 +1872,27 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const threadId = asThreadId("thread-steer-reconnect-before-acceptance");
       const firstUserMessageEvent = promiseWithResolvers<unknown>();
       const reconnectEvent = promiseWithResolvers<unknown>();
+      const busyEvent = promiseWithResolvers<unknown>();
+      const idleEvent = promiseWithResolvers<unknown>();
       const steerStarted = promiseWithResolvers<void>();
       const steerRelease = promiseWithResolvers<void>();
       runtimeMock.state.autoPromptEcho = false;
-      runtimeMock.state.subscribedEvents = [firstUserMessageEvent.promise, reconnectEvent.promise];
+      runtimeMock.state.subscribedEvents = [
+        firstUserMessageEvent.promise,
+        reconnectEvent.promise,
+        busyEvent.promise,
+        idleEvent.promise,
+      ];
+      // OpenCode is still booting the steer prompt when the stream
+      // reconnects, so the first status poll misses the session entirely.
+      // The busy report afterwards proves the prompt started, and the
+      // recovery resolves through it like the real server would.
+      runtimeMock.state.sessionStatusImplementation = async () => {
+        if (runtimeMock.state.sessionStatusCalls <= 1) {
+          return { data: {} };
+        }
+        return { data: { "http://127.0.0.1:9999/session": { type: "busy" as const } } };
+      };
       runtimeMock.state.promptAsyncImplementation = async () => {
         if (runtimeMock.state.promptCalls.length === 2) {
           steerStarted.resolve(undefined);
@@ -1939,8 +1956,26 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
       steerRelease.resolve(undefined);
       yield* Fiber.join(steerFiber);
-      yield* advanceTestClock(250);
+      // The busy observation resolves the steer admission.
+      busyEvent.resolve({
+        id: "evt-busy-after-reconnect-steer",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "busy" },
+        },
+      });
+      yield* advanceTestClock(2_000);
 
+      // The turn ends when OpenCode actually goes idle.
+      idleEvent.resolve({
+        id: "evt-idle-after-reconnect-steer",
+        type: "session.status",
+        properties: {
+          sessionID: "http://127.0.0.1:9999/session",
+          status: { type: "idle" },
+        },
+      });
       const completed = Option.getOrUndefined(
         yield* Fiber.join(completedFiber).pipe(Effect.timeout("1 second")),
       );
