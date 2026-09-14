@@ -1437,6 +1437,10 @@ const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   messageId: MessageId,
   delta: Schema.String,
   turnId: Schema.optional(TurnId),
+  // When the first text for this message was recorded. Buffered delivery
+  // flushes a whole reply in one delta long after the first token arrived;
+  // without it the projected message's createdAt collapses to flush time.
+  startedAt: Schema.optional(IsoDateTime),
   createdAt: IsoDateTime,
 });
 

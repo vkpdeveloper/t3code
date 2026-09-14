@@ -1611,6 +1611,81 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  // The reply-speed estimate reads createdAt→updatedAt as the delivery window,
+  // so a buffered reply must keep its first delta's timestamp instead of
+  // collapsing to the flush time.
+  it.each([
+    { provider: "codex", delivery: "buffered", enableLegacyTokenStreaming: false },
+    { provider: "opencode", delivery: "buffered", enableLegacyTokenStreaming: false },
+    { provider: "claudeAgent", delivery: "buffered", enableLegacyTokenStreaming: false },
+    { provider: "codex", delivery: "streamed", enableLegacyTokenStreaming: true },
+    { provider: "opencode", delivery: "streamed", enableLegacyTokenStreaming: true },
+  ] as const)(
+    "anchors $provider $delivery assistant messages at the first delta's timestamp",
+    async ({ provider, enableLegacyTokenStreaming }) => {
+      const harness = await createHarness({
+        serverSettings: { enableLegacyTokenStreaming },
+        provider: ProviderDriverKind.make(provider),
+      });
+      const firstDeltaAt = "2026-01-01T00:00:01.000Z";
+      const secondDeltaAt = "2026-01-01T00:00:05.000Z";
+      const completedAt = "2026-01-01T00:00:09.000Z";
+
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId("evt-speed-delta-1"),
+        provider: ProviderDriverKind.make(provider),
+        createdAt: firstDeltaAt,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-speed"),
+        itemId: asItemId("item-speed"),
+        payload: {
+          streamKind: "assistant_text",
+          delta: "hello",
+        },
+      });
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId("evt-speed-delta-2"),
+        provider: ProviderDriverKind.make(provider),
+        createdAt: secondDeltaAt,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-speed"),
+        itemId: asItemId("item-speed"),
+        payload: {
+          streamKind: "assistant_text",
+          delta: " world",
+        },
+      });
+      harness.emit({
+        type: "item.completed",
+        eventId: asEventId("evt-speed-item-completed"),
+        provider: ProviderDriverKind.make(provider),
+        createdAt: completedAt,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-speed"),
+        itemId: asItemId("item-speed"),
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+        },
+      });
+
+      const thread = await waitForThread(harness.readModel, (entry) =>
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === "assistant:item-speed" && !message.streaming,
+        ),
+      );
+      const message = thread.messages.find(
+        (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-speed",
+      );
+      expect(message?.text).toBe("hello world");
+      expect(message?.createdAt).toBe(firstDeltaAt);
+      expect(message?.updatedAt).toBe(completedAt);
+    },
+  );
+
   it("uses assistant item completion detail when no assistant deltas were streamed", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
