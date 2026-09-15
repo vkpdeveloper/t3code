@@ -7,7 +7,7 @@ import {
   type ServerProviderAuth,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -49,7 +49,6 @@ import { discoverGrokSkills } from "../Drivers/GrokSkills.ts";
 const GROK_PRESENTATION = {
   displayName: "Grok",
   supportsConversationRollback: false,
-  badgeLabel: "Early Access",
   showInteractionModeToggle: false,
   requiresNewThreadForModelChange: false,
 } as const;

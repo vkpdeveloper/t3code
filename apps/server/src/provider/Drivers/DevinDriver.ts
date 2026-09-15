@@ -20,8 +20,11 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeDevinTextGeneration } from "../../textGeneration/DevinTextGeneration.ts";
+import {
+  DevinAdapterV2Driver,
+  type DevinAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/DevinAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeDevinAdapter } from "../Layers/DevinAdapter.ts";
 import {
   buildInitialDevinProviderSnapshot,
   checkDevinProviderStatus,
@@ -60,6 +63,7 @@ export type DevinDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
+  | DevinAdapterV2DriverEnv
   | ServerConfig
   | ServerSettingsService;
 
@@ -92,11 +96,24 @@ export const DevinDriver: ProviderDriver<DevinSettings, DevinDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies DevinSettings;
-      const adapter = yield* makeDevinAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const orchestrationAdapter = yield* DevinAdapterV2Driver.create({
         instanceId,
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build Devin orchestration adapter.",
+              cause,
+            }),
+        ),
+      );
       const textGeneration = yield* makeDevinTextGeneration(effectiveConfig, processEnv);
 
       const checkProvider = checkDevinProviderStatus(effectiveConfig, processEnv, cwd).pipe(
@@ -142,7 +159,7 @@ export const DevinDriver: ProviderDriver<DevinSettings, DevinDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

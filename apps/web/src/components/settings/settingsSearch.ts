@@ -16,9 +16,9 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/providers"
-  | "/settings/agentic-operator"
   | "/settings/usages"
   | "/settings/integrations"
+  | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/archived";
@@ -82,9 +82,9 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
-  "/settings/agentic-operator": "Operator",
   "/settings/usages": "Usages",
   "/settings/integrations": "Integrations",
+  "/settings/scheduled-tasks": "Schedule Tasks",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
@@ -103,11 +103,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "wallpaper image upload brightness blur gradient landscape nature anime games fit screen",
     ],
-  },
-  {
-    id: "agentic-operator",
-    title: "Enable Operator",
-    to: "/settings/agentic-operator",
   },
   {
     id: "vibe-proxy-enabled",
@@ -239,6 +234,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Word wrap",
     to: "/settings/appearance",
     searchTerms: ["long lines code blocks tables diffs file previews"],
+  },
+  {
+    id: "composer-context",
+    title: "Composer context",
+    to: "/settings/appearance",
   },
   {
     id: "project-grouping",
@@ -832,7 +832,6 @@ const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id,
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
   "/settings/projects": "project",
-  "/settings/agentic-operator": null,
   "/settings/notifications": null,
   "/settings/usages": null,
   "/settings/general": null,
@@ -845,6 +844,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/integrations": null,
   "/settings/source-control": "environment-defaults",
   "/settings/connections": "connections",
+  "/settings/scheduled-tasks": null,
   "/settings/archived": "project-defaults",
 };
 

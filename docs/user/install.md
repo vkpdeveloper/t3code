@@ -101,6 +101,7 @@ computer.
 | Amp         | Install the Amp CLI and run `amp login`, then add an Amp instance in provider settings.                |
 | Devin       | Install the [Devin CLI](https://docs.devin.ai/cli), run `devin auth login`, then add a Devin instance. |
 | Antigravity | Install and sign in with Google from T3 Code's provider settings.                                      |
+| Pi          | Install [Pi](https://pi.dev), then run `pi` once to finish its login or API-key setup.                 |
 
 Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set its
 **Binary path** in provider settings, especially when using a version manager.
@@ -121,7 +122,7 @@ their original values.
 
 For provider-specific setup and accounts, see [Codex](./providers-codex.md),
 [Amp](./providers-amp.md), [Claude](./providers-claude.md), [Devin](./providers-devin.md),
-[OpenCode](./providers-opencode.md), and [Antigravity](./providers-antigravity.md).
+[OpenCode](./providers-opencode.md), [Antigravity](./providers-antigravity.md), and [Pi](./providers-pi.md).
 
 ### Grok reasoning controls
 

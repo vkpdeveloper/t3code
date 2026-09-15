@@ -1,4 +1,5 @@
 import type { AssistantCitation } from "@t3tools/contracts";
+import type { TerminalContextDraft } from "./lib/terminalContext";
 import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
@@ -37,6 +38,11 @@ export type ComposerPromptSegment =
       kind: string;
       contextId: string;
       label: string;
+      source: string;
+    }
+  | {
+      type: "terminal-context";
+      context?: TerminalContextDraft;
       source: string;
     };
 

@@ -84,6 +84,10 @@ import {
   splitPromptIntoComposerSegments,
 } from "~/composer-editor-mentions";
 import { collectInlineContextIds } from "~/lib/composerContextReferences";
+import {
+  INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+  type TerminalContextDraft,
+} from "~/lib/terminalContext";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import {
@@ -99,6 +103,7 @@ import {
   $createComposerContextReferenceNode,
   ComposerContextReferenceNode,
 } from "./ComposerContextReferenceNode";
+import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 import {
   ComposerContextActionsContext,
   ComposerContextRecordsContext,
@@ -525,7 +530,7 @@ function $createComposerThreadNode(
 }
 
 function ComposerTerminalContextDecorator(props: { context: TerminalContextDraft }) {
-  return <ComposerPendingTerminalContextChip context={props.context} />;
+  return <ComposerPendingTerminalContextChip context={props.context} detailsMode="popover" />;
 }
 
 class ComposerTerminalContextNode extends DecoratorNode<React.ReactElement> {
@@ -2175,6 +2180,7 @@ function ComposerPromptEditorInner({
     <ComposerContextRecordsContext value={contextRecords}>
       <ComposerCitationCommentContext value={citationCommentActions}>
         <div
+          data-composer-prompt-surface="true"
           className={cn(
             "relative [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)] [@media(max-width:39.999rem)_and_(pointer:coarse)]:[font-size:max(var(--font-size-prompt,1rem),16px)]",
             containerClassName,

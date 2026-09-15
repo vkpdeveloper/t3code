@@ -17,6 +17,7 @@ import {
   BlocksIcon,
   BotIcon,
   createLucideIcon,
+  CalendarClockIcon,
   GitBranchIcon,
   PanelsTopLeftIcon,
   KeyboardIcon,
@@ -80,7 +81,6 @@ const SETTINGS_SECTION_ICONS: Readonly<
 > = {
   "/settings/general": Settings2Icon,
   "/settings/notifications": BellIcon,
-  "/settings/agentic-operator": WorkflowIcon,
   "/settings/usages": GaugeIcon,
   "/settings/appearance": PaletteIcon,
   "/settings/projects": PanelsTopLeftIcon,
@@ -88,6 +88,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/snap-shot": SnapShotIcon,
   "/settings/providers": BotIcon,
   "/settings/integrations": BlocksIcon,
+  "/settings/scheduled-tasks": CalendarClockIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
   "/settings/archived": ArchiveIcon,

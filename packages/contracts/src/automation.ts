@@ -10,7 +10,8 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { ModelSelection, RuntimeMode } from "./orchestration.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode } from "./providerPolicy.ts";
 
 export const AUTOMATION_WORKSPACE_PROJECT_ID = ProjectId.make("t3-automation-workspace");
 

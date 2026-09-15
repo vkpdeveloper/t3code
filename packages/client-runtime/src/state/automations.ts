@@ -1,9 +1,4 @@
-import {
-  WS_METHODS,
-  type AutomationRun,
-  type EnvironmentId,
-  type OrchestrationThreadShell,
-} from "@t3tools/contracts";
+import { WS_METHODS, type AutomationRun, type EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
@@ -17,27 +12,31 @@ import {
 // Run status records dispatch. The thread carries the current execution outcome.
 export function automationRunStatusLabel(
   run: AutomationRun,
-  thread: Pick<
-    OrchestrationThreadShell,
-    "latestTurn" | "session" | "hasPendingApprovals" | "hasPendingUserInput" | "usageLimitWait"
-  > | null,
+  thread: {
+    readonly status: string;
+    readonly hasPendingApprovals: boolean;
+    readonly hasPendingUserInput: boolean;
+  } | null,
 ): string {
   if (run.status === "failed") return "Failed";
   if (thread?.hasPendingApprovals) return "Awaiting approval";
   if (thread?.hasPendingUserInput) return "Awaiting input";
-  if (thread?.usageLimitWait) return "Waiting for usage limit";
-  if (thread?.session?.status === "error") return "Failed";
-  if (thread?.session?.status === "starting") return "Starting";
-  if (thread?.session?.status === "running") return "Running";
-  switch (thread?.latestTurn?.state) {
+  switch (thread?.status) {
+    case "failed":
+      return "Failed";
+    case "preparing":
+      return "Preparing";
+    case "starting":
+      return "Starting";
+    case "running":
+    case "waiting":
+      return "Running";
     case "completed":
       return "Completed";
-    case "error":
-      return "Failed";
     case "interrupted":
       return "Interrupted";
-    case "running":
-      return "Running";
+    case "cancelled":
+      return "Cancelled";
   }
   return run.status === "pending" ? "Queued" : "Started";
 }

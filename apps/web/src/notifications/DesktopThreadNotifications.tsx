@@ -3,11 +3,13 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
 import type { ClientSettings } from "@t3tools/contracts/settings";
-import type { DesktopNotificationKind, ScopedThreadRef } from "@t3tools/contracts";
 import type {
-  EnvironmentThread,
-  EnvironmentThreadShell,
-} from "@t3tools/client-runtime/state/shell";
+  DesktopNotificationKind,
+  OrchestrationV2ThreadProjection,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import * as Option from "effect/Option";
 
 import { isElectron } from "~/env";
 import { getClientSettings, useClientSettings } from "~/hooks/useSettings";
@@ -47,14 +49,16 @@ import { reconcileWebPushRegistration } from "./webPush";
  * back to the thread title whenever nothing is loaded.
  */
 function readLoadedResponseText(ref: ScopedThreadRef): string | null {
-  const atom = environmentThreadDetails.detailAtom(ref);
+  const atom = environmentThreadDetails.stateAtom(ref);
   const node = appAtomRegistry.getNodes().get(atom);
   if (node === undefined || node.currentState() !== "valid") {
     return null;
   }
 
-  const detail = node.value() as EnvironmentThread | null;
-  const messages = detail?.messages;
+  const detail = node.value() as { data?: Option.Option<OrchestrationV2ThreadProjection> } | null;
+  const messages = Option.isSome(detail?.data ?? Option.none())
+    ? (detail?.data as Option.Some<OrchestrationV2ThreadProjection>).value.messages
+    : undefined;
   if (messages === undefined) {
     return null;
   }

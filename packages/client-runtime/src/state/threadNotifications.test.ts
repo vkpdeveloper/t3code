@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import type { EnvironmentThreadShell } from "./models.ts";
 
 import {
@@ -27,60 +28,52 @@ const ALL_ENABLED: ThreadNotificationSettings = {
 type ThreadPhaseFixture = "running" | "completed" | "failed" | "approval" | "input" | "unknown";
 
 /**
- * Builds the smallest shell that drives `projectThreadAwareness` to the wanted
- * phase, so the tests exercise the real phase resolution rather than a stub.
+ * Builds the smallest shell that drives `projectThreadAwarenessV2` to the
+ * wanted phase, so the tests exercise the real phase resolution rather than a
+ * stub.
  */
 function makeThread(
   phase: ThreadPhaseFixture,
   overrides: {
     readonly threadId?: ThreadId;
     readonly archivedAt?: string | null;
-    readonly backgroundLiveness?: "working" | "monitoring" | null;
+    readonly pendingBackgroundTasks?: ReadonlyArray<unknown>;
   } = {},
 ): EnvironmentThreadShell {
-  const base = {
+  const pendingRuntimeRequest =
+    phase === "approval"
+      ? { kind: "approval" as const }
+      : phase === "input"
+        ? { kind: "user_input" as const }
+        : null;
+  const source = {
+    id: overrides.threadId ?? THREAD_ID,
+    title: "Fix flaky auth test",
+    modelSelection: { instanceId: "codex" as never, model: "gpt-5" },
+    updatedAt: DateTime.makeUnsafe("2026-08-11T10:00:00.000Z"),
+    pendingRuntimeRequest,
+    activityRunStatus: phase === "running" ? ("running" as const) : null,
+    status:
+      phase === "completed"
+        ? ("completed" as const)
+        : phase === "failed"
+          ? ("failed" as const)
+          : phase === "running" || phase === "approval" || phase === "input"
+            ? ("running" as const)
+            : ("idle" as const),
+    lastError: phase === "failed" ? "Provider crashed" : null,
+  };
+  return {
     id: overrides.threadId ?? THREAD_ID,
     environmentId: ENVIRONMENT_ID,
     projectId: PROJECT_ID,
     title: "Fix flaky auth test",
-    modelSelection: { provider: "codex", model: "gpt-5" },
+    modelSelection: { instanceId: "codex", model: "gpt-5" },
     updatedAt: "2026-08-11T10:00:00.000Z",
     archivedAt: overrides.archivedAt ?? null,
-    backgroundLiveness: overrides.backgroundLiveness ?? null,
-    hasPendingApprovals: phase === "approval",
-    hasPendingUserInput: phase === "input",
-    latestTurn: null as unknown,
-    session: null as unknown,
-  };
-
-  switch (phase) {
-    case "running":
-      return {
-        ...base,
-        session: { status: "running", providerName: "Codex", lastError: null },
-        latestTurn: { state: "running", completedAt: null },
-      } as unknown as EnvironmentThreadShell;
-    case "completed":
-      return {
-        ...base,
-        session: { status: "ready", providerName: "Codex", lastError: null },
-        latestTurn: { state: "completed", completedAt: "2026-08-11T10:00:00.000Z" },
-      } as unknown as EnvironmentThreadShell;
-    case "failed":
-      return {
-        ...base,
-        session: { status: "error", providerName: "Codex", lastError: "Provider crashed" },
-      } as unknown as EnvironmentThreadShell;
-    case "approval":
-    case "input":
-      return {
-        ...base,
-        session: { status: "running", providerName: "Codex", lastError: null },
-        latestTurn: { state: "running", completedAt: null },
-      } as unknown as EnvironmentThreadShell;
-    case "unknown":
-      return base as unknown as EnvironmentThreadShell;
-  }
+    pendingBackgroundTasks: overrides.pendingBackgroundTasks ?? [],
+    source,
+  } as unknown as EnvironmentThreadShell;
 }
 
 const PROJECT_TITLES = buildProjectTitleMap([
@@ -237,18 +230,16 @@ describe("reconcileThreadNotifications", () => {
 
   it("does not announce completion while background work is still live", () => {
     const seeded = reconcile(EMPTY_THREAD_PHASE_SNAPSHOT, [makeThread("running")]).next;
-    const working = reconcile(seeded, [makeThread("completed", { backgroundLiveness: "working" })]);
+    const liveTasks = [{ taskId: "bg-1", description: "delegated work" }];
+    const working = reconcile(seeded, [
+      makeThread("completed", { pendingBackgroundTasks: liveTasks }),
+    ]);
 
     expect(working.notifications).toEqual([]);
     // Held at running, so the real completion still reads as a transition.
     expect(working.next.get(KEY)).toBe("running");
 
-    const monitoring = reconcile(working.next, [
-      makeThread("completed", { backgroundLiveness: "monitoring" }),
-    ]);
-    expect(monitoring.notifications).toEqual([]);
-
-    const settled = reconcile(monitoring.next, [makeThread("completed")]);
+    const settled = reconcile(working.next, [makeThread("completed")]);
     expect(settled.notifications).toHaveLength(1);
     expect(settled.notifications[0]?.kind).toBe("task-completed");
   });

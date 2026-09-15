@@ -29,7 +29,7 @@
 - [Running in the background](./user/background-service.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) ·
   [Amp](./user/providers-amp.md) · [Devin](./user/providers-devin.md) · [Grok Build](./user/providers-grok.md) · [OpenCode](./user/providers-opencode.md) ·
-  [Antigravity](./user/providers-antigravity.md)
+  [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md)
 
 Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
 

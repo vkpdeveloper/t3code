@@ -1,8 +1,8 @@
+import type { MenuAction } from "@react-native-menu/menu";
 import type {
   ModelCapabilities,
   ModelSelection,
-  OrchestrationThreadShell,
-  ServerProvider,
+  RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
 import {
@@ -18,12 +18,15 @@ export type ModelOption = {
   readonly providerKey: string;
   readonly providerLabel: string;
   readonly providerDriver: string;
+  readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode>;
+  readonly providerIconUrl?: string | undefined;
   readonly isDefault: boolean;
   readonly isLegacy: boolean;
   readonly isUnavailable?: boolean;
   readonly capabilities: ModelCapabilities | null;
   readonly selection: ModelSelection;
-  readonly disabledReason?: string;
+  /** Set when picking this option requires a fresh thread (provider can't switch mid-thread). */
+  readonly disabledReason?: string | undefined;
 };
 
 export type ProviderGroup = {
@@ -31,32 +34,6 @@ export type ProviderGroup = {
   readonly providerLabel: string;
   readonly models: ReadonlyArray<ModelOption>;
 };
-
-export function threadShellHasConversationHistory(
-  thread: Pick<OrchestrationThreadShell, "latestTurn" | "latestUserMessageAt">,
-): boolean {
-  return thread.latestTurn !== null || thread.latestUserMessageAt !== null;
-}
-
-export function markModelOptionsRequiringNewThread(input: {
-  readonly options: ReadonlyArray<ModelOption>;
-  readonly providers: ReadonlyArray<
-    Pick<ServerProvider, "instanceId" | "models" | "requiresNewThreadForModelChange">
-  >;
-  readonly currentModelSelection: ModelSelection;
-  readonly hasConversationHistory: boolean;
-}): ReadonlyArray<ModelOption> {
-  return input.options.map((option) =>
-    modelChangeRequiresNewThread({
-      providers: input.providers,
-      currentModelSelection: input.currentModelSelection,
-      nextModelSelection: option.selection,
-      hasConversationHistory: input.hasConversationHistory,
-    })
-      ? { ...option, disabledReason: "Start a new thread to use this model." }
-      : option,
-  );
-}
 
 function providerDisplayLabel(provider: {
   readonly displayName?: string | undefined;
@@ -66,6 +43,7 @@ function providerDisplayLabel(provider: {
   if (provider.displayName) return provider.displayName;
   if (provider.driver === "codex") return "Codex";
   if (provider.driver === "claudeAgent") return "Claude";
+  if (provider.driver === "pi") return "Pi";
   return provider.instanceId;
 }
 
@@ -92,6 +70,38 @@ function normalizeSelectionOptions(
 }
 
 /** Whether a known Antigravity selection needs setup or a different model. */
+export function threadShellHasConversationHistory(
+  thread: Pick<
+    { latestRun: { readonly runId: string } | null; latestUserMessageAt: string | null },
+    "latestRun" | "latestUserMessageAt"
+  >,
+): boolean {
+  return thread.latestRun !== null || thread.latestUserMessageAt !== null;
+}
+
+export function markModelOptionsRequiringNewThread(input: {
+  readonly options: ReadonlyArray<ModelOption>;
+  readonly providers: ReadonlyArray<
+    Pick<
+      T3ServerConfig["providers"][number],
+      "instanceId" | "models" | "requiresNewThreadForModelChange"
+    >
+  >;
+  readonly currentModelSelection: ModelSelection;
+  readonly hasConversationHistory: boolean;
+}): ReadonlyArray<ModelOption> {
+  return input.options.map((option) =>
+    modelChangeRequiresNewThread({
+      providers: input.providers,
+      currentModelSelection: input.currentModelSelection,
+      nextModelSelection: option.selection,
+      hasConversationHistory: input.hasConversationHistory,
+    })
+      ? { ...option, disabledReason: "Start a new thread to use this model." }
+      : option,
+  );
+}
+
 export function isModelSelectionUnavailable(
   config: T3ServerConfig | null | undefined,
   selection: ModelSelection | null | undefined,
@@ -203,6 +213,10 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
+        ...(provider.supportedRuntimeModes === undefined
+          ? {}
+          : { supportedRuntimeModes: provider.supportedRuntimeModes }),
+        ...(provider.iconUrl ? { providerIconUrl: provider.iconUrl } : {}),
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
         capabilities: model.capabilities,
@@ -283,4 +297,54 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
     providerLabel: group.providerLabel,
     models: group.models,
   }));
+}
+
+function modelMenuAction(option: ModelOption, selectedModel: ModelSelection | null): MenuAction {
+  return {
+    id: `model:${option.key}`,
+    title: option.label,
+    state:
+      option.selection.instanceId === selectedModel?.instanceId &&
+      option.selection.model === selectedModel.model
+        ? "on"
+        : undefined,
+  };
+}
+
+export function buildModelMenuActions(
+  groups: ReadonlyArray<ProviderGroup>,
+  selectedModel: ModelSelection | null,
+): MenuAction[] {
+  return groups.flatMap((group) => {
+    const currentModels = group.models.filter((model) => !model.isLegacy);
+    const legacyModels = group.models.filter((model) => model.isLegacy);
+    const selected = group.models.find(
+      (model) =>
+        model.selection.instanceId === selectedModel?.instanceId &&
+        model.selection.model === selectedModel.model,
+    );
+
+    return [
+      ...(currentModels.length > 0
+        ? [
+            {
+              id: `provider:${group.providerKey}`,
+              title: group.providerLabel,
+              subtitle: selected && !selected.isLegacy ? selected.label : undefined,
+              subactions: currentModels.map((option) => modelMenuAction(option, selectedModel)),
+            },
+          ]
+        : []),
+      ...(legacyModels.length > 0
+        ? [
+            {
+              id: `legacy-models:${group.providerKey}`,
+              title: `${group.providerLabel} legacy models`,
+              subtitle: selected?.isLegacy ? selected.label : undefined,
+              subactions: legacyModels.map((option) => modelMenuAction(option, selectedModel)),
+            },
+          ]
+        : []),
+    ];
+  });
 }

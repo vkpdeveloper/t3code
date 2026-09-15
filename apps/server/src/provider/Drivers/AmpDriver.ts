@@ -10,7 +10,7 @@ import * as Stream from "effect/Stream";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { makeAmpAdapter } from "../Layers/AmpAdapter.ts";
+import { makeUnsupportedAdapterV2 } from "../../orchestration-v2/Adapters/UnsupportedAdapterV2.ts";
 import {
   buildInitialAmpProviderSnapshot,
   checkAmpProviderStatus,
@@ -62,7 +62,9 @@ export const AmpDriver: ProviderDriver<AmpSettings, AmpDriverEnv> = {
             .act(workspace, operation)
             .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       };
-      const adapter = yield* makeAmpAdapter(effectiveConfig, processEnv, instanceId);
+      // Amp stays out of orchestration V2: threads keep their text-generation
+      // and routing features while new runs are rejected by a typed error.
+      const orchestrationAdapter = makeUnsupportedAdapterV2({ instanceId, driver: driverKind });
       const snapshot = yield* makeManagedServerProvider({
         resolveMaintenance: () =>
           Effect.succeed(
@@ -121,7 +123,7 @@ export const AmpDriver: ProviderDriver<AmpSettings, AmpDriverEnv> = {
         enabled,
         snapshot,
         snapshotForCwd,
-        adapter,
+        orchestrationAdapter,
         ampRouting,
         textGeneration: makeAmpTextGeneration(effectiveConfig, processEnv),
       };

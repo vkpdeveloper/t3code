@@ -1,5 +1,5 @@
 import type { DesktopNotificationKind, ScopedThreadRef } from "@t3tools/contracts";
-import { projectThreadAwareness, type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
+import { projectThreadAwarenessV2, type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
 import {
   agentNotificationKind,
   notificationBody,
@@ -110,26 +110,25 @@ function isNotificationKindEnabled(
 }
 
 /**
- * Holds a thread at "running" while native background work is still alive.
+ * Holds a thread at "running" while background work is still alive.
  *
- * `projectThreadAwareness` reads a session sitting at `ready`/`idle` with
- * nothing pending as finished, which is right for a thread that has genuinely
- * stopped. But a provider also parks the session at `ready` *between* turns
- * while subagents, workflows, or watch loops keep going, so a long task
- * momentarily looks complete and would fire a "Completed" notification while
- * it is still working. The sidebar already resolves this the same way
- * (`resolveSidebarThreadStatus` prefers `backgroundLiveness` over `ready`);
- * this keeps the notification view consistent with what the user sees there.
+ * `projectThreadAwarenessV2` reads a run settled at `completed` as finished,
+ * which is right for a thread that has genuinely stopped. But delegated
+ * subagent tasks can still be running underneath a settled run, so a long
+ * task momentarily looks complete and would fire a "Completed" notification
+ * while it is still working. The sidebar already resolves this the same way
+ * (`resolveSidebarThreadStatus` prefers `pendingBackgroundTasks` over the
+ * resting state); this keeps the notification view consistent with what the
+ * user sees there.
  */
 export function resolveNotifiablePhase(
-  thread: Pick<EnvironmentThreadShell, "backgroundLiveness">,
+  thread: Pick<EnvironmentThreadShell, "pendingBackgroundTasks">,
   phase: AgentAwarenessPhase | null,
 ): AgentAwarenessPhase | null {
   if (phase !== "completed") {
     return phase;
   }
-  const liveness = thread.backgroundLiveness ?? null;
-  return liveness === "working" || liveness === "monitoring" ? "running" : phase;
+  return (thread.pendingBackgroundTasks?.length ?? 0) > 0 ? "running" : phase;
 }
 
 /**
@@ -169,10 +168,10 @@ export function reconcileThreadNotifications(
       input.projectTitles.get(
         projectTitleKey({ environmentId: thread.environmentId, projectId: thread.projectId }),
       ) ?? "";
-    const awareness = projectThreadAwareness({
+    const awareness = projectThreadAwarenessV2({
       environmentId: thread.environmentId,
       project: { title: projectTitle },
-      thread,
+      thread: thread.source,
     });
     const phase = resolveNotifiablePhase(thread, awareness?.phase ?? null);
 
