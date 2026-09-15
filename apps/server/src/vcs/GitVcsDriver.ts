@@ -819,7 +819,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         const commitTreeResult = yield* execute({
           operation,
           cwd: input.cwd,
-          args: ["commit-tree", treeOid, "-m", message],
+          // Checkpoint commits are internal refs that are never pushed, so a
+          // user's global commit.gpgsign must not apply — a gpg-agent pin
+          // prompt would otherwise stall the run's start effect on the process
+          // timeout.
+          args: ["-c", "commit.gpgsign=false", "commit-tree", treeOid, "-m", message],
           env: commitEnv,
         });
         const commitOid = commitTreeResult.stdout.trim();

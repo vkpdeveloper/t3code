@@ -339,6 +339,16 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
           cause,
         }),
     ),
+    // A child that exits before draining stdin (e.g. `git rev-parse` on a
+    // non-repository) writes to a closed pipe. The input is irrelevant once
+    // the process is gone, so EPIPE is tolerated rather than surfaced.
+    Effect.catchIf(
+      (error) =>
+        Schema.is(ProcessStdinError)(error) &&
+        error.cause instanceof Error &&
+        /EPIPE|EOF|closed/i.test(String(error.cause.cause ?? error.cause.message)),
+      () => Effect.void,
+    ),
   );
 
   const [stdout, stderr] = yield* Effect.all(
