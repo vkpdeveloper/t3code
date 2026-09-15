@@ -6,7 +6,6 @@
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
 - [Permission modes](./user/permission-modes.md)
-- [Operator](./user/agentic-operator.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Notifications](./user/notifications.md)
 - [Referencing another task](./user/task-references.md)
