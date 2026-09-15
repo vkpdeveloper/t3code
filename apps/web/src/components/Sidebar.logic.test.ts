@@ -842,7 +842,12 @@ describe("resolveSidebarThreadStatus", () => {
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  const idle = { hasPendingApprovals: false, hasPendingUserInput: false, runtime: null };
+  const idle = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    runtime: null,
+    usageLimitResume: null,
+  };
 
   it("prioritizes approval over a running runtime", () => {
     expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true, runtime })).toBe(
@@ -891,6 +896,19 @@ describe("resolveSidebarThreadStatus", () => {
       resolveSidebarThreadStatus({
         ...idle,
         runtime: { ...runtime, status: "idle" as const, lastError: "persisted" },
+      }),
+    ).toBe("waiting");
+  });
+
+  it("reports waiting while a usage-limit resume is scheduled", () => {
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        usageLimitResume: {
+          blockedRunId: RunId.make("run-1"),
+          resumeAt: "2026-03-09T11:00:00.000Z",
+          isEstimated: false,
+        },
       }),
     ).toBe("waiting");
   });

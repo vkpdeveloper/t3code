@@ -2310,6 +2310,9 @@ interface ActiveClaudeTurnContext {
   readonly announcedUsageLimits: Set<string>;
   authenticationFailureMessage: string | undefined;
   readonly rejectedRateLimitTypes: Set<string>;
+  // limitType -> latest rejected window reset (ms), so a terminal usage-limit
+  // failure can carry the provider's own reset time.
+  readonly rejectedRateLimitResetsAt: Map<string, number>;
   latestAssistantRateLimited: boolean;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
@@ -4475,12 +4478,16 @@ export function makeClaudeAdapterV2(
             if (context !== null) {
               if (blocked) {
                 context.rejectedRateLimitTypes.add(limitType);
+                const resetsAtMs =
+                  rateLimitInfo.resetsAt == null ? Number.NaN : rateLimitInfo.resetsAt * 1000;
+                context.rejectedRateLimitResetsAt.set(limitType, resetsAtMs);
               } else if (
                 rateLimitInfo.status === "allowed" ||
                 rateLimitInfo.status === "allowed_warning" ||
                 overageAllowed
               ) {
                 context.rejectedRateLimitTypes.delete(limitType);
+                context.rejectedRateLimitResetsAt.delete(limitType);
               }
             }
             // Rejected windows pause the SDK without ending its turn. Overage
@@ -5040,9 +5047,36 @@ export function makeClaudeAdapterV2(
               (context.rejectedRateLimitTypes.size > 0 || context.latestAssistantRateLimited
                 ? "Claude usage limit reached. Send the message again once the limit resets."
                 : undefined);
-            const resultFailure = interrupted
-              ? null
-              : providerFailureFromResult(message, failureHint);
+            const resultFailure = (() => {
+              if (interrupted) return null;
+              const failure = providerFailureFromResult(message, failureHint);
+              if (
+                failure === null ||
+                (context.rejectedRateLimitTypes.size === 0 && !context.latestAssistantRateLimited)
+              ) {
+                return failure;
+              }
+              // The SDK's rejected rate-limit events outlast the turn: an end
+              // on a rejected window is a usage-limit stop, and the tracked
+              // reset gives the resume service the provider's own time.
+              let resetsAtMs = Number.NaN;
+              for (const limitType of context.rejectedRateLimitTypes) {
+                const candidate = context.rejectedRateLimitResetsAt.get(limitType);
+                if (
+                  candidate !== undefined &&
+                  (!Number.isFinite(resetsAtMs) || candidate > resetsAtMs)
+                ) {
+                  resetsAtMs = candidate;
+                }
+              }
+              return {
+                ...failure,
+                class: "usage_limit" as const,
+                resetsAt: Number.isFinite(resetsAtMs)
+                  ? DateTime.formatIso(DateTime.makeUnsafe(resetsAtMs))
+                  : null,
+              };
+            })();
             yield* finalizeActiveTurn({
               context,
               status: interrupted ? "interrupted" : terminalStatusFromResult(message, failureHint),
@@ -5509,6 +5543,7 @@ export function makeClaudeAdapterV2(
               announcedUsageLimits: new Set(),
               authenticationFailureMessage: undefined,
               rejectedRateLimitTypes: new Set(),
+              rejectedRateLimitResetsAt: new Map(),
               latestAssistantRateLimited: false,
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),

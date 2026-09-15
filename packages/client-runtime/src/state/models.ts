@@ -95,6 +95,12 @@ export interface EnvironmentThreadShell {
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
   readonly automationId: OrchestrationV2ThreadShell["automationId"];
+  readonly usageLimitResume: {
+    readonly blockedRunId: RunId;
+    readonly resumeAt: string;
+    readonly isEstimated: boolean;
+    readonly limitType?: string | undefined;
+  } | null;
   readonly forkedFrom: OrchestrationV2ThreadShell["forkedFrom"];
   readonly activeProviderThreadId: OrchestrationV2ThreadShell["activeProviderThreadId"];
   readonly latestRun: ThreadRunSummary | null;
@@ -226,6 +232,17 @@ export function presentThreadShell(
     branchPullRequest: thread.branchPullRequest ?? null,
     lineage: thread.lineage,
     automationId: thread.automationId ?? null,
+    usageLimitResume:
+      thread.usageLimitResume == null
+        ? null
+        : {
+            blockedRunId: thread.usageLimitResume.blockedRunId,
+            resumeAt: iso(thread.usageLimitResume.resumeAt),
+            isEstimated: thread.usageLimitResume.isEstimated,
+            ...(thread.usageLimitResume.limitType === undefined
+              ? {}
+              : { limitType: thread.usageLimitResume.limitType }),
+          },
     forkedFrom: thread.forkedFrom,
     activeProviderThreadId: thread.activeProviderThreadId,
     latestRun,

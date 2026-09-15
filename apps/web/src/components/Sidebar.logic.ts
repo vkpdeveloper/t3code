@@ -875,7 +875,7 @@ export function shouldRecedeSidebarThread(input: {
 
 type SidebarThreadStatusInput = Pick<
   SidebarThreadSummary,
-  "hasPendingApprovals" | "hasPendingUserInput" | "runtime"
+  "hasPendingApprovals" | "hasPendingUserInput" | "runtime" | "usageLimitResume"
 >;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
@@ -891,7 +891,7 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   ) {
     return "working";
   }
-  if (thread.runtime?.status === "idle") {
+  if (thread.runtime?.status === "idle" || thread.usageLimitResume != null) {
     return "waiting";
   }
   if (thread.runtime?.status === "failed") {

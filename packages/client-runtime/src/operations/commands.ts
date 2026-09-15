@@ -512,6 +512,19 @@ export const unsnoozeThread = Effect.fn("EnvironmentCommands.unsnoozeThread")(fu
   });
 });
 
+export type CancelUsageLimitResumeInput = ThreadCommandInput;
+
+export const cancelUsageLimitResume = Effect.fn("EnvironmentCommands.cancelUsageLimitResume")(
+  function* (input: CancelUsageLimitResumeInput) {
+    return yield* dispatch({
+      type: "thread.usage-limit-resume.cancel",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      reason: "user",
+    });
+  },
+);
+
 export const visitThread = Effect.fn("EnvironmentCommands.visitThread")(function* (
   input: VisitThreadInput,
 ) {

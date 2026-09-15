@@ -213,6 +213,30 @@ function codexUsageLimitNextStep(rateLimitReachedType: string | null | undefined
 }
 
 /**
+ * ISO timestamp of the next exhausted window reset, when the snapshot shows
+ * the turn was blocked by a usage limit. Returns undefined when no window is
+ * exhausted or every exhausted window already reset.
+ */
+export function codexUsageLimitResetsAt(
+  snapshot: CodexRateLimitSnapshot | undefined,
+  atMs: number,
+): string | undefined {
+  if (!snapshot || !Number.isFinite(atMs)) return undefined;
+  // Latest exhausted reset, matching codexUsageLimitMessage's window naming:
+  // every spent window must have rolled over before the turn can succeed.
+  let latest: string | undefined;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const window of codexRateLimitsToWindows(snapshot)) {
+    if (window.usedPercent < 100 || !window.resetsAt) continue;
+    const resetMs = Date.parse(window.resetsAt);
+    if (!Number.isFinite(resetMs) || resetMs <= atMs || resetMs <= latestMs) continue;
+    latestMs = resetMs;
+    latest = window.resetsAt;
+  }
+  return latest;
+}
+
+/**
  * The message a usage-limit stop shows instead of the provider sentence, which
  * on a Business workspace blames credits for a window that simply ran out. The
  * window named is the exhausted one that has yet to reset, latest first; `atIso`

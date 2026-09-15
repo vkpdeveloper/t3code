@@ -3273,7 +3273,8 @@ export default function ChatView(props: ChatViewProps) {
     compactRequestIsActive &&
     !compactionSettled;
   const isWorking =
-    phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
+    activeThread?.usageLimitResume == null &&
+    (phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting);
   const activeContextWindow = useMemo(
     () =>
       deriveLatestContextWindowSnapshot(
@@ -6415,6 +6416,9 @@ export default function ChatView(props: ChatViewProps) {
   const unsnoozeThreadMutation = useAtomCommand(threadEnvironment.unsnooze, {
     reportFailure: false,
   });
+  const cancelUsageLimitResumeMutation = useAtomCommand(threadEnvironment.cancelUsageLimitResume, {
+    reportFailure: false,
+  });
   const [unsnoozingThreadKey, setUnsnoozingThreadKey] = useState<string | null>(null);
   const isUnsnoozing = unsnoozingThreadKey !== null && unsnoozingThreadKey === activeThreadKey;
   const handleUnsnoozeActiveThread = useCallback(async () => {
@@ -6610,6 +6614,74 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [activeBackgroundTasks, activeThread, handleStopBackgroundWork, isStoppingBackgroundWork]);
 
+  const [isCancellingUsageLimitResume, setIsCancellingUsageLimitResume] = useState(false);
+  const usageLimitResume = activeThread?.usageLimitResume ?? null;
+  useEffect(() => {
+    setIsCancellingUsageLimitResume(false);
+  }, [usageLimitResume?.blockedRunId]);
+  const handleCancelUsageLimitResume = useCallback(async () => {
+    if (!activeThread || !usageLimitResume) return;
+    setIsCancellingUsageLimitResume(true);
+    const result = await cancelUsageLimitResumeMutation({
+      environmentId,
+      input: { threadId: activeThread.id },
+    });
+    if (result._tag === "Failure") {
+      setIsCancellingUsageLimitResume(false);
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to cancel automatic continuation.",
+        );
+      }
+    }
+  }, [
+    activeThread,
+    cancelUsageLimitResumeMutation,
+    environmentId,
+    setThreadError,
+    usageLimitResume,
+  ]);
+  const usageLimitResumeBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (!usageLimitResume || !activeThread) return null;
+    const providerLabel = activeThread.runtime?.providerName ?? "Provider";
+    const resumeDate = new Date(usageLimitResume.resumeAt);
+    const sameDay = resumeDate.toDateString() === new Date().toDateString();
+    const time = formatShortTimestamp(usageLimitResume.resumeAt, timestampFormat);
+    const resumeLabel = sameDay
+      ? time
+      : `${resumeDate.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })} at ${time}`;
+    return {
+      id: `usage-limit-resume:${usageLimitResume.blockedRunId}`,
+      variant: "warning",
+      icon: <AlarmClockIcon />,
+      title: `${providerLabel} usage limit reached`,
+      description: usageLimitResume.isEstimated
+        ? `Automatically tries again at ${resumeLabel}.`
+        : `Automatically continues at ${resumeLabel}.`,
+      actions: (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={isCancellingUsageLimitResume}
+          onClick={() => void handleCancelUsageLimitResume()}
+        >
+          {isCancellingUsageLimitResume ? "Cancelling..." : "Cancel"}
+        </Button>
+      ),
+    };
+  }, [
+    activeThread,
+    handleCancelUsageLimitResume,
+    isCancellingUsageLimitResume,
+    timestampFormat,
+    usageLimitResume,
+  ]);
+
   // A woken thread announces itself in the open view, not just the sidebar
   // pill. Dismissing marks the wake as seen (same acknowledgment as the
   // pill); sending a message clears it as a side effect of the send path.
@@ -6796,6 +6868,8 @@ export default function ChatView(props: ChatViewProps) {
     const backgroundWorkItems = backgroundWorkBannerItem === null ? [] : [backgroundWorkBannerItem];
     const resumeCompactionItems =
       resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem];
+    const usageLimitResumeItems =
+      usageLimitResumeBannerItem === null ? [] : [usageLimitResumeBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     // The user asked for this one, so it leads the notice tier instead of trailing it.
@@ -6807,6 +6881,7 @@ export default function ChatView(props: ChatViewProps) {
         ...systemComposerBannerItems,
         ...backgroundWorkItems,
         ...resumeCompactionItems,
+        ...usageLimitResumeItems,
         ...wokeThreadItems,
         ...parkedThreadItems,
       ];
@@ -6817,6 +6892,7 @@ export default function ChatView(props: ChatViewProps) {
       ...systemComposerBannerItems,
       ...backgroundWorkItems,
       ...resumeCompactionItems,
+      ...usageLimitResumeItems,
       ...wokeThreadItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
@@ -6869,6 +6945,7 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    usageLimitResumeBannerItem,
     usageLimitsBanner,
     wokeThreadBannerItem,
   ]);

@@ -41,6 +41,7 @@ import {
   type UnpinThreadInput,
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
+  type CancelUsageLimitResumeInput,
   type UpdateThreadMetadataInput,
   type VisitThreadInput,
   archiveThread,
@@ -72,6 +73,7 @@ import {
   unlinkThreadPullRequest,
   unpinThread,
   unsettleThread,
+  cancelUsageLimitResume,
   unsnoozeThread,
   updateThreadMetadata,
   visitThread,
@@ -178,6 +180,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     unsnooze: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:unsnooze",
       execute: (input: UnsnoozeThreadInput) => unsnoozeThread(input),
+      scheduler,
+      concurrency,
+    }),
+    cancelUsageLimitResume: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:cancelUsageLimitResume",
+      execute: (input: CancelUsageLimitResumeInput) => cancelUsageLimitResume(input),
       scheduler,
       concurrency,
     }),

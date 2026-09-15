@@ -220,6 +220,10 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const cancelUsageLimitResume = useAtomCommand(
+    threadEnvironment.cancelUsageLimitResume,
+    "cancel usage-limit resume",
+  );
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,
@@ -902,6 +906,14 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
+          onCancelUsageLimitResume={() =>
+            selectedThread
+              ? cancelUsageLimitResume({
+                  environmentId: selectedThread.environmentId,
+                  input: { threadId: selectedThread.id },
+                })
+              : Promise.resolve()
+          }
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}

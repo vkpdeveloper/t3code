@@ -84,6 +84,9 @@ export function shouldPublishAgentAwarenessEvent(
     case "thread.pull-request-synced":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
+    // A scheduled usage-limit resume changes the thread's waiting state.
+    case "thread.usage-limit-resume-scheduled":
+    case "thread.usage-limit-resume-cleared":
     case "run.created":
     case "run.updated":
     case "runtime-request.updated":

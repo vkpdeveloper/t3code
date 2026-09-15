@@ -324,7 +324,7 @@ export function useThreadComposerState() {
   ]);
 
   const activeWorkStartedAt = useMemo(() => {
-    if (!selectedThreadShell) {
+    if (!selectedThreadShell || selectedThreadShell.usageLimitResume != null) {
       return null;
     }
     return resolveThreadWorkingStartedAt({

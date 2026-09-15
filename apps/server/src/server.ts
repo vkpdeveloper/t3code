@@ -142,6 +142,8 @@ import {
 } from "./orchestration-v2/runtimeLayer.ts";
 import * as ResourceCleanupService from "./orchestration-v2/ResourceCleanupService.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
+import * as TransientFailureRetryService from "./orchestration-v2/TransientFailureRetryService.ts";
+import * as UsageLimitResumeService from "./orchestration-v2/UsageLimitResumeService.ts";
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as RunFinalizationService from "./orchestration-v2/RunFinalizationService.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
@@ -452,6 +454,21 @@ const ThreadPullRequestWorkerLive = Layer.effectDiscard(
   ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(PullRequestServiceLive), Layer.provide(OrchestrationInfrastructureLayerLive));
 
+// Usage-limit auto-resume: runs that fail on a provider usage-limit window
+// park the thread and continue it once the window resets (see
+// UsageLimitResumeService); the shell field survives restarts and holds
+// queued sends until the resume fires or the user cancels.
+const UsageLimitResumeWorkerLive = Layer.effectDiscard(
+  UsageLimitResumeService.make.pipe(Effect.flatMap((service) => service.start())),
+).pipe(Layer.provide(OrchestrationInfrastructureLayerLive));
+
+// Transient provider-failure retry: retryable run failures (transport blips,
+// 5xx, capacity, timeouts) resend the turn's continue prompt after a short
+// backoff — the V2 port of the V1 turn-retry policy.
+const TransientFailureRetryWorkerLive = Layer.effectDiscard(
+  TransientFailureRetryService.make.pipe(Effect.flatMap((service) => service.start())),
+).pipe(Layer.provide(OrchestrationInfrastructureLayerLive));
+
 const AntigravityInstallationRefreshLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const installation = yield* AntigravityInstallation;
@@ -483,6 +500,8 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   ThreadSettlementWorkerLive,
   ThreadPullRequestWorkerLive,
+  UsageLimitResumeWorkerLive,
+  TransientFailureRetryWorkerLive,
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;

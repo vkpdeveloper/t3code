@@ -10,7 +10,11 @@ import {
   type CodexTurnTokenUsageState,
 } from "../../provider/CodexTurnTokenUsage.ts";
 import type { ServerProviderShape } from "../../provider/Services/ServerProvider.ts";
-import { codexRateLimitsToUpdate } from "../../provider/Layers/codexUsageLimits.ts";
+import {
+  codexRateLimitsToUpdate,
+  codexUsageLimitResetsAt,
+  type CodexRateLimitSnapshot,
+} from "../../provider/Layers/codexUsageLimits.ts";
 import { CodexSettings, defaultInstanceIdForDriver, ProviderDriverKind } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
@@ -1597,6 +1601,9 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
         const providerRetries = yield* Ref.make(
           new Map<ProviderTurnId, ActiveCodexProviderRetry>(),
         );
+        // Account-level rate-limit snapshot; rate limits are per-account, not
+        // per-thread, so one ref serves every turn this adapter drives.
+        const latestRateLimits = yield* Ref.make<CodexRateLimitSnapshot | undefined>(undefined);
         const planDeltas = yield* Ref.make(new Map<string, string>());
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
         const pendingRuntimeRequests = yield* Ref.make(
@@ -3501,6 +3508,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
 
         yield* client.handleServerNotification("account/rateLimits/updated", (payload) =>
           Effect.gen(function* () {
+            yield* Ref.set(latestRateLimits, payload.rateLimits);
             const update = codexRateLimitsToUpdate(payload.rateLimits);
             if (update && adapterOptions.onUsageLimits) {
               const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -4527,6 +4535,15 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           }): Effect.fn.Return<CodexRootTerminalEvent> {
             const terminalStatus = providerTurnStatusToTerminal(input.status);
             if (terminalStatus === "failed") {
+              // An exhausted rate-limit window marks the failure as
+              // usage_limit so the resume service can park the thread until
+              // the window resets instead of leaving it dead.
+              const now = yield* DateTime.now;
+              const rateLimits = yield* Ref.get(latestRateLimits);
+              const usageLimitResetsAt = codexUsageLimitResetsAt(
+                rateLimits,
+                DateTime.toEpochMillis(now),
+              );
               return {
                 type: "turn.terminal",
                 driver: CODEX_PROVIDER,
@@ -4538,13 +4555,18 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   `terminal-failure:${input.context.providerTurnId}`,
                 ),
                 status: terminalStatus,
-                failure:
-                  input.failureMessage === undefined && input.providerRetry !== undefined
-                    ? input.providerRetry.failure
-                    : makeProviderFailure({
-                        message: input.failureMessage,
-                        class: "provider_error",
-                      }),
+                failure: (() => {
+                  const failure =
+                    input.failureMessage === undefined && input.providerRetry !== undefined
+                      ? input.providerRetry.failure
+                      : makeProviderFailure({
+                          message: input.failureMessage,
+                          class: "provider_error",
+                        });
+                  return usageLimitResetsAt === undefined || failure.class === "usage_limit"
+                    ? failure
+                    : { ...failure, class: "usage_limit" as const, resetsAt: usageLimitResetsAt };
+                })(),
                 ...(input.providerRetry === undefined
                   ? {}
                   : {

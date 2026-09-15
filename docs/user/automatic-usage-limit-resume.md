@@ -3,15 +3,17 @@
 When a Codex or Claude subscription limit stops a turn, T3 Code keeps the thread working and
 continues it after the provider's usage window resets. This is enabled by default.
 
-The wait happens inside the provider session itself: the agent stays in its working state and the
-turn resumes on its own once the limit clears. If the provider reports an exact reset time, that
-time is used; another limit response schedules the next attempt instead of abandoning the task.
+While the wait is scheduled, the thread shows a "usage limit reached" banner with the resume time
+and a Cancel button. Messages you send during the wait stay queued on the thread instead of failing
+into the same limit.
 
-Messages sent during the wait stay queued on the thread. When the limit resets, T3 Code sends them
-to the agent in order, including image attachments, as part of the continued turn.
+When the window resets, T3 Code clears the wait and continues the thread: queued messages send in
+order, and if nothing was queued the agent gets a "continue" prompt so it picks the task back up.
+The schedule survives restarts, so the wait still fires if the app is closed and reopened.
 
-Interrupting the thread stops the wait along with the rest of the turn. Switching to another agent
-ends the current session and starts the new turn immediately.
+Cancelling the banner ends the wait immediately and any queued sends run right away. Switching
+providers or models on the thread also spends the wait, since it belongs to the previous window.
+Disabling "Automatically continue after usage limits reset" in Settings cancels all pending waits.
 
 Automatic continuation applies only to recognized Codex and Claude subscription limits. Workspace
 credit limits, spend controls, and ordinary provider errors are left stopped for you to handle.

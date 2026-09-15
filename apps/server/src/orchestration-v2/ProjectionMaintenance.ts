@@ -227,6 +227,8 @@ export const layer: Layer.Layer<
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.usage-limit-resume-scheduled",
+      "thread.usage-limit-resume-cleared",
       "thread.visited",
       "thread.marked-unread",
     ];

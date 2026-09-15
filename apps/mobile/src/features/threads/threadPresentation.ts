@@ -9,6 +9,7 @@ export type ThreadStatusKind =
   | "awaiting-input"
   | "working"
   | "connecting"
+  | "waiting"
   | "error"
   | "plan-ready";
 
@@ -83,6 +84,18 @@ export function resolveThreadStatus(
       iconColor: "#0a84ff",
       iconBackground: "rgba(10,132,255,0.22)",
       pulse: true,
+    };
+  }
+
+  if (thread.usageLimitResume != null) {
+    return {
+      kind: "waiting",
+      label: "Waiting for reset",
+      pillClassName: "bg-amber-500/12 dark:bg-amber-500/16",
+      textClassName: "text-amber-700 dark:text-amber-300",
+      iconColor: "#ff9f0a",
+      iconBackground: "rgba(255,159,10,0.22)",
+      pulse: false,
     };
   }
 

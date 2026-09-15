@@ -40,7 +40,7 @@ import { useProviderColors } from "./usageProviders";
 
 const TONE_TEXT_CLASS: Readonly<Record<VibeProxyAccountTone, string>> = {
   ok: "text-success",
-  warning: "text-warning",
+  warning: "text-warning-foreground",
   error: "text-danger-foreground",
   muted: "text-foreground-muted",
 };
@@ -487,7 +487,7 @@ function StateNotice(props: { readonly warning?: boolean; readonly children: Rea
     <Text
       className={
         props.warning
-          ? "border-t border-border-subtle px-4 py-4 text-sm text-warning"
+          ? "border-t border-border-subtle px-4 py-4 text-sm text-warning-foreground"
           : "border-t border-border-subtle px-4 py-4 text-sm text-foreground-muted"
       }
     >

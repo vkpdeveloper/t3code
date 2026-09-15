@@ -327,6 +327,21 @@ export const OrchestrationV2ProviderCapabilities = Schema.Struct({
 });
 export type OrchestrationV2ProviderCapabilities = typeof OrchestrationV2ProviderCapabilities.Type;
 
+/**
+ * A pending automatic resume after a provider usage limit stopped the latest
+ * run. `resumeAt` is the provider-reported window reset when known; with
+ * `isEstimated` it is a server-side guess. Persisted on the thread so a
+ * server restart reschedules the wait.
+ */
+export const OrchestrationV2UsageLimitResume = Schema.Struct({
+  /** Run whose provider turn hit the limit; guards against stale resumes. */
+  blockedRunId: RunId,
+  resumeAt: Schema.DateTimeUtc,
+  isEstimated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  limitType: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationV2UsageLimitResume = typeof OrchestrationV2UsageLimitResume.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -349,6 +364,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   lineage: OrchestrationV2AppThreadLineage,
   /** Automation run that spawned this thread; unset for user threads. */
   automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  usageLimitResume: Schema.optional(Schema.NullOr(OrchestrationV2UsageLimitResume)),
   forkedFrom: Schema.NullOr(
     Schema.Union([
       Schema.Struct({ type: Schema.Literal("run"), threadId: ThreadId, runId: RunId }),
@@ -926,6 +942,9 @@ export const OrchestrationV2ProviderFailureClass = Schema.Literals([
   "transport_error",
   "permission_error",
   "validation_error",
+  // The provider's own usage-limit window stopped the turn. `resetsAt`
+  // carries the window reset when the provider reported one.
+  "usage_limit",
   "unknown",
 ]);
 export type OrchestrationV2ProviderFailureClass = typeof OrchestrationV2ProviderFailureClass.Type;
@@ -945,6 +964,10 @@ export const OrchestrationV2ProviderFailure = Schema.Struct({
   message: OrchestrationV2ProviderFailureMessage,
   code: Schema.NullOr(OrchestrationV2ProviderFailureCode),
   retryable: Schema.NullOr(Schema.Boolean),
+  // When `class` is "usage_limit": the provider-reported window reset as an
+  // ISO string. Null means the provider gave no reset and any resume time is
+  // a server-side estimate.
+  resetsAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type OrchestrationV2ProviderFailure = typeof OrchestrationV2ProviderFailure.Type;
 
@@ -1270,6 +1293,8 @@ export const OrchestrationV2DomainEvent = Schema.Union([
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.usage-limit-resume-scheduled",
+      "thread.usage-limit-resume-cleared",
     ]),
     payload: OrchestrationV2AppThread,
   }),
@@ -1440,6 +1465,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   lineage: OrchestrationV2AppThreadLineage,
   /** Automation run that spawned this thread; unset for user threads. */
   automationId: Schema.optional(Schema.NullOr(AutomationId)),
+  usageLimitResume: Schema.optional(Schema.NullOr(OrchestrationV2UsageLimitResume)),
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
@@ -1566,6 +1592,14 @@ export type OrchestrationV2StoredEvent = typeof OrchestrationV2StoredEvent.Type;
 
 export const OrchestrationV2AppThreadJson = OrchestrationV2AppThread.mapFields((fields) => ({
   ...fields,
+  usageLimitResume: Schema.optional(
+    Schema.NullOr(
+      OrchestrationV2UsageLimitResume.mapFields((resumeFields) => ({
+        ...resumeFields,
+        resumeAt: Schema.DateTimeUtcFromString,
+      })),
+    ),
+  ),
   createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
   archivedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
@@ -1968,6 +2002,14 @@ export type OrchestrationV2LatestVisibleMessageSummaryJson =
 
 export const OrchestrationV2ThreadShellJson = OrchestrationV2ThreadShell.mapFields((fields) => ({
   ...fields,
+  usageLimitResume: Schema.optional(
+    Schema.NullOr(
+      OrchestrationV2UsageLimitResume.mapFields((resumeFields) => ({
+        ...resumeFields,
+        resumeAt: Schema.DateTimeUtcFromString,
+      })),
+    ),
+  ),
   latestRunRequestedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
   latestRunCompletedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtcFromString)),
@@ -2044,6 +2086,8 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.usage-limit-resume-scheduled",
+      "thread.usage-limit-resume-cleared",
     ]),
     payload: OrchestrationV2AppThreadJson,
   }),
@@ -2431,6 +2475,29 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     runId: RunId,
     reason: Schema.optional(Schema.String),
+  }),
+  /**
+   * Server-internal: the usage-limit resume reactor dispatches this when a
+   * provider turn fails on a usage-limit window. Records the resume on the
+   * thread so waits survive restarts and hold new sends in the queue.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.usage-limit-resume.schedule"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    blockedRunId: RunId,
+    resumeAt: Schema.DateTimeUtc,
+    isEstimated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+    limitType: Schema.optional(TrimmedNonEmptyString),
+  }),
+  /** Clears a scheduled usage-limit resume (user cancel, resume fired, or stale). */
+  Schema.Struct({
+    type: Schema.Literal("thread.usage-limit-resume.cancel"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    reason: Schema.optional(
+      Schema.Literals(["user", "resumed", "stale", "disabled", "superseded"]),
+    ),
   }),
   Schema.Struct({
     type: Schema.Literal("queued-message.promote-to-steer"),

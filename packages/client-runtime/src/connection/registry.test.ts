@@ -711,6 +711,7 @@ describe("EnvironmentRegistry", () => {
         ).toEqual({
           target: renamedTarget,
           profile: Option.some(renamedProfile),
+          enabled: true,
         });
         expect((yield* Ref.get(harness.storedTargets)).get(BEARER_TARGET.environmentId)).toEqual(
           renamedTarget,

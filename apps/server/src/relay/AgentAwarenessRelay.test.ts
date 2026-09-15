@@ -220,6 +220,8 @@ describe("AgentAwarenessRelay", () => {
       "thread.metadata-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
+      "thread.usage-limit-resume-scheduled",
+      "thread.usage-limit-resume-cleared",
       "thread.archived",
       "thread.unarchived",
       "thread.deleted",

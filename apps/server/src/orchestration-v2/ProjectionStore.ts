@@ -483,6 +483,8 @@ export function applyToProjection(
     case "thread.interaction-mode-updated":
     case "thread.model-selection-updated":
     case "thread.provider-switched":
+    case "thread.usage-limit-resume-scheduled":
+    case "thread.usage-limit-resume-cleared":
       return {
         ...base,
         thread: event.payload,
@@ -1158,6 +1160,7 @@ export function threadShellFromProjection(
       : { activeOrderKey: projection.thread.activeOrderKey }),
     lineage: projection.thread.lineage,
     automationId: projection.thread.automationId ?? null,
+    usageLimitResume: projection.thread.usageLimitResume ?? null,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
     ...(projection.thread.historyOrigin === undefined
@@ -1454,7 +1457,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "thread.runtime-mode-updated":
           case "thread.interaction-mode-updated":
           case "thread.model-selection-updated":
-          case "thread.provider-switched": {
+          case "thread.provider-switched":
+          case "thread.usage-limit-resume-scheduled":
+          case "thread.usage-limit-resume-cleared": {
             const payloadJson = yield* encodeThreadPayload(event.payload);
             const payload = parseEncodedPayload(payloadJson);
             yield* sql`
@@ -2273,7 +2278,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.runtime-mode-updated" &&
           event.type !== "thread.interaction-mode-updated" &&
           event.type !== "thread.model-selection-updated" &&
-          event.type !== "thread.provider-switched"
+          event.type !== "thread.provider-switched" &&
+          event.type !== "thread.usage-limit-resume-scheduled" &&
+          event.type !== "thread.usage-limit-resume-cleared"
         ) {
           const rows = yield* sql<PayloadRow>`
             SELECT payload_json

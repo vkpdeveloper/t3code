@@ -94,6 +94,7 @@ export function makeProviderFailure(input: {
   readonly code?: string | null | undefined;
   readonly class?: OrchestrationV2ProviderFailureClass;
   readonly retryable?: boolean | null;
+  readonly resetsAt?: string | null | undefined;
 }): OrchestrationV2ProviderFailure {
   const rawMessage =
     input.message ??
@@ -109,6 +110,7 @@ export function makeProviderFailure(input: {
     message: message || DEFAULT_PROVIDER_FAILURE_MESSAGE,
     code,
     retryable: input.retryable ?? null,
+    ...(input.resetsAt === undefined ? {} : { resetsAt: input.resetsAt }),
   };
 }
 

@@ -4,6 +4,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import {
   INITIAL_AGENT_STATUS_PRESENTER_STATE,
@@ -34,7 +35,25 @@ function makeThread(
   fixture: "running" | "completed" | "failed" | "approval" | "input",
   startedAt = "2026-09-04T09:50:00.000Z",
 ): EnvironmentThreadShell {
-  const base = {
+  const active = fixture === "running" || fixture === "approval" || fixture === "input";
+  const pendingRuntimeRequest =
+    fixture === "approval"
+      ? { id: "request:approval", kind: "command", createdAt: startedAt }
+      : fixture === "input"
+        ? { id: "request:input", kind: "user_input", createdAt: startedAt }
+        : null;
+  const source = {
+    id: threadId as ThreadId,
+    projectId: PROJECT_ID,
+    title: `Task ${threadId}`,
+    modelSelection: { instanceId: "codex", model: "gpt-5" },
+    status: active ? "running" : fixture,
+    activityRunStatus: active ? "running" : null,
+    lastError: fixture === "failed" ? "Provider crashed" : null,
+    pendingRuntimeRequest,
+    updatedAt: DateTime.makeUnsafe("2026-09-04T10:00:00.000Z"),
+  };
+  return {
     id: threadId as ThreadId,
     environmentId,
     projectId: PROJECT_ID,
@@ -42,42 +61,21 @@ function makeThread(
     modelSelection: { provider: "codex", model: "gpt-5" },
     updatedAt: "2026-09-04T10:00:00.000Z",
     archivedAt: null,
-    backgroundLiveness: null,
     hasPendingApprovals: fixture === "approval",
     hasPendingUserInput: fixture === "input",
-  };
-  switch (fixture) {
-    case "running":
-    case "approval":
-    case "input":
-      return {
-        ...base,
-        session: { status: "running", providerName: "Codex", lastError: null },
-        latestTurn: {
-          state: "running",
-          requestedAt: startedAt,
-          startedAt,
-          completedAt: null,
-        },
-      } as unknown as EnvironmentThreadShell;
-    case "completed":
-      return {
-        ...base,
-        session: { status: "ready", providerName: "Codex", lastError: null },
-        latestTurn: {
-          state: "completed",
-          requestedAt: startedAt,
-          startedAt,
-          completedAt: "2026-09-04T10:00:00.000Z",
-        },
-      } as unknown as EnvironmentThreadShell;
-    case "failed":
-      return {
-        ...base,
-        session: { status: "error", providerName: "Codex", lastError: "Provider crashed" },
-        latestTurn: null,
-      } as unknown as EnvironmentThreadShell;
-  }
+    pendingBackgroundTasks: [],
+    latestRun:
+      fixture === "failed"
+        ? null
+        : {
+            runId: `run:${threadId}`,
+            status: fixture === "completed" ? "completed" : "running",
+            requestedAt: startedAt,
+            startedAt,
+            completedAt: fixture === "completed" ? "2026-09-04T10:00:00.000Z" : null,
+          },
+    source,
+  } as unknown as EnvironmentThreadShell;
 }
 
 function input(

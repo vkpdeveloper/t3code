@@ -304,6 +304,8 @@ function commandThreadId(command: OrchestrationV2Command): ThreadId {
     case "queued-run.edit":
     case "runtime-request.respond":
     case "thread.user-input.dismiss":
+    case "thread.usage-limit-resume.schedule":
+    case "thread.usage-limit-resume.cancel":
     case "checkpoint.rollback":
     case "provider.switch":
       return command.threadId;
@@ -869,6 +871,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
+        // A scheduled usage-limit resume holds the queue: queued sends wait
+        // for the provider window instead of failing into the same limit.
+        projection.thread.usageLimitResume != null ||
         projection.runs.some(isBlockingRun)
       ) {
         return;
@@ -1529,7 +1534,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.runtime-mode.set"
           | "thread.interaction-mode.set"
           | "thread.model-selection.set"
-          | "provider.switch";
+          | "provider.switch"
+          | "thread.usage-limit-resume.schedule"
+          | "thread.usage-limit-resume.cancel";
       }
     >,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -2079,8 +2086,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             providerInstanceId: command.modelSelection.instanceId,
             modelSelection: command.modelSelection,
+            // Switching providers or models spends the scheduled resume: the
+            // wait was for the previous window, and the new turn starts now.
+            usageLimitResume: null,
             updatedAt: now,
           };
+        case "thread.usage-limit-resume.schedule": {
+          const unchanged =
+            thread.usageLimitResume != null &&
+            thread.usageLimitResume.blockedRunId === command.blockedRunId;
+          return {
+            ...thread,
+            usageLimitResume: {
+              blockedRunId: command.blockedRunId,
+              resumeAt: command.resumeAt,
+              isEstimated: command.isEstimated,
+              ...(command.limitType === undefined ? {} : { limitType: command.limitType }),
+            },
+            updatedAt: unchanged ? thread.updatedAt : now,
+          };
+        }
+        case "thread.usage-limit-resume.cancel": {
+          if (thread.usageLimitResume == null) return thread;
+          return {
+            ...thread,
+            usageLimitResume: null,
+            updatedAt: now,
+          };
+        }
       }
     })();
     const eventType = (() => {
@@ -2125,6 +2158,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             : ("thread.provider-switched" as const);
         case "provider.switch":
           return "thread.provider-switched" as const;
+        case "thread.usage-limit-resume.schedule":
+          return "thread.usage-limit-resume-scheduled" as const;
+        case "thread.usage-limit-resume.cancel":
+          return "thread.usage-limit-resume-cleared" as const;
       }
     })();
     yield* emit(
@@ -3541,7 +3578,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const activeRun = projection.runs.find(isBlockingRun);
       const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
       const shouldQueue =
-        activeRun !== undefined &&
+        (activeRun !== undefined || projection.thread.usageLimitResume != null) &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
@@ -3555,14 +3592,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
         const queueProviderThread =
           activeProviderThread ??
-          projection.providerThreads.find(
-            (candidate) => candidate.id === activeRun.providerThreadId,
-          );
+          (activeRun === undefined
+            ? undefined
+            : projection.providerThreads.find(
+                (candidate) => candidate.id === activeRun.providerThreadId,
+              ));
         if (queueProviderThread === undefined) {
           return yield* new OrchestratorDispatchError({
             commandId: command.commandId,
             commandType: command.type,
-            cause: `Active run ${activeRun.id} has no provider thread for queued dispatch.`,
+            cause:
+              activeRun === undefined
+                ? `Thread ${command.threadId} is waiting on a usage-limit resume but has no provider thread to queue behind.`
+                : `Active run ${activeRun.id} has no provider thread for queued dispatch.`,
           });
         }
         if (modelSelection.instanceId !== queueProviderThread.providerInstanceId) {
@@ -3595,7 +3637,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const attemptId = idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 });
         const rootNodeId = idAllocator.derive.rootNode({ runId });
         const checkpointScope =
-          activeRun.status === "preparing"
+          activeRun === undefined || activeRun.status === "preparing"
             ? null
             : yield* runtimePolicy.resolve({ thread: projection.thread, modelSelection }).pipe(
                 Effect.flatMap((resolvedRuntimePolicy) =>
@@ -7702,6 +7744,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.interaction-mode.set":
       case "thread.model-selection.set":
       case "provider.switch":
+      case "thread.usage-limit-resume.schedule":
+      case "thread.usage-limit-resume.cancel":
         yield* dispatchThreadMutation(command, events, effects);
         break;
       case "provider-session.detach":
@@ -7969,13 +8013,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   yield* eventSink.stream({ afterSequence: terminalEventsAfterSequence }).pipe(
     Stream.filter(
       (stored) =>
-        stored.event.type === "run.updated" &&
-        !String(stored.commandId).startsWith("command:runtime-reconcile:") &&
-        (stored.event.payload.status === "completed" ||
-          stored.event.payload.status === "interrupted" ||
-          stored.event.payload.status === "failed" ||
-          stored.event.payload.status === "cancelled" ||
-          stored.event.payload.status === "rolled_back"),
+        // A cleared usage-limit wait is promotion-worthy too: messages sent
+        // during the wait sit queued behind it. A provider/model switch
+        // spends the wait inline without emitting the cleared event.
+        (stored.event.type === "thread.usage-limit-resume-cleared" ||
+          stored.event.type === "thread.provider-switched" ||
+          stored.event.type === "thread.model-selection-updated" ||
+          (stored.event.type === "run.updated" &&
+            (stored.event.payload.status === "completed" ||
+              stored.event.payload.status === "interrupted" ||
+              stored.event.payload.status === "failed" ||
+              stored.event.payload.status === "cancelled" ||
+              stored.event.payload.status === "rolled_back"))) &&
+        !String(stored.commandId).startsWith("command:runtime-reconcile:"),
     ),
     Stream.runForEach(handleTerminalRun),
     Effect.forkDetach,
