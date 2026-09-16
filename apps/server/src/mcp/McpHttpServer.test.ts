@@ -1,3 +1,5 @@
+import { OrchestratorV2 } from "../orchestration-v2/Orchestrator.ts";
+import { ProjectionStoreV2 } from "../orchestration-v2/ProjectionStore.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,13 +15,11 @@ import * as Stream from "effect/Stream";
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerConfig from "../config.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
-import { OperatorModelsTool } from "./toolkits/operator/tools.ts";
 
 const environmentId = EnvironmentId.make("environment-mcp-test");
 const threadId = ThreadId.make("thread-mcp-test");
@@ -59,7 +59,8 @@ const PullRequestsTestLayer = McpHttpServer.PullRequestsToolkitRegistrationLive.
       Layer.mock(ProjectionSnapshotQuery)({
         getThreadShellById: () => Effect.succeed(Option.none()),
       }),
-      Layer.mock(OrchestrationEngineService)({}),
+      Layer.mock(OrchestratorV2)({}),
+      Layer.mock(ProjectionStoreV2)({}),
       NodeServices.layer,
     ),
   ),
@@ -126,13 +127,6 @@ it("normalizes empty successful notification responses to accepted", () => {
     HttpServerResponse.jsonUnsafe({ jsonrpc: "2.0", id: 1, result: {} }),
   );
   expect(resultResponse.status).toBe(200);
-});
-
-it("advertises an object input schema for argument-free Operator tools", () => {
-  expect(Tool.getJsonSchema(OperatorModelsTool)).toEqual({
-    type: "object",
-    additionalProperties: false,
-  });
 });
 
 it.effect.each([{}, { includeImage: false }])(

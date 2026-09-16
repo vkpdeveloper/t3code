@@ -39,7 +39,9 @@ function AutomationRunRow({
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const status = automationRunStatusLabel(run, thread);
   const error =
-    restoreError ?? run.error ?? (status === "Failed" ? thread?.session?.lastError : null);
+    restoreError ??
+    run.error ??
+    (status === "Failed" ? (thread?.runtime?.lastError ?? null) : null);
 
   const restoreThread = async () => {
     setRestoring(true);

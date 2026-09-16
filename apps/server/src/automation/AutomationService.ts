@@ -32,6 +32,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { OrchestratorV2 } from "../orchestration-v2/Orchestrator.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { nextAutomationRunAt } from "./AutomationSchedule.ts";
 
@@ -129,6 +130,7 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     const crypto = yield* Crypto.Crypto;
     const engine = yield* OrchestrationEngineService;
+    const orchestrator = yield* OrchestratorV2;
     const query = yield* ProjectionSnapshotQuery;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -224,7 +226,7 @@ export const layer = Layer.effect(
       const createdAt = run.createdAt;
       const runId = AutomationRunId.make(run.runId);
       const threadId = ThreadId.make(run.threadId);
-      yield* engine.dispatch({
+      yield* orchestrator.dispatch({
         type: "thread.create",
         commandId: CommandId.make(`automation:${run.runId}:create`),
         threadId,
@@ -236,23 +238,22 @@ export const layer = Layer.effect(
         branch: null,
         worktreePath: null,
         automationId: automation.id,
-        automationRunId: runId,
-        createdAt,
+        createdBy: "system",
+        creationSource: "server",
       });
-      yield* engine.dispatch({
-        type: "thread.turn.start",
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
         commandId: CommandId.make(`automation:${run.runId}:start`),
         threadId,
-        message: {
-          messageId: MessageId.make(`automation:${run.runId}:message`),
-          role: "user",
-          text: automation.prompt,
-          attachments: [],
-        },
+        messageId: MessageId.make(`automation:${run.runId}:message`),
+        text: automation.prompt,
+        attachments: [],
+        deliveryIntent: "auto",
+        dispatchMode: { type: "start_immediately" },
         modelSelection: automation.modelSelection,
-        runtimeMode: automation.runtimeMode,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        createdAt,
+        titleSeed: automation.name,
+        createdBy: "system",
+        creationSource: "server",
       });
       const startedAt = yield* nowIso;
       yield* sql`

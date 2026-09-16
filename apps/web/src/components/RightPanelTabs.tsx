@@ -28,7 +28,6 @@ import {
   TerminalSquare,
   Volume2,
   VolumeOff,
-  Workflow,
 } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -65,6 +64,7 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
+import type { PreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
@@ -83,6 +83,7 @@ interface RightPanelTabsProps {
   widthStorageKey?: string;
   /** Forwarded to PreviewPanelShell as the initial width before a user resize. */
   defaultWidth?: number;
+  inlineSize?: PreviewPanelInlineSize;
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   /** Fallback environment for surfaces that do not carry their own. */
@@ -118,7 +119,6 @@ interface RightPanelTabsProps {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddAgents: () => void;
-  onAddOperator: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -127,13 +127,10 @@ interface RightPanelTabsProps {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
-  operatorAvailable: boolean;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
-  /** Queued + running + waiting T3 tasks; badges the Operator card in the empty state. */
-  liveOperatorCount: number;
   children: ReactNode;
 }
 
@@ -161,7 +158,6 @@ const SURFACE_DISABLED_REASONS = {
   pullRequest: "This thread's branch has no pull request yet.",
   pullRequests: "No linked pull requests are available for this thread.",
   agents: "Agents are only available from a thread.",
-  operator: "Operator is unavailable for this task or environment.",
   device: "Devices are only available from a thread.",
 } as const;
 
@@ -326,7 +322,6 @@ function RightPanelEmptyState(props: {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddAgents: () => void;
-  onAddOperator: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -335,10 +330,8 @@ function RightPanelEmptyState(props: {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
-  operatorAvailable: boolean;
   deviceAvailable: boolean;
   liveAgentCount: number;
-  liveOperatorCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
@@ -406,16 +399,6 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.agents,
       onClick: props.onAddAgents,
       badgeCount: props.liveAgentCount,
-    },
-    {
-      label: "Operator",
-      description: "Monitor model-specific T3 Code tasks.",
-      icon: Workflow,
-      shortcut: "O",
-      available: props.operatorAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.operator,
-      onClick: props.onAddOperator,
-      badgeCount: props.liveOperatorCount,
     },
     {
       label: "Device",
@@ -649,8 +632,6 @@ function surfaceTitle(
       return "Pull requests";
     case "agents":
       return "Agents";
-    case "operator":
-      return "Operator";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -736,8 +717,6 @@ function SurfaceIcon({
       return <GitPullRequestArrow className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
-    case "operator":
-      return <Workflow className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -941,14 +920,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddAgents,
     },
     {
-      label: "Operator",
-      icon: Workflow,
-      shortcut: "O",
-      available: props.operatorAvailable,
-      disabledReason: SURFACE_DISABLED_REASONS.operator,
-      onClick: props.onAddOperator,
-    },
-    {
       label: "Device",
       icon: Smartphone,
       shortcut: "M",
@@ -1128,6 +1099,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       {...(props.open !== undefined ? { open: props.open } : {})}
       {...(props.widthStorageKey !== undefined ? { widthStorageKey: props.widthStorageKey } : {})}
       {...(props.defaultWidth !== undefined ? { defaultWidth: props.defaultWidth } : {})}
+      {...(props.inlineSize ? { inlineSize: props.inlineSize } : {})}
     >
       <div
         className={cn(
@@ -1427,7 +1399,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddAgents={props.onAddAgents}
-            onAddOperator={props.onAddOperator}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
@@ -1436,10 +1407,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
             agentsAvailable={props.agentsAvailable}
-            operatorAvailable={props.operatorAvailable}
             deviceAvailable={props.deviceAvailable}
             liveAgentCount={props.liveAgentCount}
-            liveOperatorCount={props.liveOperatorCount}
           />
         ) : (
           props.children

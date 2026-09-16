@@ -4,6 +4,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import { aggregateAgentStatus } from "./aggregate";
 
@@ -33,7 +34,47 @@ function makeThread(
     readonly backgroundLiveness?: "working" | "monitoring" | null;
   } = {},
 ): EnvironmentThreadShell {
-  const base = {
+  const startedAt =
+    overrides.startedAt === undefined ? "2026-09-04T09:50:00.000Z" : overrides.startedAt;
+  const requestedAt = "2026-09-04T09:49:00.000Z";
+  const pendingRuntimeRequest =
+    fixture === "approval"
+      ? { id: "request:approval", kind: "command", createdAt: requestedAt }
+      : fixture === "input"
+        ? { id: "request:input", kind: "user_input", createdAt: requestedAt }
+        : null;
+  const source = {
+    id: threadId as ThreadId,
+    projectId: PROJECT_ID,
+    title: `Task ${threadId}`,
+    modelSelection: { instanceId: "codex", model: "gpt-5" },
+    status:
+      fixture === "running" || fixture === "approval" || fixture === "input"
+        ? "running"
+        : fixture === "completed"
+          ? "completed"
+          : "idle",
+    activityRunStatus:
+      fixture === "running" || fixture === "approval" || fixture === "input"
+        ? "running"
+        : fixture === "completed"
+          ? null
+          : null,
+    lastError: null,
+    pendingRuntimeRequest,
+    updatedAt: DateTime.makeUnsafe("2026-09-04T10:00:00.000Z"),
+  };
+  const latestRun =
+    fixture === "unknown"
+      ? null
+      : {
+          runId: `run:${threadId}`,
+          status: fixture === "completed" ? "completed" : "running",
+          requestedAt,
+          startedAt,
+          completedAt: fixture === "completed" ? "2026-09-04T10:00:00.000Z" : null,
+        };
+  return {
     id: threadId as ThreadId,
     environmentId,
     projectId: PROJECT_ID,
@@ -41,40 +82,15 @@ function makeThread(
     modelSelection: { provider: "codex", model: "gpt-5" },
     updatedAt: "2026-09-04T10:00:00.000Z",
     archivedAt: overrides.archivedAt ?? null,
-    backgroundLiveness: overrides.backgroundLiveness ?? null,
     hasPendingApprovals: fixture === "approval",
     hasPendingUserInput: fixture === "input",
-  };
-  const startedAt =
-    overrides.startedAt === undefined ? "2026-09-04T09:50:00.000Z" : overrides.startedAt;
-  switch (fixture) {
-    case "running":
-    case "approval":
-    case "input":
-      return {
-        ...base,
-        session: { status: "running", providerName: "Codex", lastError: null },
-        latestTurn: {
-          state: "running",
-          requestedAt: "2026-09-04T09:49:00.000Z",
-          startedAt,
-          completedAt: null,
-        },
-      } as unknown as EnvironmentThreadShell;
-    case "completed":
-      return {
-        ...base,
-        session: { status: "ready", providerName: "Codex", lastError: null },
-        latestTurn: {
-          state: "completed",
-          requestedAt: "2026-09-04T09:49:00.000Z",
-          startedAt,
-          completedAt: "2026-09-04T10:00:00.000Z",
-        },
-      } as unknown as EnvironmentThreadShell;
-    case "unknown":
-      return { ...base, session: null, latestTurn: null } as unknown as EnvironmentThreadShell;
-  }
+    pendingBackgroundTasks:
+      overrides.backgroundLiveness === "working" || overrides.backgroundLiveness === "monitoring"
+        ? [{ taskId: "task:background", description: "Background task" }]
+        : [],
+    latestRun,
+    source,
+  } as unknown as EnvironmentThreadShell;
 }
 
 function aggregate(threads: ReadonlyArray<EnvironmentThreadShell>) {

@@ -110,6 +110,7 @@ function sourceFromParam(value: string | string[] | undefined): AddProjectRemote
     source === "url" ||
     source === "github" ||
     source === "gitlab" ||
+    source === "forgejo" ||
     source === "bitbucket" ||
     source === "azure-devops"
   ) {
@@ -613,7 +614,6 @@ function useCreateProject(environment: EnvironmentOption | null) {
         commandId: CommandId.make(uuidv4()),
         projectId,
         workspaceRoot,
-        createdAt: new Date().toISOString(),
       });
       const result = await createProject({
         environmentId: environment.environmentId,

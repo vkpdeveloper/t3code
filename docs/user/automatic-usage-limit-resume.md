@@ -1,21 +1,19 @@
 # Automatic continuation after usage limits
 
-When a Codex or Claude subscription limit stops a turn, T3 Code keeps the thread ready and
+When a Codex or Claude subscription limit stops a turn, T3 Code keeps the thread working and
 continues it after the provider's usage window resets. This is enabled by default.
 
-The thread shows when it will continue. If the provider gives an exact reset time, T3 Code waits
-for that time and a short grace period. If no reset time is available, it shows an estimated retry
-time. Another limit response schedules the next attempt instead of abandoning the task.
+While the wait is scheduled, the thread shows a "usage limit reached" banner with the resume time
+and a Cancel button. Messages you send during the wait stay queued on the thread instead of failing
+into the same limit.
 
-Messages sent during the wait stay queued on the thread. When the limit resets, T3 Code sends them
-to the agent in order, including image attachments, as part of one resumed turn.
+When the window resets, T3 Code clears the wait and continues the thread: queued messages send in
+order, and if nothing was queued the agent gets a "continue" prompt so it picks the task back up.
+The schedule survives restarts, so the wait still fires if the app is closed and reopened.
 
-Choose **Cancel** in the thread notice when you want to leave the task stopped. Switching to another
-agent cancels the wait and starts the new turn immediately.
-
-The schedule is stored with the thread, so restarting the T3 Code server does not lose it. To turn
-the behavior off for the environment, disable **Automatically continue after usage limits reset**
-under **Settings → General**. Disabling it also cancels waits that are already scheduled.
+Cancelling the banner ends the wait immediately and any queued sends run right away. Switching
+providers or models on the thread also spends the wait, since it belongs to the previous window.
+Disabling "Automatically continue after usage limits reset" in Settings cancels all pending waits.
 
 Automatic continuation applies only to recognized Codex and Claude subscription limits. Workspace
 credit limits, spend controls, and ordinary provider errors are left stopped for you to handle.

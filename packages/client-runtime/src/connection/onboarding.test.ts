@@ -10,6 +10,7 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   SshConnectionProfile,
+  type ConnectionCatalogEntry,
 } from "./catalog.ts";
 import { BearerConnectionTarget, SshConnectionTarget } from "./model.ts";
 import {
@@ -208,6 +209,7 @@ describe("connection onboarding", () => {
               wsBaseUrl: "ws://old.example.test/",
             }),
           ),
+          enabled: true,
         }),
         credential: Option.some(new BearerConnectionCredential({ token: "bearer-token" })),
       });
@@ -237,12 +239,13 @@ describe("connection onboarding", () => {
         const bearerEnvironmentId = EnvironmentId.make("environment-bearer");
         const bearer = yield* prepareSavedConnectionRename({
           input: { environmentId: bearerEnvironmentId, label: "Desk Mac" },
-          entry: Option.some({
+          entry: Option.some<ConnectionCatalogEntry>({
             target: new BearerConnectionTarget({
               environmentId: bearerEnvironmentId,
               label: "macbook.local",
               connectionId: "bearer:environment-bearer",
             }),
+            enabled: true,
             profile: Option.some(
               new BearerConnectionProfile({
                 connectionId: "bearer:environment-bearer",
@@ -265,12 +268,13 @@ describe("connection onboarding", () => {
         };
         const ssh = yield* prepareSavedConnectionRename({
           input: { environmentId: sshEnvironmentId, label: "Linux workstation" },
-          entry: Option.some({
+          entry: Option.some<ConnectionCatalogEntry>({
             target: new SshConnectionTarget({
               environmentId: sshEnvironmentId,
               label: "archv",
               connectionId: "ssh:environment-ssh-rename",
             }),
+            enabled: true,
             profile: Option.some(
               new SshConnectionProfile({
                 connectionId: "ssh:environment-ssh-rename",

@@ -74,6 +74,11 @@ export interface GitStatusDetails {
   aheadOfDefaultCount: number;
 }
 
+export interface GitLocalStatusOptions {
+  /** Skip revision walks and return zero divergence counts for local-only consumers. */
+  readonly includeDivergence?: boolean;
+}
+
 export interface GitRemoteStatusDetails {
   isRepo: boolean;
   defaultBranch: string | null;
@@ -102,6 +107,36 @@ export interface ExecuteGitProgress {
   }) => Effect.Effect<void, never>;
 }
 
+/**
+ * Progress callbacks for `createWorktree`. Git prints `Updating files: 78% (2104/2700)`
+ * to stderr during checkout, and `Submodule path 'x': checked out` during
+ * submodule init. The tracker uses these to drive the worktree setup card.
+ */
+export interface CreateWorktreeProgress {
+  /**
+   * Fires once `git worktree add` has created and registered the directory,
+   * before the (possibly long) submodule step. Git refuses an existing path,
+   * so a path reported here belongs to this call and is safe to remove on
+   * cancel.
+   */
+  readonly onWorktreeClaimed?: (path: string) => Effect.Effect<void, never>;
+  readonly onCheckoutProgress?: (input: {
+    percent: number;
+    completed: number;
+    total: number;
+  }) => Effect.Effect<void, never>;
+  readonly onSubmodulesStarted?: () => Effect.Effect<void, never>;
+  readonly onSubmoduleLine?: (line: string) => Effect.Effect<void, never>;
+  readonly onSubmodulesFinished?: (input: {
+    ok: boolean;
+    detail: string | null;
+  }) => Effect.Effect<void, never>;
+}
+
+export interface CreateWorktreeOptions {
+  readonly progress?: CreateWorktreeProgress;
+}
+
 export interface GitCommitProgress {
   readonly onOutputLine?: (input: {
     stream: "stdout" | "stderr";
@@ -118,6 +153,12 @@ export interface GitCommitProgress {
 export interface GitCommitOptions {
   readonly timeoutMs?: number;
   readonly progress?: GitCommitProgress;
+}
+
+export interface GitDeleteLocalBranchInput {
+  readonly cwd: string;
+  readonly refName: string;
+  readonly force?: boolean;
 }
 
 export interface GitPushResult {
@@ -240,7 +281,10 @@ export class GitVcsDriver extends Context.Service<
     readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
     readonly status: (input: VcsStatusInput) => Effect.Effect<VcsStatusResult, GitCommandError>;
     readonly statusDetails: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
-    readonly statusDetailsLocal: (cwd: string) => Effect.Effect<GitStatusDetails, GitCommandError>;
+    readonly statusDetailsLocal: (
+      cwd: string,
+      options?: GitLocalStatusOptions,
+    ) => Effect.Effect<GitStatusDetails, GitCommandError>;
     readonly statusDetailsRemote: (
       cwd: string,
       options?: GitRemoteStatusOptions,
@@ -280,6 +324,7 @@ export class GitVcsDriver extends Context.Service<
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>;
     readonly createWorktree: (
       input: VcsCreateWorktreeInput,
+      options?: CreateWorktreeOptions,
     ) => Effect.Effect<VcsCreateWorktreeResult, GitCommandError>;
     readonly fetchPullRequestBranch: (
       input: GitFetchPullRequestBranchInput,
@@ -325,6 +370,9 @@ export class GitVcsDriver extends Context.Service<
     readonly pruneWorktrees: (input: {
       readonly cwd: string;
     }) => Effect.Effect<void, GitCommandError>;
+    readonly deleteLocalBranch: (
+      input: GitDeleteLocalBranchInput,
+    ) => Effect.Effect<void, GitCommandError>;
     readonly renameBranch: (
       input: GitRenameBranchInput,
     ) => Effect.Effect<GitRenameBranchResult, GitCommandError>;
@@ -771,7 +819,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         const commitTreeResult = yield* execute({
           operation,
           cwd: input.cwd,
-          args: ["commit-tree", treeOid, "-m", message],
+          // Checkpoint commits are internal refs that are never pushed, so a
+          // user's global commit.gpgsign must not apply — a gpg-agent pin
+          // prompt would otherwise stall the run's start effect on the process
+          // timeout.
+          args: ["-c", "commit.gpgsign=false", "commit-tree", treeOid, "-m", message],
           env: commitEnv,
         });
         const commitOid = commitTreeResult.stdout.trim();
@@ -791,6 +843,27 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           args: ["update-ref", input.checkpointRef, commitOid],
         });
       }).pipe(Effect.ensuring(cleanupTempIndex));
+    }),
+
+    warmCheckpoint: Effect.fn("GitVcsDriver.checkpoints.warmCheckpoint")(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.warmCheckpoint";
+      const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+      const tempIndexPath = path.join(
+        gitCommonDir,
+        `t3-checkpoint-warm-${NodeCrypto.randomUUID()}`,
+      );
+      // Hashing into a throwaway index writes every worktree blob into the
+      // object store, so the next real captureCheckpoint's `git add -A` only
+      // has to reuse them. Concurrent captures are safe: object writes are
+      // idempotent and each capture owns its own temp index.
+      yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["add", "-A", "--", "."],
+        env: { ...process.env, GIT_INDEX_FILE: tempIndexPath },
+      }).pipe(
+        Effect.ensuring(fileSystem.remove(tempIndexPath, { force: true }).pipe(Effect.ignore)),
+      );
     }),
 
     hasCheckpointRef: (input) =>

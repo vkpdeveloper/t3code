@@ -1,13 +1,15 @@
 import type { StatusTone } from "../../components/StatusPill";
-import type { OrchestrationLatestTurn, OrchestrationSession } from "@t3tools/contracts";
-import { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import {
+  threadRuntimeIsActive,
+  type EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
 
 export type ThreadStatusKind =
   | "pending-approval"
   | "awaiting-input"
-  | "waiting"
   | "working"
   | "connecting"
+  | "waiting"
   | "error"
   | "plan-ready";
 
@@ -21,14 +23,10 @@ export interface ThreadStatusPresentation extends StatusTone {
   readonly pulse: boolean;
 }
 
-function isLatestTurnSettled(
-  latestTurn: OrchestrationLatestTurn | null,
-  session: OrchestrationSession | null,
-): boolean {
-  if (!latestTurn?.startedAt) return false;
-  if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  return session.status !== "running";
+function isLatestRunSettled(thread: EnvironmentThreadShell): boolean {
+  if (!thread.latestRun?.startedAt) return false;
+  if (!thread.latestRun.completedAt) return false;
+  return !threadRuntimeIsActive(thread.runtime);
 }
 
 /**
@@ -63,19 +61,9 @@ export function resolveThreadStatus(
     };
   }
 
-  if (thread.usageLimitWait != null) {
-    return {
-      kind: "waiting",
-      label: "Waiting for reset",
-      pillClassName: "bg-amber-500/12 dark:bg-amber-500/16",
-      textClassName: "text-amber-700 dark:text-amber-300",
-      iconColor: "#ff9f0a",
-      iconBackground: "rgba(255,159,10,0.22)",
-      pulse: false,
-    };
-  }
+  const runtimeStatus = thread.runtime?.status;
 
-  if (thread.session?.status === "running") {
+  if (runtimeStatus === "running" || runtimeStatus === "waiting") {
     return {
       kind: "working",
       label: "Working",
@@ -87,7 +75,7 @@ export function resolveThreadStatus(
     };
   }
 
-  if (thread.session?.status === "starting") {
+  if (runtimeStatus === "preparing" || runtimeStatus === "queued" || runtimeStatus === "starting") {
     return {
       kind: "connecting",
       label: "Connecting",
@@ -99,7 +87,19 @@ export function resolveThreadStatus(
     };
   }
 
-  if (thread.session?.status === "error" || thread.latestTurn?.state === "error") {
+  if (thread.usageLimitResume != null) {
+    return {
+      kind: "waiting",
+      label: "Waiting for reset",
+      pillClassName: "bg-amber-500/12 dark:bg-amber-500/16",
+      textClassName: "text-amber-700 dark:text-amber-300",
+      iconColor: "#ff9f0a",
+      iconBackground: "rgba(255,159,10,0.22)",
+      pulse: false,
+    };
+  }
+
+  if (runtimeStatus === "failed" || thread.latestRun?.status === "failed") {
     return {
       kind: "error",
       label: "Error",
@@ -113,7 +113,7 @@ export function resolveThreadStatus(
 
   const hasPlanReadyPrompt =
     thread.interactionMode === "plan" &&
-    isLatestTurnSettled(thread.latestTurn, thread.session) &&
+    isLatestRunSettled(thread) &&
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {

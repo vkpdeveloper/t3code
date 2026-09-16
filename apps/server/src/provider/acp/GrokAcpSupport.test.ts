@@ -1,12 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
+
 import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
 
 import {
   applyGrokAcpModelSelection,
   buildGrokAcpSpawnInput,
   currentGrokModelSelectionFromSessionSetup,
+  grokAcpRuntimeProcessOwnership,
   grokAcpSpawnArgs,
   grokAcpSessionCompatibilityGroup,
   isValidGrokReasoningEffortToken,
@@ -23,6 +25,29 @@ describe("grokAcpSessionCompatibilityGroup", () => {
       "grok-strict:grok-build-orchestrator",
     );
     expect(grokAcpSessionCompatibilityGroup(undefined)).toBeUndefined();
+  });
+});
+
+describe("grokAcpRuntimeProcessOwnership", () => {
+  it("opts Grok into detached process-tree ownership on the injected host platform", () => {
+    expect(grokAcpRuntimeProcessOwnership("linux")).toEqual({
+      ownDescendantProcessGroups: true,
+      ownDetachedProcessGroup: true,
+      processGroupPlatform: "linux",
+    });
+  });
+
+  it("uses the prior provider-group path on Darwin and Windows", () => {
+    expect(grokAcpRuntimeProcessOwnership("darwin")).toEqual({
+      ownDescendantProcessGroups: false,
+      ownDetachedProcessGroup: true,
+      processGroupPlatform: "darwin",
+    });
+    expect(grokAcpRuntimeProcessOwnership("win32")).toEqual({
+      ownDescendantProcessGroups: false,
+      ownDetachedProcessGroup: true,
+      processGroupPlatform: "win32",
+    });
   });
 });
 

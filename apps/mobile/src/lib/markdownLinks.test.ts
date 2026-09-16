@@ -82,7 +82,7 @@ describe("resolveMarkdownLinkPresentation", () => {
     expect(resolveMarkdownLinkPresentation("package.json")).toEqual({
       kind: "file",
       href: "package.json",
-      icon: "package",
+      icon: "npm",
       label: "package.json",
       path: "package.json",
     });

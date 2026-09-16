@@ -1,12 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import {
-  AutomationId,
-  AutomationRunId,
-  ThreadId,
-  TurnId,
-  type AutomationRun,
-  type OrchestrationThreadShell,
-} from "@t3tools/contracts";
+import { AutomationId, AutomationRunId, ThreadId, type AutomationRun } from "@t3tools/contracts";
 
 import { automationRunStatusLabel } from "./automations.ts";
 
@@ -23,21 +16,10 @@ const run: AutomationRun = {
 };
 
 const completedThread = {
-  latestTurn: {
-    turnId: TurnId.make("turn-1"),
-    state: "completed",
-    requestedAt: run.createdAt,
-    startedAt: run.startedAt,
-    completedAt: "2026-09-05T09:01:00Z",
-    assistantMessageId: null,
-  },
-  session: null,
+  status: "completed",
   hasPendingApprovals: false,
   hasPendingUserInput: false,
-} satisfies Pick<
-  OrchestrationThreadShell,
-  "latestTurn" | "session" | "hasPendingApprovals" | "hasPendingUserInput"
->;
+} as const;
 
 describe("automationRunStatusLabel", () => {
   it("uses the thread outcome after the scheduler marks a run as started", () => {
@@ -45,13 +27,13 @@ describe("automationRunStatusLabel", () => {
     expect(
       automationRunStatusLabel(run, {
         ...completedThread,
-        latestTurn: { ...completedThread.latestTurn, state: "interrupted" },
+        status: "interrupted" as const,
       }),
     ).toBe("Interrupted");
     expect(
       automationRunStatusLabel(run, {
         ...completedThread,
-        latestTurn: { ...completedThread.latestTurn, state: "error" },
+        status: "failed" as const,
       }),
     ).toBe("Failed");
   });
@@ -74,7 +56,7 @@ describe("automationRunStatusLabel", () => {
   it("shows required approval and input while a run is working", () => {
     const workingThread = {
       ...completedThread,
-      latestTurn: { ...completedThread.latestTurn, state: "running" as const, completedAt: null },
+      status: "running" as const,
     };
     expect(automationRunStatusLabel(run, workingThread)).toBe("Running");
     expect(automationRunStatusLabel(run, { ...workingThread, hasPendingApprovals: true })).toBe(
@@ -88,21 +70,13 @@ describe("automationRunStatusLabel", () => {
   it("shows a follow-up starting instead of the previous completed turn", () => {
     const thread = {
       ...completedThread,
-      session: {
-        threadId: run.threadId,
-        status: "starting" as const,
-        providerName: "codex",
-        runtimeMode: "full-access" as const,
-        activeTurnId: null,
-        lastError: null,
-        updatedAt: "2026-09-05T09:05:00Z",
-      },
+      status: "starting" as const,
     };
     expect(automationRunStatusLabel(run, thread)).toBe("Starting");
     expect(
       automationRunStatusLabel(run, {
         ...thread,
-        session: { ...thread.session, status: "error", lastError: "Provider unavailable" },
+        status: "failed" as const,
       }),
     ).toBe("Failed");
   });

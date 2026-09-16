@@ -1,6 +1,15 @@
 # Provider architecture
 
+<<<<<<< HEAD
+
 > For maintainers. Using T3 Code? See [docs/user](../user/).
+> \=======
+> Orchestration records intent and state without knowing which provider runs a thread. Provider
+> protocols, account ownership, permissions, and capabilities belong at the
+> [adapter boundary](../../apps/server/src/orchestration-v2/ProviderAdapter.ts). Normalize there
+> instead of spreading provider checks through reactors and clients.
+>
+> > > > > > > upstream/t3code/codex-turn-mapping
 
 A provider is the agent runtime that does the actual work. T3 Code supports several, and the
 orchestration layer does not know which one is behind a thread.
@@ -8,6 +17,8 @@ orchestration layer does not know which one is behind a thread.
 ## Built-in drivers
 
 [`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with eight entries:
+
+<<<<<<< HEAD
 
 | Driver kind   | Driver source                                 |
 | ------------- | --------------------------------------------- |
@@ -25,6 +36,20 @@ adapter in a child scope. Adapter implementations live beside them in
 `apps/server/src/provider/Layers/` (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on) and conform to
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
 transport, config, and event shapes are mapped.
+=======
+
+OpenCode also stores persistent approval grants per directory. Automatic full-access replies use
+`once` so they cannot widen a supervised thread's permissions on a shared external server.
+See the [adapter](../../apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts).
+
+Pi runs the user's own `pi` install in RPC mode and owns native extension, package, and project
+trust discovery. T3 injects only its namespaced MCP bridge, so a Pi session behaves as it does in
+the Pi TUI. Pi session files back native resume, rollback, and same-instance thread forks.
+Forks use Pi's CLI in the destination directory because RPC session switching retains the source
+session's cwd. Provider switches still use portable handoff summaries.
+See the [adapter](../../apps/server/src/orchestration-v2/Adapters/PiAdapterV2.ts).
+
+> > > > > > > upstream/t3code/codex-turn-mapping
 
 Antigravity separates account profiles per instance while sharing installed executables across the
 environment. It forces file-based credential storage because the native macOS keychain entry would
@@ -71,6 +96,8 @@ The Devin driver runs `devin acp`, a stock ACP agent, so the shared runtime hand
 tool calls, permissions, usage, and titles. Three Devin decisions live in
 [`DevinAcpSupport`][devin-support]:
 
+<<<<<<< HEAD
+
 - The runtime is started without an `authMethodId`, so it never sends ACP `authenticate`. Devin's
   only auth method is `devin-browser`, which starts a browser PKCE flow on every call even when the
   CLI already holds credentials. Sessions rely on `devin auth login` credentials instead, and the
@@ -86,6 +113,23 @@ tool calls, permissions, usage, and titles. Three Devin decisions live in
 Devin sends ask-user-question as an ACP form elicitation under `elicitation/create` and
 `_session/elicitation` rather than `session/elicitation`; the adapter registers both as extension
 requests and maps the JSON-schema form onto T3 user-input questions.
+=======
+
+Codex async questions arrive as notifications and are answered with a new user message. There is
+no pending RPC response to send. The
+[adapter](../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts) persists them as
+`user_input_request` turn items and runtime requests with `responseCapability: { type: "message" }`.
+Their execution nodes do not block the run. Web, desktop, and mobile use their normal question
+panels, and requests remain pending after a turn finishes, a provider exits, or the server restarts.
+
+`runtime-request.respond` reads the persisted request and question item, validates required
+answers, and commits the resolution and a user message in one transaction. Repeating the same
+command returns its receipt without posting the answer twice. The normal message path starts or
+resumes a run, queues behind active work, or steers when the adapter supports it. Blocking questions
+retain the provider's live response path. Do not infer that a request has disappeared merely because
+it is outside the recent history window.
+
+> > > > > > > upstream/t3code/codex-turn-mapping
 
 ## Antigravity ownership and protocol
 
@@ -98,12 +142,24 @@ launch. The driver never reuses CLI credentials or ambient `GOOGLE_*` variables 
 back to another method. Antigravity is disabled by default and supports multiple provider
 instances. The open driver and instance identifiers require no database migration.
 
+<<<<<<< HEAD
+
 ### Runtime installation
+
+=======
+Attachments live outside the project workspace. The
+[attachment boundary](../../apps/server/src/orchestration-v2/AttachmentClaims.ts) validates and claims
+uploads for a thread; adapters choose native input formats for those environment-local files.
+A path in the prompt does not grant filesystem access. Keep provider sandbox and approval rules
+in force; copying uploads into the project to bypass them changes that boundary.
+
+> > > > > > > upstream/t3code/codex-turn-mapping
 
 [`AntigravityInstallation`][antigravity-installation] belongs to the environment, outside
 WebSocket and provider-instance scopes. Instances share an explicit download operation and the
 completed runtime. Client disconnects and instance rebuilds do not cancel installation.
 
+<<<<<<< HEAD
 The fixed [release table][antigravity-release] contains official Google URLs, SHA-256 hashes,
 archive sizes, and the exact executable pair for each published host. Downloads stream to disk.
 Lazy `yauzl` entry streams extract only that pair, with member names, types, duplicates, and
@@ -450,3 +506,25 @@ Several Grok Build notifications do not yet have a truthful adapter-only mapping
 [ingest]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
 [cmd]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
 [checkpoint]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
+
+=======
+
+## Provider diagnostics
+
+Native event logs retain lifecycle events, responses, and failures. Token deltas and duplicate raw
+frames are filtered before adapters copy or redact payloads. The filter accepts both legacy native
+events and v2 protocol envelopes; decode failures remain visible through diagnostic frames.
+
+Log payloads have a 64 KiB encoded budget. Large or deeply nested payloads become structural
+summaries that retain routing identifiers, methods, status, and error fields. Traversal is bounded
+before redaction and serialization, so logging a large response does not require several full
+copies. These limits apply to diagnostics; provider event handling is unchanged.
+
+Codex resumes with metadata-only reads when it needs a thread's identity and update time. Its
+initialization capabilities opt out of `turn/diff/updated`: T3 derives diffs from checkpoints.
+The logger filters those notifications before traversal when an older provider still sends them.
+
+Model classification has its own [manifest constraints](./model-manifest.md). Assistant-reference
+handling is documented under [citations](./assistant-citations.md).
+
+> > > > > > > upstream/t3code/codex-turn-mapping

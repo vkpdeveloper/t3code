@@ -123,10 +123,8 @@ function renderTabs(
       onAddDiff={() => undefined}
       onAddFiles={() => undefined}
       onAddAgents={() => undefined}
-      onAddOperator={() => undefined}
       onAddDevice={() => undefined}
       liveAgentCount={0}
-      liveOperatorCount={0}
       browserAvailable
       terminalAvailable={false}
       diffAvailable={false}
@@ -134,7 +132,6 @@ function renderTabs(
       pullRequestAvailable={false}
       pullRequestsAvailable={false}
       agentsAvailable={false}
-      operatorAvailable={false}
       deviceAvailable={false}
     >
       <div>content</div>

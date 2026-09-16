@@ -53,7 +53,7 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   draftId?: DraftId;
   activeThreadTitle: string;
-  operatorParentTitle: string | null;
+  parentThreadTitle: string | null;
   /** Drafts have no server thread yet, so the title carries no action menu. */
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
@@ -66,7 +66,7 @@ interface ChatHeaderProps {
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
-  onOpenOperatorParent: () => void;
+  onOpenParentThread: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -125,7 +125,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   draftId,
   activeThreadTitle,
-  operatorParentTitle,
+  parentThreadTitle,
   isServerThread,
   activeProject,
   openInCwd,
@@ -137,7 +137,7 @@ export const ChatHeader = memo(function ChatHeader({
   gitCwd,
   onOpenPullRequest,
   onNewThreadInProject,
-  onOpenOperatorParent,
+  onOpenParentThread,
   onOpenProjectSettings,
   onRunProjectScript,
   onAddProjectScript,
@@ -404,15 +404,15 @@ export const ChatHeader = memo(function ChatHeader({
               </Tooltip>
             )}
           </div>
-          {operatorParentTitle === null ? null : (
+          {parentThreadTitle === null ? null : (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    data-testid="operator-parent-header-link"
-                    aria-label={`Open master task ${operatorParentTitle}`}
-                    onClick={onOpenOperatorParent}
+                    data-testid="parent-thread-header-link"
+                    aria-label={`Open parent thread ${parentThreadTitle}`}
+                    onClick={onOpenParentThread}
                     className="inline-flex min-w-0 max-w-28 shrink-0 cursor-pointer items-center gap-1 rounded-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring sm:max-w-48"
                   />
                 }
@@ -421,9 +421,9 @@ export const ChatHeader = memo(function ChatHeader({
                   aria-hidden
                   className="size-3.5 shrink-0 text-violet-600/75 dark:text-violet-300/75"
                 />
-                <span className="min-w-0 truncate">{operatorParentTitle}</span>
+                <span className="min-w-0 truncate">{parentThreadTitle}</span>
               </TooltipTrigger>
-              <TooltipPopup side="top">Spawned from {operatorParentTitle}</TooltipPopup>
+              <TooltipPopup side="top">Spawned from {parentThreadTitle}</TooltipPopup>
             </Tooltip>
           )}
         </WorkspaceBreadcrumbItem>

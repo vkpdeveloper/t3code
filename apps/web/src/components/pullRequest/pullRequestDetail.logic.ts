@@ -7,13 +7,14 @@ import {
   type PullRequestActor,
   type PullRequestBaseComparison,
   type PullRequestCheck,
-  type PullRequestChecksState,
+  type PullRequestChecksState as ContractPullRequestChecksState,
   type PullRequestComment,
   type PullRequestCommit,
+  type PullRequestContextMetadata,
   type PullRequestDetailView,
   type PullRequestMergeability,
-  type PullRequestMergeMethod,
   type PullRequestReaction,
+  type PullRequestMergeMethod,
   type PullRequestReviewThread,
   type PullRequestState,
   type PullRequestUpdateMethod,
@@ -22,6 +23,8 @@ import {
 } from "@t3tools/contracts";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
+import { reviewCommentContextId } from "~/lib/composerContextRecords";
+import { removeInlineContextReference } from "~/lib/composerContextReferences";
 
 export const PULL_REQUEST_MERGE_METHOD_LABELS: Record<PullRequestMergeMethod, string> = {
   merge: "Merge",
@@ -72,7 +75,7 @@ export function resolvePullRequestPrimaryControl(input: {
   readonly state: PullRequestState;
   readonly isDraft: boolean;
   readonly mergeability: PullRequestMergeability;
-  readonly checksState: PullRequestChecksState | null;
+  readonly checksState: ContractPullRequestChecksState | null;
   readonly autoMergeEnabled: boolean | undefined;
   readonly hasMergeMethod: boolean;
   readonly canMerge: boolean;
@@ -101,12 +104,17 @@ export function pullRequestCheckoutCommand(
   number: number,
   headBranch: string,
   headRepositoryNameWithOwner?: string | null,
+  repositoryUrl?: string | null,
 ): string | null {
   switch (provider) {
     case "github":
       return `gh pr checkout ${number}`;
     case "gitlab":
       return `glab mr checkout ${number}`;
+    case "forgejo":
+      return repositoryUrl
+        ? `git fetch '${repositoryUrl.replaceAll("'", "'\\''")}' refs/pull/${number}/head && git checkout -B pulls/${number} FETCH_HEAD`
+        : null;
     case "azure-devops":
       return `az repos pr checkout --id ${number}`;
     case "bitbucket": {
@@ -220,6 +228,116 @@ export function isStackedPullRequestBase(
     ? defaultRef.name.slice(remotePrefix.length)
     : defaultRef.name;
   return defaultBranch !== baseBranch;
+}
+
+/** The slice of a detail that decides which actions it offers. */
+export type PullRequestActionableDetail = Pick<
+  PullRequestDetail,
+  "state" | "isDraft" | "mergeability" | "capabilities" | "viewerPermissions" | "mergeCapabilities"
+>;
+
+/**
+ * The host says which strategies it offers at all; the repository narrows that to the ones it
+ * actually allows.
+ */
+export function allowedPullRequestMergeMethods(
+  detail: Pick<PullRequestActionableDetail, "capabilities" | "mergeCapabilities"> | null,
+): ReadonlyArray<PullRequestMergeMethod> {
+  return detail === null
+    ? []
+    : detail.capabilities.mergeMethods.filter((method) => detail.mergeCapabilities[method]);
+}
+
+/** The reader's preference where the repository allows it, and the first allowed method else. */
+export function resolveSelectedMergeMethod(
+  allowedMergeMethods: ReadonlyArray<PullRequestMergeMethod>,
+  preferred: PullRequestMergeMethod,
+): PullRequestMergeMethod {
+  return allowedMergeMethods.includes(preferred) ? preferred : (allowedMergeMethods[0] ?? "merge");
+}
+
+/**
+ * Two questions, both of which have to say yes: whether this host can do it at all, and whether
+ * this account may. A reader with read access on someone else's project sees the pull request and
+ * none of the buttons that would only ever be refused.
+ */
+function canPerformPullRequestAction(
+  detail: Pick<PullRequestActionableDetail, "capabilities" | "viewerPermissions"> | null,
+  action: PullRequestAction,
+): boolean {
+  return (
+    detail !== null &&
+    detail.capabilities.actions.includes(action) &&
+    detail.viewerPermissions.actions.includes(action)
+  );
+}
+
+export function isPullRequestConflicting(
+  detail: Pick<PullRequestActionableDetail, "state" | "mergeability"> | null,
+): boolean {
+  return detail?.state === "open" && detail.mergeability === "conflicting";
+}
+
+/** The checks as one word. Failing outranks running: a red run is already worth acting on. */
+export type PullRequestChecksState = "none" | "pending" | "failing" | "passing";
+
+export function classifyPullRequestChecks(
+  checks: ReadonlyArray<PullRequestCheck>,
+): PullRequestChecksState {
+  if (checks.length === 0) return "none";
+  if (checks.some((check) => check.status === "failure" || check.status === "cancelled")) {
+    return "failing";
+  }
+  if (checks.some((check) => check.status === "pending")) return "pending";
+  return "passing";
+}
+
+/**
+ * The checks with every live facet, unlike the single-facet summary: a run with failures in it
+ * still says how much is in flight — "7 of 16 running · 1 failed" — because both numbers change
+ * what a reader does next.
+ */
+export function describePullRequestChecks(checks: ReadonlyArray<PullRequestCheck>): string {
+  if (checks.length === 0) return "No checks reported";
+  const failed = checks.filter(
+    (check) => check.status === "failure" || check.status === "cancelled",
+  ).length;
+  const pending = checks.filter((check) => check.status === "pending").length;
+  const passed = checks.filter((check) => check.status === "success").length;
+  const parts: string[] = [];
+  if (pending > 0) parts.push(`${pending} of ${checks.length} running`);
+  if (failed > 0) {
+    parts.push(pending > 0 ? `${failed} failed` : `${failed} of ${checks.length} failing`);
+  }
+  if (parts.length === 0) {
+    return passed === checks.length ? "All checks passed" : `${passed} of ${checks.length} passing`;
+  }
+  return parts.join(" · ");
+}
+
+export type ThreadPanelPullRequestAction = "resolve" | "ready" | "fix" | "merge";
+
+/**
+ * Which single action the thread panel's compact pull request row offers, ranked by what
+ * unblocks the merge next: conflicts stop everything, a draft is not up for review yet, failing
+ * checks want fixing, and only a clean open pull request earns Merge. While checks run the slot
+ * stays empty — the row shows their progress instead of an action that would race them.
+ */
+export function resolveThreadPanelPullRequestAction(
+  detail: (PullRequestActionableDetail & Pick<PullRequestDetail, "checks">) | null,
+): ThreadPanelPullRequestAction | null {
+  if (detail === null || detail.state !== "open") return null;
+  if (isPullRequestConflicting(detail)) return "resolve";
+  if (detail.isDraft) {
+    return canPerformPullRequestAction(detail, "ready") ? "ready" : null;
+  }
+  const checks = classifyPullRequestChecks(detail.checks);
+  if (checks === "failing") return "fix";
+  if (checks === "pending") return null;
+  return canPerformPullRequestAction(detail, "merge") &&
+    allowedPullRequestMergeMethods(detail).length > 0
+    ? "merge"
+    : null;
 }
 
 /** Chronological ascending, oldest to newest — reversed for the "newest" reading order. */
@@ -603,6 +721,20 @@ export interface FixFindingsHandoff {
  */
 const HANDOFF_COMMENT_ID_PREFIX = "pull-request-";
 
+/** Removes references owned by the previous PR handoff before its prose is replaced. */
+export function stripPullRequestHandoffReferences(
+  prompt: string,
+  comments: ReadonlyArray<ReviewCommentContext>,
+  retainedIds: ReadonlySet<string> = new Set(),
+): string {
+  let next = prompt;
+  for (const comment of comments) {
+    if (!comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX) || retainedIds.has(comment.id)) continue;
+    next = removeInlineContextReference(next, reviewCommentContextId(comment.id)).prompt;
+  }
+  return next;
+}
+
 /**
  * The prompt the composer should hold once a hand-off lands there.
  *
@@ -858,6 +990,8 @@ function pullRequestContextComment(
     readonly url: string;
     readonly headBranch: string;
     readonly baseBranch: string;
+    readonly state: PullRequestState;
+    readonly isDraft: boolean;
   },
   instructions: ReadonlyArray<string>,
 ): ReviewCommentContext {
@@ -878,7 +1012,28 @@ function pullRequestContextComment(
       ...instructions,
     ].join("\n"),
     diff: "",
+    pullRequest: {
+      number: input.number,
+      title: boundedField(input.title),
+      url: boundedField(input.url),
+      headBranch: boundedField(input.headBranch),
+      baseBranch: boundedField(input.baseBranch),
+      state: input.state,
+      isDraft: input.isDraft,
+    },
   };
+}
+
+/**
+ * A neutral pull request reference inserted directly from the message composer. It is the
+ * reader's own chip, so it sits outside the `pull-request-` namespace a hand-off owns and
+ * sweeps: a later hand-off must not delete a reference the reader put there themselves.
+ */
+export function buildPullRequestReferenceContext(
+  input: PullRequestContextMetadata,
+): ReviewCommentContext {
+  const comment = pullRequestContextComment(input, []);
+  return { ...comment, id: `pr-reference:${input.number}` };
 }
 
 /** What the agent is asked to do with a question, as opposed to a task. */
@@ -897,6 +1052,8 @@ export function buildAskAboutPullRequestHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
 }): FixFindingsHandoff {
   return {
     prompt: "",
@@ -915,6 +1072,8 @@ export function buildExplainPullRequestHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
 }): FixFindingsHandoff {
   return {
     prompt: "Explain this pull request.",
@@ -933,6 +1092,8 @@ export function buildAddSelectionToAgentHandoff(input: {
   readonly url: string;
   readonly headBranch: string;
   readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
   readonly comment: ReviewCommentContext;
   readonly request: string;
 }): FixFindingsHandoff {

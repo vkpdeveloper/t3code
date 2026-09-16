@@ -9,6 +9,12 @@ cost. These estimates are not your subscription bill.
 Totals depend on the history available on each server. Grok turns without a saved completed-turn
 record are missing from the totals.
 
+Usage includes each configured account's history, including disabled accounts. Custom homes follow
+the account's home setting or its `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `GROK_HOME` environment
+variable. Use absolute paths or `~/` paths in the account's environment settings; relative
+environment paths depend on each project's working directory and cannot be reliably discovered
+by Usage. Accounts sharing a history directory count once.
+
 On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
 results appear as each one responds.
@@ -105,3 +111,9 @@ The page refreshes account limits whenever you open it. The last successful resu
 while a refresh runs or when Vibe-Proxy is temporarily unreachable. Accounts for the same provider
 share one remaining-quota bar per window. Open a segment for that account's status, reset time, and
 recent request health. The account selected for routing is marked **In use**.
+
+## Subscription usage widget
+
+Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
+Claude quotas. Tap it to open **Usage → Limits**. On iOS, use **Edit Widget** to choose Session,
+Weekly, or both for each provider. Reopen T3 to refresh expired readings.

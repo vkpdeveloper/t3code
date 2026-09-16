@@ -8,11 +8,7 @@ import {
   resolveNotifiablePhase,
 } from "@t3tools/client-runtime/state/threadNotifications";
 import type { EnvironmentId } from "@t3tools/contracts";
-import {
-  buildAgentAwarenessDeepLink,
-  projectThreadAwareness,
-  type AgentAwarenessPhase,
-} from "@t3tools/shared/agentAwareness";
+import { projectThreadAwarenessV2, type AgentAwarenessPhase } from "@t3tools/shared/agentAwareness";
 
 export type AgentStatusPhase = Extract<
   AgentAwarenessPhase,
@@ -97,10 +93,10 @@ export function aggregateAgentStatus(input: {
       projectTitles.get(
         projectTitleKey({ environmentId: thread.environmentId, projectId: thread.projectId }),
       ) ?? "";
-    const awareness = projectThreadAwareness({
+    const awareness = projectThreadAwarenessV2({
       environmentId: thread.environmentId,
       project: { title: projectTitle },
-      thread,
+      thread: thread.source,
     });
     const phase = resolveNotifiablePhase(thread, awareness?.phase ?? null);
     if (phase === null || !isActivePhase(phase)) continue;
@@ -112,11 +108,8 @@ export function aggregateAgentStatus(input: {
       projectTitle,
       threadTitle: thread.title,
       phase,
-      startedAtMs: parseIsoMs(thread.latestTurn?.startedAt ?? thread.latestTurn?.requestedAt),
-      deepLink: buildAgentAwarenessDeepLink({
-        environmentId: thread.environmentId,
-        threadId: thread.id,
-      }),
+      startedAtMs: parseIsoMs(thread.latestRun?.startedAt ?? thread.latestRun?.requestedAt),
+      deepLink: awareness?.deepLink ?? "",
     });
   }
 

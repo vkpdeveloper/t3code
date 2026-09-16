@@ -1,7 +1,7 @@
 import {
   type DesktopSshEnvironmentTarget,
   EnvironmentId,
-  type OrchestrationShellSnapshot,
+  type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -47,10 +47,15 @@ import {
 import * as Persistence from "../platform/persistence.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as EnvironmentRegistry from "./registry.ts";
+import {
+  GitHubRoutingPermissions,
+  makeGitHubRoutingPermissions,
+} from "./githubRoutingPermissions.ts";
 import * as RpcSession from "../rpc/session.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 import { runDesktopCommitWithReconnectObserver } from "../state/server.ts";
+import { v2ShellSnapshot } from "../state/orchestrationV2TestFixtures.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -117,11 +122,9 @@ const SSH_PROFILE = new SshConnectionProfile({
   target: SSH_TARGET,
 });
 
-const CACHED_SNAPSHOT: OrchestrationShellSnapshot = {
+const CACHED_SNAPSHOT: OrchestrationV2ShellSnapshot = {
+  ...v2ShellSnapshot,
   snapshotSequence: 1,
-  projects: [],
-  threads: [],
-  updatedAt: "2026-06-06T00:00:00.000Z",
 };
 
 interface SessionControl {
@@ -140,6 +143,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     readonly beforeRegistrationRemove?: (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
+    readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
   },
 ) {
   const storedTargets = yield* Ref.make(
@@ -176,8 +180,12 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   );
   const disconnectedSshTargets = yield* Ref.make<ReadonlyArray<DesktopSshEnvironmentTarget>>([]);
 
+  const storedDisabled = yield* Ref.make<ReadonlySet<EnvironmentId>>(
+    new Set(options?.initialDisabled ?? []),
+  );
   const targetStore = Persistence.ConnectionTargetStore.of({
     list: Ref.get(storedTargets).pipe(Effect.map((targets) => [...targets.values()])),
+    listDisabled: Ref.get(storedDisabled).pipe(Effect.map((ids) => [...ids])),
   });
   const registrationStore = Persistence.ConnectionRegistrationStore.of({
     register: (registration) =>
@@ -236,6 +244,16 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
           next.delete(target.environmentId);
           return next;
         });
+      }),
+    setEnabled: (environmentId, enabled) =>
+      Ref.update(storedDisabled, (current) => {
+        const next = new Set(current);
+        if (enabled) {
+          next.delete(environmentId);
+        } else {
+          next.add(environmentId);
+        }
+        return next;
       }),
   });
   const cacheStore = Persistence.EnvironmentCacheStore.of({
@@ -405,6 +423,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     profileReadCount,
     storedCredentials,
     storedRemoteTokens,
+    storedDisabled,
     disconnectedSshTargets,
     networkStatus,
   };
@@ -692,6 +711,7 @@ describe("EnvironmentRegistry", () => {
         ).toEqual({
           target: renamedTarget,
           profile: Option.some(renamedProfile),
+          enabled: true,
         });
         expect((yield* Ref.get(harness.storedTargets)).get(BEARER_TARGET.environmentId)).toEqual(
           renamedTarget,
@@ -739,6 +759,122 @@ describe("EnvironmentRegistry", () => {
         expect(yield* Ref.get(harness.sessions)).toHaveLength(2);
         expect(yield* Ref.get(harness.releasedSessions)).toBe(1);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("switching an environment off disconnects it and persists the flag", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([RELAY_TARGET]);
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* awaitConnectionState(
+          registry,
+          RELAY_TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+
+        yield* registry.setEnabled(RELAY_TARGET.environmentId, false);
+        yield* awaitConnectionState(
+          registry,
+          RELAY_TARGET.environmentId,
+          (state) => state.phase === "available",
+        );
+
+        const entry = (yield* SubscriptionRef.get(registry.entries)).get(
+          RELAY_TARGET.environmentId,
+        );
+        expect(entry?.enabled).toBe(false);
+        expect((yield* Ref.get(harness.storedDisabled)).has(RELAY_TARGET.environmentId)).toBe(true);
+        expect((yield* Ref.get(harness.storedTargets)).has(RELAY_TARGET.environmentId)).toBe(true);
+        expect(yield* Ref.get(harness.releasedSessions)).toBe(1);
+
+        yield* registry.setEnabled(RELAY_TARGET.environmentId, true);
+        yield* awaitConnectionState(
+          registry,
+          RELAY_TARGET.environmentId,
+          (state) => state.phase === "connected",
+        );
+        expect((yield* Ref.get(harness.storedDisabled)).has(RELAY_TARGET.environmentId)).toBe(
+          false,
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("re-registering a switched-off environment keeps it off", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([RELAY_TARGET], [], [], {
+        initialDisabled: [RELAY_TARGET.environmentId],
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* registry.register(
+          new RelayConnectionRegistration({
+            target: new RelayConnectionTarget({ ...RELAY_TARGET, label: "Renamed" }),
+          }),
+        );
+        yield* Effect.yieldNow;
+
+        const entry = (yield* SubscriptionRef.get(registry.entries)).get(
+          RELAY_TARGET.environmentId,
+        );
+        expect(entry?.target.label).toBe("Renamed");
+        expect(entry?.enabled).toBe(false);
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("switching an SSH environment off tears down its managed backend", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE]);
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* awaitConnectionState(
+          registry,
+          SSH_CONNECTION.environmentId,
+          (state) => state.phase === "connected",
+        );
+
+        yield* registry.setEnabled(SSH_CONNECTION.environmentId, false);
+        yield* awaitConnectionState(
+          registry,
+          SSH_CONNECTION.environmentId,
+          (state) => state.phase === "available",
+        );
+
+        expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
+        expect((yield* Ref.get(harness.storedTargets)).has(SSH_CONNECTION.environmentId)).toBe(
+          true,
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("does not connect a persisted environment that was switched off", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([RELAY_TARGET], [], [], {
+        initialDisabled: [RELAY_TARGET.environmentId],
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* Effect.yieldNow;
+
+        const entry = (yield* SubscriptionRef.get(registry.entries)).get(
+          RELAY_TARGET.environmentId,
+        );
+        expect(entry?.enabled).toBe(false);
+        expect((yield* registry.state(RELAY_TARGET.environmentId)).phase).toBe("available");
+        expect(yield* Ref.get(harness.sessions)).toHaveLength(0);
+      }).pipe(Effect.provide(harness.layer));
     }),
   );
 
@@ -937,10 +1073,17 @@ describe("EnvironmentRegistry", () => {
         label: "Shadowed relay environment",
       });
       const harness = yield* makeHarness([shadowedTarget]);
+      const permissions = yield* makeGitHubRoutingPermissions({
+        read: Effect.succeed([]),
+        write: () => Effect.void,
+      });
+      const shadowedEntry = { target: shadowedTarget, profile: Option.none(), enabled: true };
+      yield* permissions.set(shadowedEntry, "read-write");
 
       yield* Effect.gen(function* () {
         const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
         yield* registry.registerPlatform(new PrimaryConnectionRegistration({ target: TARGET }));
+        expect(yield* permissions.get(shadowedEntry)).toBe("off");
 
         expect(
           (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
@@ -953,7 +1096,11 @@ describe("EnvironmentRegistry", () => {
           (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
         ).toEqual(TARGET);
         expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(false);
-      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }).pipe(
+        Effect.provide(harness.layer),
+        Effect.provideService(GitHubRoutingPermissions, permissions),
+        Effect.scoped,
+      );
     }),
   );
 
@@ -1040,6 +1187,20 @@ describe("EnvironmentRegistry", () => {
   it.effect("retains a healthy runtime when the platform repeats an identical registration", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness([]);
+      let failWrites = false;
+      const permissions = yield* makeGitHubRoutingPermissions({
+        read: Effect.succeed([]),
+        write: () =>
+          failWrites
+            ? Effect.fail(
+                new ConnectionTransientError({
+                  reason: "remote-unavailable",
+                  detail: "Storage unavailable",
+                }),
+              )
+            : Effect.void,
+      });
+      const entry = { target: TARGET, profile: Option.none(), enabled: true };
 
       yield* Effect.gen(function* () {
         const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
@@ -1050,11 +1211,43 @@ describe("EnvironmentRegistry", () => {
           TARGET.environmentId,
           (state) => state.phase === "connected",
         );
+        yield* permissions.set(entry, "read-write");
 
         yield* registry.registerPlatform(registration);
 
         expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
-      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+        expect(yield* permissions.get(entry)).toBe("read-write");
+
+        const changedTarget = new PrimaryConnectionTarget({
+          ...TARGET,
+          httpBaseUrl: "https://changed.example.test",
+        });
+        failWrites = true;
+        yield* registry.registerPlatform(
+          new PrimaryConnectionRegistration({ target: changedTarget }),
+        );
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
+        ).toEqual(TARGET);
+        yield* registry.reconcilePlatform([]);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(true);
+
+        failWrites = false;
+        yield* registry.registerPlatform(
+          new PrimaryConnectionRegistration({ target: changedTarget }),
+        );
+        expect(yield* permissions.get(entry)).toBe("off");
+        yield* registry.registerPlatform(registration);
+        expect(yield* permissions.get(entry)).toBe("off");
+        yield* permissions.set(entry, "read-write");
+        yield* registry.reconcilePlatform([]);
+        yield* registry.registerPlatform(registration);
+        expect(yield* permissions.get(entry)).toBe("off");
+      }).pipe(
+        Effect.provide(harness.layer),
+        Effect.provideService(GitHubRoutingPermissions, permissions),
+        Effect.scoped,
+      );
     }),
   );
 
