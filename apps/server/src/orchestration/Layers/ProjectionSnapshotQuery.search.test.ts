@@ -100,3 +100,33 @@ it.effect("search uses v2 visibility while legacy transcripts are still lazy", (
     );
   }).pipe(Effect.provide(TestLayer)),
 );
+
+it.effect("loads thread snapshots when usage limit waits are absent", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const query = yield* ProjectionSnapshotQuery;
+    const now = "2026-09-17T00:00:00.000Z";
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id, title, workspace_root, default_model_selection_json,
+        scripts_json, created_at, updated_at, deleted_at
+      ) VALUES ('project:snapshot', 'Snapshot', '/tmp/snapshot', NULL, '[]', ${now}, ${now}, NULL)
+    `;
+    yield* sql`
+      INSERT INTO projection_threads (
+        thread_id, project_id, title, model_selection_json, runtime_mode,
+        interaction_mode, branch, worktree_path, latest_turn_id, created_at,
+        updated_at, archived_at, settled_override, settled_at, deleted_at
+      ) VALUES (
+        'thread:snapshot', 'project:snapshot', 'Snapshot',
+        '{"instanceId":"codex","model":"gpt-5.4"}', 'full-access', 'default',
+        NULL, NULL, NULL, ${now}, ${now}, NULL, NULL, NULL, NULL
+      )
+    `;
+
+    const commandModel = yield* query.getCommandReadModel();
+    const snapshot = yield* query.getSnapshot();
+    assert.equal(commandModel.threads[0]?.usageLimitWait, null);
+    assert.equal(snapshot.threads[0]?.usageLimitWait, null);
+  }).pipe(Effect.provide(TestLayer)),
+);
