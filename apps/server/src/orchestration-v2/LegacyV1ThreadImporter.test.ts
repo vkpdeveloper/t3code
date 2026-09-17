@@ -188,8 +188,7 @@ it.layer(TestLayer)("LegacyV1ThreadImporter", (it) => {
       `;
       assert.equal(shellEventCount[0]?.count, 6);
 
-      const rebuilt = yield* maintenance.rebuild;
-      assert.isTrue(rebuilt.valid);
+      assert.isTrue((yield* maintenance.verify).valid);
       const shellProjection = yield* projections.getThreadProjection(threadId);
       assert.equal(shellProjection.thread.historyOrigin, "v1_import");
       assert.equal(shellProjection.thread.branch, "main");
@@ -339,6 +338,24 @@ it.layer(TestLayer)("LegacyV1ThreadImporter", (it) => {
           AND stream_id = ${threadId}
       `;
       assert.equal(eventCountAfterRetry[0]?.count, eventCountBeforeRetry[0]?.count);
+
+      // Reproduce an earlier completed import whose shell was never projected.
+      yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+      assert.deepStrictEqual(yield* importer.reconcileShells, {
+        importedThreadCount: 1,
+        importedMessageCount: 0,
+      });
+      assert.isTrue((yield* maintenance.verify).valid);
+      assert.deepStrictEqual(yield* projections.getThreadProjection(threadId), repaired);
+      const recoveredEventCount = yield* sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM orchestration_events
+        WHERE application_event_version = 2 AND stream_id = ${threadId}
+      `;
+      assert.equal(recoveredEventCount[0]?.count, eventCountBeforeRetry[0]?.count);
+      assert.deepStrictEqual(yield* importer.reconcileShells, {
+        importedThreadCount: 0,
+        importedMessageCount: 0,
+      });
     }),
   );
 

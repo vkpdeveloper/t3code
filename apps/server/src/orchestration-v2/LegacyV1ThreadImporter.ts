@@ -30,6 +30,11 @@ import { EventSinkV2 } from "./EventSink.ts";
 import { EventStoreV2 } from "./EventStore.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
+import {
+  ProjectionMaintenanceV2,
+  layer as projectionMaintenanceLayer,
+} from "./ProjectionMaintenance.ts";
+import { ProjectionStoreV2 } from "./ProjectionStore.ts";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
 const TRANSCRIPT_EVENT_BATCH_SIZE = 100;
@@ -338,8 +343,8 @@ function chunks<A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const eventStore = yield* EventStoreV2;
   const eventSink = yield* EventSinkV2;
+  const maintenance = yield* ProjectionMaintenanceV2;
   const transcriptImports = yield* makeKeyedSerialExecutor<ThreadId>();
 
   const listMessages = (threadId: ThreadId) =>
@@ -434,6 +439,20 @@ const make = Effect.gen(function* () {
     });
 
   const reconcileShellsBase = Effect.gen(function* () {
+    // Earlier imports appended shell events without projecting them. Replay the
+    // stored events so recovery preserves subsequent v2 edits and transcripts.
+    const missingShells = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM orchestration_v2_legacy_imports AS legacy_import
+      WHERE NOT EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_threads AS projection
+        WHERE projection.thread_id = legacy_import.thread_id
+      )
+    `;
+    const recoveredThreadCount = missingShells[0]?.count ?? 0;
+    if (recoveredThreadCount > 0) {
+      yield* maintenance.rebuild;
+    }
     const now = DateTime.formatIso(yield* DateTime.now);
     const repairRows = yield* sql<LegacyRepairRow>`
       SELECT
@@ -476,7 +495,7 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
-    let repairedThreadCount = 0;
+    let repairedThreadCount = recoveredThreadCount;
     for (const row of repairRows) {
       const decoded = decodeStoredThread(row.payload_json);
       if (Option.isNone(decoded)) continue;
@@ -581,7 +600,6 @@ const make = Effect.gen(function* () {
       ];
       yield* sql.withTransaction(
         Effect.gen(function* () {
-          yield* eventStore.append({ events });
           yield* Effect.forEach(
             previews,
             (message) =>
@@ -600,6 +618,7 @@ const make = Effect.gen(function* () {
               `,
             { discard: true },
           );
+          yield* eventSink.write({ events });
           yield* sql`
             INSERT INTO orchestration_v2_legacy_imports (
               thread_id,
@@ -801,5 +820,5 @@ const make = Effect.gen(function* () {
 export const layer: Layer.Layer<
   LegacyV1ThreadImporter,
   never,
-  EventSinkV2 | EventStoreV2 | SqlClient.SqlClient
-> = Layer.effect(LegacyV1ThreadImporter, make);
+  EventSinkV2 | EventStoreV2 | ProjectionStoreV2 | SqlClient.SqlClient
+> = Layer.effect(LegacyV1ThreadImporter, make).pipe(Layer.provide(projectionMaintenanceLayer));
