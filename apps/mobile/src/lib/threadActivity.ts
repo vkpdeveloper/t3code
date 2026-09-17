@@ -130,7 +130,9 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
-  | Extract<RawThreadFeedEntry, { type: "message" }>
+  | (Extract<RawThreadFeedEntry, { type: "message" }> & {
+      readonly reasoningMessages?: ReadonlyArray<ThreadFeedMessage>;
+    })
   | {
       readonly type: "activity-group";
       readonly id: string;
@@ -150,7 +152,7 @@ export type ThreadFeedEntry =
       readonly summaryKind: ToolGroupSummaryKind;
       readonly toolSurface?: WorkLogPresentationEntry["toolSurface"];
       readonly toolIcon?: WorkLogPresentationEntry["toolIcon"];
-      readonly summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
+      readonly summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request" | "brain";
       readonly hasFailure: boolean;
       readonly live: boolean;
       readonly shimmer: boolean;
@@ -246,6 +248,18 @@ const runFoldRowsCache = new WeakMap<
   Extract<ThreadFeedEntry, { readonly type: "run-fold" }>
 >();
 let cachedThinkingRow: Extract<ThreadFeedEntry, { readonly type: "thinking" }> | null = null;
+const reasoningGroupsCache = new WeakMap<
+  ThreadFeedEntry,
+  Extract<ThreadFeedEntry, { readonly type: "message" }>
+>();
+const activityRunsCache = new WeakMap<
+  ThreadFeedEntry,
+  {
+    readonly source: ReadonlyArray<ThreadFeedEntry>;
+    readonly state: string;
+    readonly rows: ThreadFeedEntry[];
+  }
+>();
 
 export function isContextCompactionActivityGroup(entry: ThreadFeedActivityGroup): boolean {
   return (
@@ -947,7 +961,8 @@ export function deriveThreadFeedPresentation(
     }
   }
   const result: ThreadFeedEntry[] = [];
-  for (const entry of sourceFeed) {
+  for (let index = 0; index < sourceFeed.length; index += 1) {
+    const entry = sourceFeed[index]!;
     const isActiveTailGroup =
       isWorking &&
       activeRunId !== null &&

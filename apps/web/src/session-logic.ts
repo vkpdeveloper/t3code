@@ -790,11 +790,13 @@ export function createMessageAttachmentPreviewProjector() {
   };
 }
 
+const streamsText = (role: ChatMessage["role"]) => role === "assistant";
+
 /** Text and update time do not change a streaming assistant message's row structure. */
 export function isStreamingMessageTextUpdate(previous: ChatMessage, next: ChatMessage): boolean {
   if (
-    previous.role !== "assistant" ||
-    next.role !== "assistant" ||
+    !streamsText(previous.role) ||
+    previous.role !== next.role ||
     !previous.streaming ||
     !next.streaming
   ) {

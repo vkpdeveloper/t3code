@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 
 describe("ComposerPendingApprovalActions", () => {
-  it("states that the persistent approval lasts for this session", () => {
+  it("keeps the main decisions visible and secondary decisions in the menu", () => {
     const markup = renderToStaticMarkup(
       <ComposerPendingApprovalActions
         requestId={RuntimeRequestId.make("approval-1")}
@@ -15,15 +15,13 @@ describe("ComposerPendingApprovalActions", () => {
       />,
     );
 
-    expect(markup).toContain(">Cancel<");
-    expect(markup).toContain("Always allow this session");
-    expect(markup).not.toContain(">Always allow<");
-    expect(markup).toContain("h-5");
-    expect(markup).toContain("sm:text-[11px]");
-    expect(markup).not.toContain("sm:h-6");
+    expect(markup).toContain(">Decline<");
+    expect(markup).toContain(">Approve<");
+    expect(markup).not.toContain(">Cancel<");
+    expect(markup).not.toContain("Always allow this session");
   });
 
-  it("shows only the approval choices advertised by an MCP server", () => {
+  it("keeps secondary provider labels out of the compact action row", () => {
     const markup = renderToStaticMarkup(
       <ComposerPendingApprovalActions
         requestId={RuntimeRequestId.make("approval-safari")}
@@ -38,7 +36,7 @@ describe("ComposerPendingApprovalActions", () => {
       />,
     );
 
-    expect(markup).toContain("Always allow Safari");
+    expect(markup).not.toContain("Always allow Safari");
     expect(markup).toContain(">Approve<");
     expect(markup).not.toContain("Always allow this session");
   });

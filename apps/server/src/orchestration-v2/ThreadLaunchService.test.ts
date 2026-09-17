@@ -457,6 +457,7 @@ it.effect("enqueues provider work only after setup has been initiated", () =>
             scriptCommand: "vp install",
             terminalId: "setup",
             cwd: "/repo",
+            async: true,
           }),
         ),
     });
@@ -744,7 +745,7 @@ it.effect("arms durable title generation after accepting the first message", () 
       const generated = yield* threads.getThreadProjection(launched.threadId);
       assert.equal(generated.thread.title, "Generated title");
       assert.deepEqual(
-        harness.generateThreadTitle.mock.calls[0]?.[0].modelSelection,
+        harness.generateThreadTitle.mock.calls[0]![0]!.modelSelection,
         DEFAULT_SERVER_SETTINGS.textGenerationModelSelection,
       );
 
@@ -766,7 +767,7 @@ it.effect("arms durable title generation after accepting the first message", () 
       });
       const regenerated = yield* threads.getThreadProjection(launched.threadId);
       assert.equal(regenerated.thread.title, "Regenerated title");
-      assert.equal(harness.generateThreadTitle.mock.calls[1]?.[0].previousTitle, "Generated title");
+      assert.equal(harness.generateThreadTitle.mock.calls[1]![0]!.previousTitle, "Generated title");
 
       yield* threads.dispatch({
         type: "thread.metadata.update",
@@ -880,9 +881,9 @@ it.effect("generates an initial title for an attachment-only message", () =>
         kind: { type: "initial", messageId },
       });
 
-      assert.equal(harness.generateThreadTitle.mock.calls[0]?.[0].message, "");
+      assert.equal(harness.generateThreadTitle.mock.calls[0]![0]!.message, "");
       assert.equal(
-        harness.generateThreadTitle.mock.calls[0]?.[0].attachments?.[0]?.name,
+        harness.generateThreadTitle.mock.calls[0]![0]!.attachments?.[0]?.name,
         "screenshot.png",
       );
     }).pipe(Effect.provide(harness.layer));

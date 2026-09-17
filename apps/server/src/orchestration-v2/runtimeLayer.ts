@@ -1,4 +1,6 @@
 import * as Layer from "effect/Layer";
+import * as Effect from "effect/Effect";
+import { SourceControlProviderError, type SourceControlProviderKind } from "@t3tools/contracts";
 import {
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationLayerLive,
@@ -6,6 +8,7 @@ import {
 import { ProjectionProjectRepositoryLive } from "../persistence/Layers/ProjectionProjects.ts";
 import { layer as providerSessionRuntimeLayer } from "../persistence/ProviderSessionRuntime.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import { ProviderAuthServiceLive } from "../provider/Layers/ProviderAuthService.ts";
 import { layer as agentSessionImporterLayer } from "../project/AgentSessionImporter.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
@@ -244,9 +247,39 @@ const providerContinuationWorkerProvided = providerContinuationWorkerLive.pipe(
     Layer.mergeAll(providerContinuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
   ),
 );
+// Title-link enrichment resolves through the source-control registry when a
+// full registry is ambient (server.ts wires the real one for ws handlers).
+// The internal TextGeneration instance uses an empty registry so this layer
+// adds no new requirements.
+const sourceControlProviderRegistryStub = Layer.sync(
+  SourceControlProviderRegistry.SourceControlProviderRegistry,
+  () => {
+    const unavailable = (kind: SourceControlProviderKind, operation: string, cwd: string) =>
+      new SourceControlProviderError({
+        provider: kind,
+        operation,
+        cwd,
+        detail: "Source control providers are not wired into this layer.",
+      });
+    return {
+      resolveLink: () => undefined,
+      get: (kind) => unavailable(kind, "get", ""),
+      resolveHandle: (input) => unavailable("unknown", "resolveHandle", input.cwd),
+      resolve: (input) => unavailable("unknown", "resolve", input.cwd),
+      discover: Effect.succeed([]),
+    };
+  },
+);
+const textGenerationProvided = TextGeneration.layer.pipe(
+  Layer.provide(sourceControlProviderRegistryStub),
+);
 const threadTitleRegenerationProvided = threadTitleRegenerationServiceLayer.pipe(
   Layer.provide(
-    Layer.mergeAll(threadManagementProvided, ProjectionProjectRepositoryLive, TextGeneration.layer),
+    Layer.mergeAll(
+      threadManagementProvided,
+      ProjectionProjectRepositoryLive,
+      textGenerationProvided,
+    ),
   ),
 );
 const effectExecutorProvided = effectExecutorLayer.pipe(

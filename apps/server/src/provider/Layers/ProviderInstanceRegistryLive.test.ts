@@ -120,6 +120,7 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
 
 const makeCursorConfig = (overrides: Partial<CursorSettings>): CursorSettings => ({
   enabled: false,
+  apiEndpoint: "",
   customModels: [],
   ...overrides,
 });

@@ -1,9 +1,42 @@
 import type { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
-import { WS_METHODS } from "@t3tools/contracts";
+import {
+  WS_METHODS,
+  type EnvironmentId,
+  type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2ThreadShell,
+} from "@t3tools/contracts";
+
+import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
+import { QUEUED_TURN_START_GRACE_MS } from "./threadSettled.ts";
+
+/**
+ * V2 twin of `canSnooze`: a thread may be hidden unless it is blocked on the
+ * user (pending runtime request) or holds a queued run start no run has
+ * adopted yet.
+ */
+const canSnoozeV2 = (thread: OrchestrationV2ThreadShell, now: DateTime.Utc): boolean => {
+  if (thread.pendingRuntimeRequest !== null) return false;
+  if (
+    thread.status === "queued" ||
+    thread.activityRunStatus === "preparing" ||
+    thread.activityRunStatus === "starting"
+  ) {
+    return false;
+  }
+  if (thread.latestUserMessageAt == null) return true;
+  const messageAt = DateTime.toEpochMillis(thread.latestUserMessageAt);
+  const nowMs = DateTime.toEpochMillis(now);
+  if (Math.abs(nowMs - messageAt) > QUEUED_TURN_START_GRACE_MS) return true;
+  const adoptedAt =
+    thread.latestRunCompletedAt ?? thread.latestRunStartedAt ?? thread.latestRunRequestedAt ?? null;
+  if (adoptedAt === null) return false;
+  return DateTime.toEpochMillis(adoptedAt) >= messageAt;
+};
 
 import {
   createAtomCommandScheduler,
@@ -127,6 +160,7 @@ export type {
 
 export function createThreadEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
+  snapshotAtom: (environmentId: EnvironmentId) => Atom.Atom<OrchestrationV2ShellSnapshot | null>,
 ) {
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
@@ -134,7 +168,7 @@ export function createThreadEnvironmentAtoms<R, E>(
     key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
       JSON.stringify([environmentId, input.threadId]),
   };
-  return {
+  const commands = {
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:create",
       execute: (input: CreateThreadInput) => createThread(input),
@@ -366,5 +400,83 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+  };
+  const optimistic = createOptimisticThreadLifecycle(snapshotAtom);
+  return {
+    ...commands,
+    snapshotAtom: optimistic.snapshotAtom,
+    settle: optimistic.wrap(commands.settle, (thread, _input, now, accepted) =>
+      !accepted &&
+      (!canSnoozeV2(thread, now) ||
+        thread.status === "starting" ||
+        thread.status === "running" ||
+        thread.status === "preparing")
+        ? thread
+        : {
+            ...thread,
+            pendingRuntimeRequest: null,
+            settledOverride: "settled",
+            settledAt: thread.settledOverride === "settled" ? (thread.settledAt ?? now) : now,
+            unsettledAt: null,
+            activeOrderKey: null,
+            pinnedAt: null,
+            pinOrderKey: null,
+            snoozedAt: null,
+            snoozedUntil: null,
+          },
+    ),
+    unsettle: optimistic.wrap(commands.unsettle, (thread, input, now) => ({
+      ...thread,
+      settledOverride: input.reason === "user" ? "active" : null,
+      settledAt: null,
+      unsettledAt: thread.settledOverride === "active" ? (thread.unsettledAt ?? null) : now,
+    })),
+    snooze: optimistic.wrap(commands.snooze, (thread, input, now, accepted) =>
+      (!accepted && !canSnoozeV2(thread, now)) ||
+      !(Date.parse(input.snoozedUntil) > DateTime.toEpochMillis(now))
+        ? thread
+        : {
+            ...thread,
+            pendingRuntimeRequest: null,
+            snoozedUntil: DateTime.makeUnsafe(input.snoozedUntil),
+            snoozedAt:
+              thread.snoozedUntil != null &&
+              DateTime.toEpochMillis(thread.snoozedUntil) === Date.parse(input.snoozedUntil)
+                ? (thread.snoozedAt ?? now)
+                : now,
+          },
+    ),
+    unsnooze: optimistic.wrap(commands.unsnooze, (thread) => ({
+      ...thread,
+      snoozedUntil: null,
+      snoozedAt: null,
+    })),
+    pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
+      ...thread,
+      pinnedAt: thread.pinnedAt ?? now,
+      pinOrderKey: thread.pinnedAt == null ? (input.orderKey ?? null) : thread.pinOrderKey,
+      ...(thread.settledOverride === "settled"
+        ? {
+            settledOverride: "active" as const,
+            settledAt: null,
+            unsettledAt: now,
+          }
+        : {}),
+      snoozedUntil: null,
+      snoozedAt: null,
+    })),
+    unpin: optimistic.wrap(commands.unpin, (thread) => ({
+      ...thread,
+      pinnedAt: null,
+      pinOrderKey: null,
+    })),
+    reorderPin: optimistic.wrap(commands.reorderPin, (thread, input) => ({
+      ...thread,
+      pinOrderKey: input.orderKey,
+    })),
+    reorderActive: optimistic.wrap(commands.reorderActive, (thread, input) => ({
+      ...thread,
+      activeOrderKey: input.orderKey,
+    })),
   };
 }
