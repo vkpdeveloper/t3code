@@ -15,7 +15,7 @@ import {
   resolveWorkspaceDisplayName,
   type EnvMode,
 } from "./BranchToolbar.logic";
-import { composerFloatingLayerProps } from "./chat/composerEventScope";
+import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
   Select,
   SelectGroup,
@@ -53,6 +53,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   const workspacePath = displayMode === "panel" ? (activeWorktreePath ?? workspaceRoot) : null;
   const workspaceDisplayName = resolveWorkspaceDisplayName(workspacePath);
   const workspaceKind = activeWorktreePath ? "Worktree" : "Project folder";
+  const composerFloatingLayerProps = useComposerMenuProps();
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -94,12 +95,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               : "min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
           }
         >
-          <span
-            data-composer-label-motion
-            className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
-          >
-            {workspaceDisplayName ?? resolveLockedWorkspaceLabel(activeWorktreePath)}
-          </span>
+          {workspaceDisplayName ?? resolveLockedWorkspaceLabel(activeWorktreePath)}
         </span>
         {displayMode === "panel" ? (
           <span className="shrink-0 text-[10px] font-normal text-muted-foreground/70">
@@ -142,6 +138,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
                 "min-w-0 shrink font-normal text-xs!",
                 displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
               )}
+              data-composer-shortcut="composer.workspace"
               aria-label="Workspace"
               data-composer-context-control
             />
@@ -168,7 +165,12 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
                 : "min-w-0 max-w-[240px] truncate group-data-[compact]/composer-context:max-w-0 transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
             }
           >
-            <SelectValue />
+            <span
+              data-composer-label-motion
+              className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
+            >
+              <SelectValue />
+            </span>
           </span>
           {displayMode === "panel" ? (
             <span className="shrink-0 text-[10px] font-normal text-muted-foreground/70">

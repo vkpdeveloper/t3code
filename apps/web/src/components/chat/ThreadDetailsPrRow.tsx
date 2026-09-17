@@ -36,6 +36,7 @@ import {
 import {
   PullRequestCheckStatusIcon,
   PullRequestDiffStat,
+  resolvePullRequestConflict,
   resolvePullRequestState,
 } from "../pullRequest/pullRequestPresentation";
 import {
@@ -162,12 +163,12 @@ export function ThreadDetailsPrRow({
   const statePresentation =
     detail === null
       ? null
-      : resolvePullRequestState({
+      : (resolvePullRequestConflict({
           state: detail.state,
           isDraft: detail.isDraft,
           mergeability: detail.mergeability,
           baseBranch: detail.baseBranch,
-        });
+        }) ?? resolvePullRequestState({ state: detail.state, isDraft: detail.isDraft }));
   const icon = statePresentation ? (
     <statePresentation.Icon
       aria-hidden

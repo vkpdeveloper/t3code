@@ -118,6 +118,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
   const latest = yield* Ref.make<EnvironmentThreadState>(EMPTY_ENVIRONMENT_THREAD_STATE);
+  const stateChangeCount = yield* Ref.make(0);
   const retryCount = yield* Ref.make(0);
   const subscriptionCount = yield* SubscriptionRef.make(0);
   const loaderCalls = yield* Ref.make(0);
@@ -130,11 +131,19 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const supervisorState = yield* SubscriptionRef.make<SupervisorConnectionState>(
     AVAILABLE_CONNECTION_STATE,
   );
+  // Preserve queued event batches while failing at the first error.
   const streamFrom = (queue: Queue.Queue<TestThreadInput>) =>
     Stream.fromQueue(queue).pipe(
-      Stream.mapEffect((input) =>
-        input instanceof Error ? Effect.fail(input) : Effect.succeed(input),
-      ),
+      Stream.chunks,
+      Stream.flatMap((chunk) => {
+        const errorIndex = chunk.findIndex((input) => input instanceof Error);
+        if (errorIndex === -1) {
+          return Stream.fromArray(chunk as ReadonlyArray<OrchestrationV2ThreadStreamItem>);
+        }
+        const prefix = chunk.slice(0, errorIndex) as ReadonlyArray<OrchestrationV2ThreadStreamItem>;
+        const failure = Stream.fail(chunk[errorIndex] as Error);
+        return prefix.length === 0 ? failure : Stream.concat(Stream.fromArray(prefix), failure);
+      }),
     );
   const client = {
     [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: {
@@ -246,7 +255,10 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const threadState = yield* makeThreadState;
   yield* SubscriptionRef.changes(threadState).pipe(
     Stream.runForEach((state) =>
-      Ref.set(latest, state).pipe(Effect.andThen(Queue.offer(observed, state))),
+      Ref.update(stateChangeCount, (count) => count + 1).pipe(
+        Effect.andThen(Ref.set(latest, state)),
+        Effect.andThen(Queue.offer(observed, state)),
+      ),
     ),
     Effect.forkScoped,
   );
@@ -257,6 +269,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     inputs,
     observed,
     latest,
+    stateChangeCount,
     retryCount,
     subscriptionCount,
     loaderCalls,

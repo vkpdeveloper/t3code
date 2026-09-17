@@ -32,12 +32,12 @@ import {
   type ConnectionTarget,
 } from "./model.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
+import { remoteHttpClientLayer } from "../rpc/http.ts";
 import {
   GitHubRoutingPermissions,
   gitHubRoutingConnectionKey,
   makeGitHubRoutingPermissions,
 } from "./githubRoutingPermissions.ts";
-import { remoteHttpClientLayer } from "../rpc/http.ts";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const ENDPOINT = {
@@ -146,6 +146,21 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   });
 
   const dependencies = Layer.mergeAll(
+    remoteHttpClientLayer((() =>
+      Promise.resolve(
+        Response.json({
+          environmentId: ENVIRONMENT_ID,
+          label: "Compatible environment",
+          platform: { os: "linux", arch: "x64" },
+          serverVersion: "0.0.0-test",
+          ...(options?.descriptorProtocolVersion === undefined
+            ? { orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION }
+            : options.descriptorProtocolVersion === null
+              ? {}
+              : { orchestrationProtocolVersion: options.descriptorProtocolVersion }),
+          capabilities: { repositoryIdentity: true },
+        }),
+      )) satisfies typeof fetch),
     Layer.succeed(
       ConnectionProfileStore.ConnectionProfileStore,
       options?.profileStore ?? profileStore,

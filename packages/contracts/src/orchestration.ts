@@ -100,7 +100,15 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
-export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
+/** `reasoning` carries a provider's thinking trace: a reasoning summary, or
+ *  the raw chain of thought when the model exposes one. It is a sibling of the
+ *  assistant text it precedes, not a replacement for it. */
+export const OrchestrationMessageRole = Schema.Literals([
+  "user",
+  "assistant",
+  "system",
+  "reasoning",
+]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
 export const OrchestrationMessage = Schema.Struct({
@@ -220,6 +228,14 @@ export const OrchestrationLatestTurn = Schema.Struct({
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
+
+// Version changes even when a manual rename keeps the same text.
+export const ThreadTitleState = Schema.Struct({
+  source: Schema.Literals(["manual", "generated"]),
+  version: CommandId,
+  needsRefinement: Schema.Boolean,
+});
+export type ThreadTitleState = typeof ThreadTitleState.Type;
 
 export const ThreadTitleRegeneration = Schema.Struct({
   requestId: CommandId,
@@ -386,6 +402,7 @@ export const OrchestrationThread = Schema.Struct({
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   usageLimitWait: Schema.optional(Schema.NullOr(OrchestrationUsageLimitWait)),
+  titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -445,6 +462,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   usageLimitWait: Schema.optional(Schema.NullOr(OrchestrationUsageLimitWait)),
+  titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -519,6 +537,29 @@ export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.T
 
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
+  /** Opt in to reasoning roles; older clients receive system messages instead. */
+  reasoningMessages: Schema.optionalKey(Schema.Boolean),
+  /**
+   * When provided, the server skips the initial snapshot frame and instead
+   * replays events after this sequence before streaming live events. Clients
+   * that load the snapshot over HTTP pass the snapshot's sequence here so the
+   * live subscription resumes without a gap (overlapping events are deduped by
+   * sequence on the client).
+   */
+  afterSequence: Schema.optionalKey(NonNegativeInt),
+  /**
+   * Requests an explicit marker after the subscription has emitted its initial
+   * snapshot or catch-up replay and before it begins emitting live events.
+   */
+  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /**
+   * When provided, the fallback snapshot frame (sent when `afterSequence` is
+   * missing or the catch-up gap is too large) is windowed to the last
+   * `turnLimit` user-anchored turns and carries `page` metadata. Absent means
+   * the fallback snapshot is the full thread, preserving pre-pagination client
+   * behavior. Live events are unaffected either way.
+   */
+  turnLimit: Schema.optionalKey(PositiveInt),
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 
@@ -1026,6 +1067,25 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadMessageReasoningDeltaCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.reasoning.delta"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  delta: Schema.String,
+  turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
+const ThreadMessageReasoningCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.reasoning.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
 const ThreadHistoryImportCommand = Schema.Struct({
   type: Schema.Literal("thread.history.import"),
   commandId: CommandId,
@@ -1038,6 +1098,24 @@ const ThreadHistoryImportCommand = Schema.Struct({
       createdAt: IsoDateTime,
     }),
   ).check(Schema.isNonEmpty()),
+});
+
+/**
+ * Persists a user message without starting a turn. Used by worktree bootstraps
+ * so the send is durable while the worktree is still being prepared; the
+ * turn that follows references the same message id.
+ */
+const ThreadMessageUserAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.user.append"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+    context: Schema.optional(OrchestrationMessageContext),
+  }),
+  createdAt: IsoDateTime,
 });
 
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
@@ -1076,6 +1154,23 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
   createdAt: IsoDateTime,
+});
+
+const ThreadTitleGenerateCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.title.generate.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedTitle: TrimmedNonEmptyString,
+  expectedVersion: Schema.NullOr(CommandId),
+  title: TrimmedNonEmptyString,
+  needsRefinement: Schema.Boolean,
+});
+
+const ThreadTitleRefineCommand = Schema.Struct({
+  type: Schema.Literal("thread.title.refine"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedVersion: CommandId,
 });
 
 const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
@@ -1135,12 +1230,17 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageReasoningDeltaCommand,
+  ThreadMessageReasoningCompleteCommand,
   ThreadHistoryImportCommand,
+  ThreadMessageUserAppendCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadTitleRegenerationCompleteCommand,
+  ThreadTitleGenerateCompleteCommand,
+  ThreadTitleRefineCommand,
   ThreadUsageLimitWaitScheduleCommand,
   ThreadUsageLimitWaitResumeCommand,
   ThreadPullRequestSyncCommand,
@@ -1293,6 +1393,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   previousTitle: Schema.optional(TrimmedNonEmptyString),
   /** Pending state shared with clients. Null clears a matching request. */
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

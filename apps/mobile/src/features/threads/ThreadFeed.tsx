@@ -213,6 +213,8 @@ import {
   ThreadMarkdownImageView,
 } from "./ThreadMarkdownImage";
 
+/** `ml-7` gutter plus the `px-3` padding of the expanded reasoning container. */
+
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   // Native iOS blockquotes and adjacent selectable text are separate layout
   // chunks. Giving their shrink-to-fit bubble a definite width keeps both
@@ -2883,6 +2885,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workGroupScrollPositions,
       terminalAssistantMessageIds,
       unsettledTurnId,
+      props.activeWorkStartedAt,
       iconSubtleColor,
       screenColor,
       userBubbleColor,
@@ -3003,17 +3006,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               entry.type === "message" ? `message:${entry.message.role}` : entry.type
             }
             getFixedItemSize={getFixedItemSize}
-            // Android can retain stale native row positions when layout transitions
-            // race the measurements arriving during sync, even with duration 0.
-            // Keep its rows on LegendList's non-animated positioning path. On iOS,
-            // keep a transition installed between disclosures so containers don't remount.
-            itemLayoutAnimation={
-              Platform.OS === "android"
-                ? undefined
-                : disclosureToggleSettling
-                  ? THREAD_FEED_LAYOUT_TRANSITION
-                  : THREAD_FEED_IMMEDIATE_TRANSITION
-            }
+            // Virtualized rows must move with their measurements. Native layout
+            // transitions can retain stale positions during sync, even at duration 0.
             onItemSizeChanged={handleItemSizeChanged}
             // Measure rows well before they scroll into view so estimate→actual
             // corrections land offscreen instead of under the user's finger.

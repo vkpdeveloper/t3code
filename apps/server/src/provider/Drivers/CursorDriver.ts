@@ -41,7 +41,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import { probeCursorSkills } from "./CursorSkills.ts";
+import { discoverCursorSkills, probeCursorSkills } from "./CursorSkills.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");

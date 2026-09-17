@@ -63,6 +63,8 @@ const makeConfig = (baseDir: string) =>
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
       otlpServiceName: "t3-server",
+      otlpHeaders: undefined,
+      otlpProtocol: "http/protobuf",
       mode: "web",
       port: 0,
       host: "127.0.0.1",

@@ -1,3 +1,4 @@
+import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -35,12 +36,15 @@ import {
   toolItemForDisplay,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
+  summarizeToolGroup,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { formatSubagentTokenCount } from "@t3tools/client-runtime/state/subagentRuntime";
 
 const NOOP_OPEN_AGENTS = () => {};
+const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
+const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 
@@ -134,6 +138,7 @@ import type {
   KnownComposerContextRecord,
 } from "@t3tools/contracts";
 import { Button } from "../ui/button";
+import type { QueuedComposerMessage } from "../../queuedMessageStore";
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
@@ -167,6 +172,7 @@ import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssis
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
+  LIVE_ACTIVITY_ROW_ID,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
@@ -191,6 +197,8 @@ import {
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   ContextChipPopover as UserMessageContextPopover,
@@ -249,6 +257,7 @@ import {
   formatReviewCommentFence,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -436,6 +445,11 @@ interface MessagesTimelineProps {
   historyControls?: MessagesTimelineHistoryControls;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
+  /** Messages sent during the running turn. They render as ghost bubbles after the live rows. */
+  queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
+  onSteerQueuedMessage?: (id: string) => void;
+  steerQueuedMessageShortcutLabel?: string | null;
+  onRemoveQueuedMessage?: (id: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +509,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
+  queuedMessages = EMPTY_QUEUED_MESSAGES,
+  onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
+  steerQueuedMessageShortcutLabel = null,
+  onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const [expandedRunIds, setExpandedRunIds] = useState<ReadonlySet<RunId>>(new Set());
   const [expandedAttemptIds, setExpandedAttemptIds] = useState<ReadonlySet<RunAttemptId>>(
@@ -1525,8 +1543,11 @@ function WorktreeSetupTimelineRow({
   return (
     <WorktreeSetupCard
       snapshot={row.snapshot}
-      onCancel={ctx.onCancelWorktreeSetup}
-      onWorkLocally={row.snapshot.phase === "running" ? ctx.onWorktreeSetupWorkLocally : null}
+      embedded={row.embedded}
+      onCancel={row.embedded ? null : ctx.onCancelWorktreeSetup}
+      onWorkLocally={
+        !row.embedded && row.snapshot.phase === "running" ? ctx.onWorktreeSetupWorkLocally : null
+      }
       onOpenTerminal={onOpenTerminal}
     />
   );
@@ -2055,12 +2076,49 @@ function RevertUserMessageButton({
   );
 }
 
+/**
+ * Hover-revealed wall-clock time with a full-date tooltip — the same metadata
+ * presentation as message rows, for work entries and turn folds. The parent
+ * carries `group/timeline-row`; hover or focus on an existing control reveals
+ * the time without adding a tab stop. Hidden timestamps stay outside the row
+ * layout. Visibility changes immediately so leaving flow cannot overlap text
+ * during a fade-out. Place it before any trailing disclosure control so
+ * revealing the time does not move the chevron.
+ */
+function TimelineRowTimestamp({
+  createdAt,
+  timestampFormat,
+  className,
+}: {
+  createdAt: string;
+  timestampFormat: TimestampFormat;
+  className?: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn(
+              "pointer-events-none absolute me-1 shrink-0 whitespace-nowrap rounded-md text-muted-foreground text-xs tabular-nums opacity-0 group-hover/timeline-row:pointer-events-auto group-hover/timeline-row:static group-hover/timeline-row:opacity-100 group-focus-within/timeline-row:pointer-events-auto group-focus-within/timeline-row:static group-focus-within/timeline-row:opacity-100",
+              className,
+            )}
+          />
+        }
+      >
+        {formatDayAwareTimestamp(createdAt, timestampFormat)}
+      </TooltipTrigger>
+      <TooltipPopup>{formatChatTimestampTooltip(createdAt, timestampFormat)}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const ctx = use(TimelineRowCtx);
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className="group/timeline-row relative flex items-center gap-1 border-b border-border/60 pb-2 pe-0.5 pt-1">
       <button
         type="button"
         aria-expanded={row.expanded}
@@ -2071,6 +2129,11 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         <span>{row.label}</span>
         <Icon className="size-3.5" />
       </button>
+      <TimelineRowTimestamp
+        createdAt={row.createdAt}
+        timestampFormat={ctx.timestampFormat}
+        className="ms-auto"
+      />
     </div>
   );
 }
@@ -2585,19 +2648,21 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
 /** Renders standalone activity or one bounded, virtualized expanded tool group. */
 const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
+  disclosureAnchorKey = anchorKey,
   groupedEntries,
   isExpandedToolGroup,
   displayLabel,
 }: {
   anchorKey: string;
+  disclosureAnchorKey?: string;
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
   isExpandedToolGroup: boolean;
   displayLabel?: string | undefined;
 }) {
   const { workspaceRoot, routeThreadKey, onToggleWorkEntry } = use(TimelineRowCtx);
   const onToggleStandaloneEntry = useCallback(
-    (collapsed: boolean) => onToggleWorkEntry(anchorKey, collapsed),
-    [anchorKey, onToggleWorkEntry],
+    (collapsed: boolean) => onToggleWorkEntry(disclosureAnchorKey, collapsed),
+    [disclosureAnchorKey, onToggleWorkEntry],
   );
   const nonEmptyEntries = useMemo(
     () => groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroup)),
@@ -2610,6 +2675,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
       <ExpandedWorkGroupEntries
         key={`${routeThreadKey}:${anchorKey}`}
         anchorKey={anchorKey}
+        disclosureAnchorKey={disclosureAnchorKey}
         entries={nonEmptyEntries}
         workspaceRoot={workspaceRoot}
       />
@@ -2677,10 +2743,12 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
 
 function ExpandedWorkGroupEntries({
   anchorKey,
+  disclosureAnchorKey,
   entries,
   workspaceRoot,
 }: {
   anchorKey: string;
+  disclosureAnchorKey: string;
   entries: TimelineWorkEntry[];
   workspaceRoot: string | undefined;
 }) {
@@ -2706,9 +2774,9 @@ function ExpandedWorkGroupEntries({
   const groupView = useMemo(
     () => ({
       state: viewState,
-      onToggleEntry: (collapsed: boolean) => onToggleWorkEntry(anchorKey, collapsed),
+      onToggleEntry: (collapsed: boolean) => onToggleWorkEntry(disclosureAnchorKey, collapsed),
     }),
-    [anchorKey, onToggleWorkEntry, viewState],
+    [disclosureAnchorKey, onToggleWorkEntry, viewState],
   );
   const updateScrollFades = useCallback(() => {
     const element = listRef.current?.getScrollableNode();
@@ -3079,7 +3147,7 @@ function WorkGroupToggleTimelineRow({
   return (
     <button
       type="button"
-      className="group/tool-group flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      className="group/tool-group group/timeline-row relative flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
@@ -3095,6 +3163,7 @@ function WorkGroupToggleTimelineRow({
         />
       </span>
       <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
+      <TimelineRowTimestamp createdAt={row.createdAt} timestampFormat={ctx.timestampFormat} />
     </button>
   );
 }
@@ -3594,7 +3663,7 @@ const userMessageContextPresentationRegistry = createContextPresentationRegistry
               <UserMessageContextChip
                 icon={
                   isPullRequest ? (
-                    <GitPullRequestIcon
+                    <PullRequestGlyph.pullRequest
                       className={cn(
                         COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
                         CONTEXT_INLINE_CHIP_ICON_TONE_CLASS_NAMES["pull-request"],
@@ -4157,7 +4226,7 @@ function ToolActivityImageIcon(props: {
 function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className: string }) {
   switch (name) {
     case "pull-request":
-      return <GitPullRequestIcon className={className} aria-hidden />;
+      return <PullRequestGlyph.pullRequest className={className} aria-hidden />;
     case "bot":
       return <BotIcon className={className} aria-hidden />;
     case "brain":
@@ -4531,6 +4600,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           !toolIconAcceptsTint(entryIconName, entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
+          <TimelineRowTimestamp
+            createdAt={workEntry.createdAt}
+            timestampFormat={ctx.timestampFormat}
+          />
           <span
             className={cn(
               "flex size-4 shrink-0 items-center justify-center",
