@@ -94,12 +94,8 @@ export function makeProviderFailure(input: {
   readonly code?: string | null | undefined;
   readonly class?: OrchestrationV2ProviderFailureClass;
   readonly retryable?: boolean | null;
-  readonly resetsAt?: string | null | undefined;
 }): OrchestrationV2ProviderFailure {
-  const rawMessage =
-    input.message ??
-    (input.cause instanceof Error ? input.cause.message : stringField(input.cause, "message")) ??
-    DEFAULT_PROVIDER_FAILURE_MESSAGE;
+  const rawMessage = input.message ?? DEFAULT_PROVIDER_FAILURE_MESSAGE;
   const message = boundedText(rawMessage, MAX_PROVIDER_FAILURE_MESSAGE_LENGTH);
   const rawCode = input.code ?? stringField(input.cause, "code") ?? null;
   const code =
@@ -110,7 +106,6 @@ export function makeProviderFailure(input: {
     message: message || DEFAULT_PROVIDER_FAILURE_MESSAGE,
     code,
     retryable: input.retryable ?? null,
-    ...(input.resetsAt === undefined ? {} : { resetsAt: input.resetsAt }),
   };
 }
 

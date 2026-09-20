@@ -1,3 +1,4 @@
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -60,6 +61,7 @@ import {
 import { OrchestrationEffectWorkerV2 } from "./EffectWorker.ts";
 import { EffectOutboxV2, layer as effectOutboxLayer } from "./EffectOutbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
+import { ProviderRuntimeRecoveryService } from "./ProviderRuntimeRecoveryService.ts";
 import { ProjectionMaintenanceV2 } from "./ProjectionMaintenance.ts";
 import type { ProviderAdapterV2SessionRuntime, ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
@@ -76,6 +78,11 @@ import {
   layer as threadCommandExecutorLayer,
 } from "./ThreadCommandExecutor.ts";
 
+const PlatformTestLayer = Layer.merge(
+  NodeServices.layer,
+  Layer.mock(SourceControlProviderRegistry)({ resolveLink: () => Effect.die("unused title link") }),
+);
+
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-orchestration-v2-runtime-layer-",
 });
@@ -89,7 +96,7 @@ const alternateInstanceId = ProviderInstanceId.make("codex_alternate");
 const VcsDriverRegistryTestLayer = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
   Layer.provide(ServerConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 const CheckpointStoreTestLayer = CheckpointStore.layer.pipe(
@@ -165,7 +172,7 @@ const TestLayer = Layer.mergeAll(
   Layer.provide(TestProviderInstanceRegistry),
   Layer.provide(GitWorkflowTestLayer),
   Layer.provide(ProjectServiceTestLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 const LegacyImportTestLayer = OrchestrationV2LayerLive.pipe(
@@ -177,7 +184,7 @@ const LegacyImportTestLayer = OrchestrationV2LayerLive.pipe(
   Layer.provide(TestProviderInstanceRegistry),
   Layer.provide(GitWorkflowTestLayer),
   Layer.provide(ProjectServiceTestLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 const ProjectDeletionTestLayer = Layer.mergeAll(
@@ -215,7 +222,7 @@ const ProjectDeletionTestLayer = Layer.mergeAll(
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(TestProviderInstanceRegistry),
   Layer.provide(GitWorkflowTestLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 it.layer(ProjectDeletionTestLayer)("project deletion during thread commands", (it) => {
@@ -350,7 +357,7 @@ const SharedApplicationDataPlaneTestLayer = Layer.merge(
   Layer.provide(TestProviderInstanceRegistry),
   Layer.provide(GitWorkflowTestLayer),
   Layer.provide(ProjectServiceTestLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(PlatformTestLayer),
 );
 
 it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
@@ -510,6 +517,38 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
           assert.deepEqual(
             (yield* outbox.listByCommandId(commandId)).map((effect) => effect.request.type),
             ["provider-thread.rollback"],
+          );
+          yield* orchestrator.dispatch({
+            type: "thread.metadata.update",
+            commandId: CommandId.make("runtime-rollback-share"),
+            threadId,
+            worktreePath: null,
+          });
+          const sharedCommandId = CommandId.make("runtime-rollback-shared");
+          const sequence = yield* orchestrator.getThreadEventSequence(threadId);
+          const shared = yield* orchestrator
+            .dispatch({
+              type: "checkpoint.rollback",
+              commandId: sharedCommandId,
+              threadId,
+              checkpointId,
+              scopeId: scope.id,
+            })
+            .pipe(Effect.flip);
+          assert.match(String(shared.cause), /isolated worktree/);
+          assert.equal(yield* orchestrator.getThreadEventSequence(threadId), sequence);
+          assert.deepEqual(yield* outbox.listByCommandId(sharedCommandId), []);
+          const conversationOnly = yield* orchestrator.dispatch({
+            type: "checkpoint.rollback",
+            commandId: CommandId.make("runtime-rollback-conversation"),
+            threadId,
+            checkpointId,
+            scopeId: scope.id,
+            restoreFiles: false,
+          });
+          assert.deepEqual(
+            conversationOnly.storedEvents.map((stored) => stored.event.type),
+            ["checkpoint.rollback-requested"],
           );
         } else {
           const error = yield* rollback.pipe(Effect.flip);
@@ -828,6 +867,16 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
       assert.deepEqual(answered.runtimeRequests[0]?.answers, command.answers);
       assert.equal(answered.nodes.find((node) => node.id === nodeId)?.status, "completed");
       assert.equal(answered.turnItems.find((item) => item.id === itemId)?.status, "completed");
+      const answeredItem = answered.turnItems.find((item) => item.id === itemId);
+      assert.equal(answeredItem?.type, "user_input_request");
+      if (answeredItem?.type === "user_input_request") {
+        assert.deepEqual(answeredItem.questionAnswer, {
+          requestId,
+          answers: command.answers,
+          attachmentsByQuestionId: {},
+          questionTextById: { color: "Which color?" },
+        });
+      }
       assert.equal(answered.messages.length, 1);
       assert.equal(answered.messages[0]?.text, "Which color?\nBlue");
       assert.equal(answered.messages[0]?.role, "user");
@@ -1302,8 +1351,7 @@ it.layer(LegacyImportTestLayer)("OrchestrationV2 legacy import", (it) => {
       `;
 
       yield* importer.reconcileShells;
-      const rebuilt = yield* maintenance.rebuild;
-      assert.isTrue(rebuilt.valid);
+      assert.isTrue((yield* maintenance.verify).valid);
 
       yield* threadManagement.dispatch({
         type: "thread.metadata.update",
@@ -1715,6 +1763,102 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
       const unlinkedShell = yield* orchestrator.getThreadShell(threadId);
       assert.isNotNull(unlinkedShell);
       assert.isNull(unlinkedShell.linkedPullRequest);
+    }),
+  );
+
+  it.effect("keeps the branch pull request when linking another pull request", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      const maintenance = yield* ProjectionMaintenanceV2;
+      const projects = yield* ProjectionProjectRepository;
+      const threadId = ThreadId.make("branch-pr-link");
+      const projectId = ProjectId.make("branch-pr-project");
+      yield* projects.upsert({
+        projectId,
+        title: "PR links",
+        workspaceRoot: "/workspace/pr-links",
+        defaultModelSelection: null,
+        defaultThreadEnvMode: null,
+        autoPull: false,
+        scripts: [],
+        createdAt: "2026-09-17T00:00:00.000Z",
+        updatedAt: "2026-09-17T00:00:00.000Z",
+        deletedAt: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("branch-pr-create"),
+        threadId,
+        projectId,
+        title: "PR links",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: "feature/pr-links",
+        worktreePath: null,
+      });
+      const snapshot = yield* orchestrator.getShellSnapshot();
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.sync",
+        commandId: CommandId.make("branch-pr-discover"),
+        threadId,
+        projectId,
+        snapshotSequence: snapshot.snapshotSequence,
+        expected: {
+          workspaceRoot: "/workspace/pr-links",
+          branch: "feature/pr-links",
+          worktreePath: null,
+          linkedPullRequest: null,
+          branchPullRequest: null,
+        },
+        branchPullRequest: {
+          projectId,
+          repository: "pingdotgg/t3code",
+          number: 1,
+          url: "https://github.com/pingdotgg/t3code/pull/1",
+        },
+      });
+      for (const [index, number] of [2, 2, 1, 3].entries()) {
+        yield* orchestrator.dispatch({
+          type: "thread.pull-request.link",
+          commandId: CommandId.make(`branch-pr-link-${index}`),
+          threadId,
+          host: "GitHub.com",
+          repository: "Pingdotgg/T3code",
+          number,
+          url: `https://github.com/pingdotgg/t3code/pull/${number}`,
+          source: "manual",
+        });
+        assert.deepEqual(
+          (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.map((link) => link.number),
+          number === 3 ? [1, 2, 3] : [1, 2],
+        );
+      }
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.unlink",
+        commandId: CommandId.make("branch-pr-unlink"),
+        threadId,
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 1,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.link",
+        commandId: CommandId.make("branch-pr-link-after-unlink"),
+        threadId,
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 4,
+        url: "https://github.com/pingdotgg/t3code/pull/4",
+        source: "manual",
+      });
+      assert.isTrue((yield* maintenance.rebuild).valid);
+      assert.deepEqual(
+        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.map((link) => link.number),
+        [2, 3, 4],
+      );
     }),
   );
 
@@ -2255,6 +2399,113 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
           assert.equal(
             afterSecondPromotion.runs.find((run) => run.id === secondQueuedRun.id)?.status,
             "starting",
+          );
+        }),
+    );
+  }
+
+  for (const trigger of ["startup", "shutdown"] as const) {
+    it.effect(
+      `preserves and holds queued messages across ${trigger} until explicitly resumed`,
+      () =>
+        Effect.gen(function* () {
+          const orchestrator = yield* OrchestratorV2;
+          const recovery = yield* ProviderRuntimeRecoveryService;
+          const threadId = ThreadId.make(`queue-hold-${trigger}`);
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`${threadId}:create`),
+            threadId,
+            projectId: ProjectId.make(`${threadId}:project`),
+            title: "Recover queue",
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: process.cwd(),
+          });
+          for (const [index, text] of ["Active", "First queued", "Second queued"].entries()) {
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make(`${threadId}:message:${index}`),
+              threadId,
+              messageId: MessageId.make(`${threadId}:message:${index}`),
+              text,
+              attachments: [],
+              modelSelection,
+              dispatchMode: { type: index === 0 ? "start_immediately" : "queue_after_active" },
+            });
+          }
+          const before = yield* orchestrator.getThreadProjection(threadId);
+          const queued = before.runs.filter((run) => run.status === "queued");
+          assert.equal(queued.length, 2);
+          yield* recovery.reconcile(trigger);
+          // A second boot must preserve the hold, even when only queued work remains.
+          yield* recovery.reconcile("startup");
+          const maintenance = yield* ProjectionMaintenanceV2;
+          assert.isTrue((yield* maintenance.rebuild).valid);
+          assert.equal(yield* orchestrator.resumeQueuedRuns, 0);
+          const held = yield* orchestrator.getThreadProjection(threadId);
+          assert.deepEqual(
+            held.runs.map((run) => run.status),
+            ["cancelled", "queued", "queued"],
+          );
+          for (const run of queued) {
+            assert.deepEqual(
+              held.runs.find((row) => row.id === run.id),
+              { ...run, queueHeld: true },
+            );
+            assert.deepEqual(
+              held.messages.find((row) => row.id === run.userMessageId),
+              before.messages.find((row) => row.id === run.userMessageId),
+            );
+            assert.equal(
+              held.attempts.find((row) => row.id === run.activeAttemptId)?.status,
+              "pending",
+            );
+            assert.equal(held.nodes.find((row) => row.id === run.rootNodeId)?.status, "pending");
+          }
+          // Editing and reordering are allowed without releasing the hold.
+          const first = queued[0]!;
+          const second = queued[1]!;
+          yield* orchestrator.dispatch({
+            type: "queued-run.edit",
+            commandId: CommandId.make(`${threadId}:edit`),
+            threadId,
+            runId: second.id,
+            text: "Edited second message",
+          });
+          yield* orchestrator.dispatch({
+            type: "queued-run.reorder",
+            commandId: CommandId.make(`${threadId}:reorder`),
+            threadId,
+            runId: second.id,
+            beforeRunId: first.id,
+          });
+          assert.equal(yield* orchestrator.resumeQueuedRuns, 0);
+          const resume = {
+            type: "queue.resume" as const,
+            commandId: CommandId.make(`${threadId}:resume`),
+            threadId,
+          };
+          yield* orchestrator.dispatch(resume);
+          yield* orchestrator.dispatch(resume);
+          const resumed = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(resumed.runs.find((run) => run.id === second.id)?.status, "starting");
+          assert.equal(resumed.runs.find((run) => run.id === first.id)?.status, "queued");
+          assert.isFalse(resumed.runs.some((run) => run.status === "queued" && run.queueHeld));
+          assert.equal(
+            resumed.messages.find((row) => row.id === second.userMessageId)?.text,
+            "Edited second message",
+          );
+          assert.equal(
+            resumed.runs.length,
+            3,
+            "resume retries must not duplicate messages or runs",
           );
         }),
     );

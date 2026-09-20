@@ -3742,18 +3742,36 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
               (event) => event._tag === "UsageUpdated" || event._tag === "SessionInfoUpdated",
             );
             if (stateEvent === undefined) return;
-            if (stateEvent._tag === "UsageUpdated" && "usage" in stateEvent) {
+            if (stateEvent._tag === "UsageUpdated") {
+              const usage =
+                "usage" in stateEvent
+                  ? stateEvent.usage
+                  : {
+                      usedTokens: stateEvent.usedTokens,
+                      ...(stateEvent.maxTokens === undefined
+                        ? {}
+                        : { maxTokens: stateEvent.maxTokens }),
+                    };
               yield* Ref.update(contextUsageBySessionId, (current) =>
-                new Map(current).set(notification.sessionId, stateEvent.usage),
+                new Map(current).set(notification.sessionId, usage),
               );
               if (context?.nativeThreadId === notification.sessionId) {
-                context.contextUsage = stateEvent.usage;
+                context.contextUsage = usage;
               }
-            } else if (stateEvent._tag === "SessionInfoUpdated" && "metadata" in stateEvent) {
+            } else {
+              const nextMetadata =
+                "metadata" in stateEvent
+                  ? stateEvent.metadata
+                  : {
+                      title: stateEvent.title,
+                      ...(stateEvent.updatedAt === undefined
+                        ? {}
+                        : { updatedAt: stateEvent.updatedAt }),
+                    };
               const metadata = yield* Ref.modify(nativeMetadataBySessionId, (current) => {
                 const merged = {
                   ...current.get(notification.sessionId),
-                  ...stateEvent.metadata,
+                  ...nextMetadata,
                 };
                 return [merged, new Map(current).set(notification.sessionId, merged)] as const;
               });

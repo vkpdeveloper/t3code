@@ -33,11 +33,7 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
-  /**
-   * For `runOnWorktreeCreate` scripts: when false, the agent's first turn waits
-   * for the script to exit. Absent or true starts the agent right away and
-   * lets the script finish in the background.
-   */
+  /** Start the agent while setup runs unless explicitly disabled. */
   async: Schema.optional(Schema.Boolean),
   previewUrl: Schema.optional(TrimmedNonEmptyString),
   autoOpenPreview: Schema.optional(Schema.Boolean),

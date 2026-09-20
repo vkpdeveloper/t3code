@@ -17,6 +17,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-sort";
 import type { EnvironmentId, ProjectId, ServerConfig } from "@t3tools/contracts";
 
+import type { ThreadListProvider } from "../../state/thread-list-environments";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 import {
@@ -34,7 +35,7 @@ export { snoozeWakeLabel };
  */
 export function resolveThreadListV2ProviderDrivers(
   thread: Pick<EnvironmentThreadShell, "providerInstanceHistory" | "modelSelection" | "runtime">,
-  providers: ServerConfig["providers"] | undefined,
+  providers: ReadonlyArray<ThreadListProvider> | undefined,
 ): ReadonlyArray<string> {
   if (providers === undefined) return [];
   const stack = resolveThreadProviderStack(thread);
@@ -178,10 +179,7 @@ export function threadHasUnseenCompletion(
 }
 
 export function resolveThreadListV2Status(
-  thread: Pick<
-    EnvironmentThreadShell,
-    "hasPendingApprovals" | "hasPendingUserInput" | "runtime" | "pendingBackgroundTasks"
-  >,
+  thread: Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "runtime">,
 ): ThreadListV2Status {
   if (thread.hasPendingApprovals) {
     return "approval";

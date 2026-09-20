@@ -5,6 +5,7 @@ import {
 import type {
   EnvironmentId,
   PullRequestContextMetadata,
+  ScopedThreadRef,
   ServerProviderSkill,
   ServerProviderSlashCommand,
   ThreadId,
@@ -30,6 +31,13 @@ export type ComposerCommandItem =
       readonly type: "path";
       readonly path: string;
       readonly kind: "file" | "directory";
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "thread";
+      readonly thread: ScopedThreadRef;
       readonly label: string;
       readonly description: string;
     }
@@ -112,6 +120,8 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
       return "text.bubble" as const;
     case "path":
       return null;
+    case "thread":
+      return "text.bubble";
   }
 }
 

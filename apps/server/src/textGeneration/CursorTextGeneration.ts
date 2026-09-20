@@ -1,7 +1,8 @@
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
 
-import { Agent, type AgentOptions, type RunResult } from "@cursor/sdk";
+import type { AgentOptions, RunResult } from "@cursor/sdk";
+import { Agent } from "../provider/cursorSdk.ts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -34,12 +35,12 @@ type CursorTextGenerationOperation =
   | "generateBranchName"
   | "generateThreadTitle";
 
-function emptyCursorSdkResultDetail(result: RunResult): string {
+function cursorSdkResultDetail(result: RunResult): string {
   switch (result.status) {
     case "cancelled":
       return "Cursor SDK request was cancelled.";
     case "error":
-      return "Cursor SDK request finished with an error and no output.";
+      return "Cursor SDK request finished with an error.";
     case "finished":
       return "Cursor SDK returned empty output.";
   }
@@ -160,10 +161,10 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       );
 
       const rawResult = promptResult.result?.trim() ?? "";
-      if (!rawResult) {
+      if (promptResult.status !== "finished" || !rawResult) {
         return yield* new TextGenerationError({
           operation,
-          detail: emptyCursorSdkResultDetail(promptResult),
+          detail: cursorSdkResultDetail(promptResult),
         });
       }
 

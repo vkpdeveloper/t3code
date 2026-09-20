@@ -1,6 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
@@ -8,35 +7,10 @@ import {
   WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
-  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
-import { QUEUED_TURN_START_GRACE_MS } from "./threadSettled.ts";
-
-/**
- * V2 twin of `canSnooze`: a thread may be hidden unless it is blocked on the
- * user (pending runtime request) or holds a queued run start no run has
- * adopted yet.
- */
-const canSnoozeV2 = (thread: OrchestrationV2ThreadShell, now: DateTime.Utc): boolean => {
-  if (thread.pendingRuntimeRequest !== null) return false;
-  if (
-    thread.status === "queued" ||
-    thread.activityRunStatus === "preparing" ||
-    thread.activityRunStatus === "starting"
-  ) {
-    return false;
-  }
-  if (thread.latestUserMessageAt == null) return true;
-  const messageAt = DateTime.toEpochMillis(thread.latestUserMessageAt);
-  const nowMs = DateTime.toEpochMillis(now);
-  if (Math.abs(nowMs - messageAt) > QUEUED_TURN_START_GRACE_MS) return true;
-  const adoptedAt =
-    thread.latestRunCompletedAt ?? thread.latestRunStartedAt ?? thread.latestRunRequestedAt ?? null;
-  if (adoptedAt === null) return false;
-  return DateTime.toEpochMillis(adoptedAt) >= messageAt;
-};
+import * as DateTime from "effect/DateTime";
 
 import {
   createAtomCommandScheduler,
@@ -44,6 +18,7 @@ import {
   createEnvironmentRpcCommand,
 } from "./runtime.ts";
 import {
+  type ThreadCommandInput,
   type ArchiveThreadInput,
   type CancelQueuedRunInput,
   type CreateThreadInput,
@@ -88,6 +63,7 @@ import {
   mergeThreadBack,
   promoteQueuedRun,
   reorderQueuedRun,
+  resumeThreadQueue,
   linkThreadPullRequest,
   respondToThreadApproval,
   respondToThreadUserInput,
@@ -350,6 +326,12 @@ export function createThreadEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.sourceThreadId, input.targetThreadId]),
       },
     }),
+    resumeThreadQueue: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:resume-queue",
+      execute: (input: ThreadCommandInput) => resumeThreadQueue(input),
+      scheduler,
+      concurrency,
+    }),
     reorderQueuedRun: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:reorder-queued-run",
       execute: (input: ReorderQueuedRunInput) => reorderQueuedRun(input),
@@ -407,10 +389,8 @@ export function createThreadEnvironmentAtoms<R, E>(
     snapshotAtom: optimistic.snapshotAtom,
     settle: optimistic.wrap(commands.settle, (thread, _input, now, accepted) =>
       !accepted &&
-      (!canSnoozeV2(thread, now) ||
-        thread.status === "starting" ||
-        thread.status === "running" ||
-        thread.status === "preparing")
+      (thread.pendingRuntimeRequest !== null ||
+        ["preparing", "queued", "starting", "running", "waiting"].includes(thread.status))
         ? thread
         : {
             ...thread,
@@ -432,7 +412,9 @@ export function createThreadEnvironmentAtoms<R, E>(
       unsettledAt: thread.settledOverride === "active" ? (thread.unsettledAt ?? null) : now,
     })),
     snooze: optimistic.wrap(commands.snooze, (thread, input, now, accepted) =>
-      (!accepted && !canSnoozeV2(thread, now)) ||
+      (!accepted &&
+        (thread.pendingRuntimeRequest !== null ||
+          ["preparing", "queued", "starting"].includes(thread.status))) ||
       !(Date.parse(input.snoozedUntil) > DateTime.toEpochMillis(now))
         ? thread
         : {
@@ -441,7 +423,7 @@ export function createThreadEnvironmentAtoms<R, E>(
             snoozedUntil: DateTime.makeUnsafe(input.snoozedUntil),
             snoozedAt:
               thread.snoozedUntil != null &&
-              DateTime.toEpochMillis(thread.snoozedUntil) === Date.parse(input.snoozedUntil)
+              DateTime.formatIso(thread.snoozedUntil) === input.snoozedUntil
                 ? (thread.snoozedAt ?? now)
                 : now,
           },

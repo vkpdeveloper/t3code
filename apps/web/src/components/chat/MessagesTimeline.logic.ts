@@ -3,7 +3,10 @@ export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setu
 import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
-import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
+import {
+  commandDisplayText,
+  commandProgramName,
+} from "@t3tools/client-runtime/work-log/command-label";
 import {
   liveActivityToolStatus,
   normalizeCompactToolLabel,
@@ -33,10 +36,10 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import {
   type MessageId,
+  type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
   type RunAttemptId,
   type RunId,
-  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
 import {
@@ -65,10 +68,11 @@ function workEntryIsActiveTurnActivity(entry: WorkLogEntry): boolean {
 }
 
 function singleToolCallLabel(entry: WorkLogEntry): string {
+  if (entry.itemType === "reasoning") return entry.detail?.trim().replace(/\s+/g, " ") || "Thought";
   const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
   if (toolPresentation) return toolPresentation.displayName;
   const command = entry.command?.trim();
-  if (command) return command;
+  if (command) return commandDisplayText(command);
   const heading = normalizeCompactToolLabel(entry.toolTitle || entry.label);
   return `${heading.charAt(0).toUpperCase()}${heading.slice(1)}`;
 }
@@ -77,7 +81,7 @@ export function workEntryDisplayLabel(entry: WorkLogEntry, workspaceRoot: string
   if (entry.itemType === "system_notice") return entry.label;
   const toolPresentation = resolveWorkEntryToolPresentation(entry);
   if (toolPresentation) return toolPresentation.displayName;
-  if (entry.command) return entry.command;
+  if (entry.command) return commandDisplayText(entry.command);
   // Retrying providers keep their progress label; other diagnostics expose
   // the retained message instead of a generic error heading.
   const providerRetry =
@@ -100,6 +104,12 @@ export function liveWorkEntryLabel(
   active: boolean,
 ) {
   const status = liveActivityToolStatus(entry.toolLifecycleStatus, active);
+  if (entry.itemType === "reasoning") {
+    return (
+      entry.detail?.trim().replace(/\s+/g, " ") ||
+      (status === "inProgress" ? "Thinking" : "Thought")
+    );
+  }
   const toolPresentation = resolveWorkEntryToolPresentation({
     ...entry,
     toolLifecycleStatus: status,
@@ -126,6 +136,7 @@ export function workEntryIsVisibleInGroup(
   entry: WorkLogEntry,
   expandedToolGroupEntry = false,
 ): boolean {
+  if (entry.itemType === "reasoning") return Boolean(entry.detail?.trim());
   return (
     (expandedToolGroupEntry &&
       (entry.toolLifecycleStatus === "inProgress" ||
@@ -329,7 +340,7 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
 
 export interface TimelineDurationMessage {
   id: string;
-  role: ChatMessage["role"];
+  role: "user" | "assistant" | "system";
   createdAt: string;
   updatedAt: string;
   streaming: boolean;
@@ -340,9 +351,20 @@ export type TimelineLatestRun = Pick<
   "runId" | "status" | "startedAt" | "completedAt"
 >;
 
-export const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
+const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
-export type MessagesTimelineRow =
+export type MessagesTimelineRow = MessagesTimelineRowContent & {
+  readonly continuesWorkLog?: boolean;
+};
+
+type MessagesTimelineRowContent =
+  | {
+      kind: "worktree-setup";
+      id: string;
+      createdAt: string | null;
+      snapshot: WorktreeSetupSnapshot;
+      embedded: boolean;
+    }
   | {
       kind: "work";
       id: string;
@@ -411,21 +433,12 @@ export type MessagesTimelineRow =
       active: boolean;
     }
   | {
-      kind: "worktree-setup";
-      id: string;
-      createdAt: string | null;
-      snapshot: WorktreeSetupSnapshot;
-      /** Rendered inside the working header once the agent took over. */
-      embedded: boolean;
-    }
-  | {
       kind: "message";
       id: string;
       createdAt: string;
       message: ChatMessage;
       projectedItem?: OrchestrationV2ProjectedTurnItem;
       durationStart: string;
-      reasoningMessages?: ReadonlyArray<ChatMessage>;
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
@@ -639,18 +652,25 @@ function timelineEntryFoldRunId(entry: TimelineEntry): RunId | null {
   return null;
 }
 
+/** A steer adds input to its existing turn, without creating a new header. */
+function timelineEntryStartsResponse(entry: TimelineEntry): boolean {
+  return (
+    (entry.kind === "message" &&
+      entry.message.role === "user" &&
+      entry.message.inputIntent !== "steer" &&
+      entry.message.inputIntent !== "promoted_queued_to_steer") ||
+    (entry.kind === "work" && entry.entry.itemType === "notification")
+  );
+}
+
 /**
  * A promptless provider restart replaces the native turn without adding a
- * user message. Keep every provider turn since the latest user message in one
- * visual response until the replacement turn settles. A steer has its own
- * user message; an automatic wake has a notification. Both start a new visual response.
+ * user message. Keep every provider turn since the initiating prompt in one
+ * visual response until the replacement turn settles. Steers keep that
+ * boundary; an automatic wake starts a new response with its notification.
  */
 function lastResponseBoundaryIndex(timelineEntries: ReadonlyArray<TimelineEntry>): number {
-  return timelineEntries.findLastIndex(
-    (entry) =>
-      (entry.kind === "message" && entry.message.role === "user") ||
-      (entry.kind === "work" && entry.entry.itemType === "notification"),
-  );
+  return timelineEntries.findLastIndex(timelineEntryStartsResponse);
 }
 
 function deriveActiveVisualResponseRunIds(input: {
@@ -716,16 +736,17 @@ function deriveTurnFolds(input: {
      * hold a single instantaneous commentary message.
      */
     startBoundary: string | null;
+    anchorEntryId: string;
   }
   const groupsByRunId = new Map<RunId, TurnGroup>();
 
-  let pendingUserBoundary: string | null = null;
-  for (const entry of input.timelineEntries) {
-    if (
-      (entry.kind === "message" && entry.message.role === "user") ||
-      (entry.kind === "work" && entry.entry.itemType === "notification")
-    ) {
-      pendingUserBoundary = entry.createdAt;
+  let pendingBoundary: { createdAt: string; anchorEntryId: string } | null = null;
+  for (const [index, entry] of input.timelineEntries.entries()) {
+    if (timelineEntryStartsResponse(entry)) {
+      const nextEntry = input.timelineEntries[index + 1];
+      pendingBoundary = nextEntry
+        ? { createdAt: entry.createdAt, anchorEntryId: nextEntry.id }
+        : null;
       continue;
     }
     const runId = timelineEntryFoldRunId(entry);
@@ -741,9 +762,10 @@ function deriveTurnFolds(input: {
         // Each user boundary starts at most one turn; a second turn after the
         // same user message (e.g. a steer-superseded continuation) falls back
         // to its own first entry.
-        startBoundary: pendingUserBoundary,
+        startBoundary: pendingBoundary?.createdAt ?? null,
+        anchorEntryId: pendingBoundary?.anchorEntryId ?? entry.id,
       };
-      pendingUserBoundary = null;
+      pendingBoundary = null;
       groupsByRunId.set(runId, group);
     }
     group.entries.push(entry);
@@ -751,9 +773,6 @@ function deriveTurnFolds(input: {
       if (input.terminalAssistantMessageIds.has(entry.message.id)) {
         group.terminalEntry = entry;
       }
-      // A live turn is already excluded above, so only an answer still being
-      // written may hold a fold open. A thinking block stranded by a crashed
-      // provider keeps its streaming flag forever and must not.
       if (entry.message.streaming) {
         group.hasStreamingMessage = true;
       }
@@ -772,13 +791,6 @@ function deriveTurnFolds(input: {
     const terminalEntryIndex = group.terminalEntry
       ? group.entries.findIndex((entry) => entry.id === group.terminalEntry?.id)
       : group.entries.length;
-    // Thinking blocks do not count toward "one trailing activity": a block can
-    // follow the answer, and it must not stop that lone tool call from folding
-    // the way it did before traces existed. Loop-invariant, so it is counted
-    // once: a long turn re-derives these rows on every work-log change.
-    const trailingEntryCount = group.entries.filter(
-      (_candidate, candidateIndex) => candidateIndex > terminalEntryIndex,
-    ).length;
     for (const [index, entry] of group.entries.entries()) {
       if (entry.id === group.terminalEntry?.id) {
         continue;
@@ -804,15 +816,13 @@ function deriveTurnFolds(input: {
       continue;
     }
     // A lone compaction row stays visible on its own; it only folds away as
-    // part of a turn that already folds other work. Thinking is the same: a
-    // question answered by thought alone keeps its "Thought" row
-    // rather than collapsing behind a "Worked for ..." that hides nothing else.
-    const hidesFoldableWork = group.entries.some(
+    // part of a turn that already folds other work.
+    const hidesNonCompactionWork = group.entries.some(
       (entry) =>
         hiddenEntryIds.has(entry.id) &&
         !(entry.kind === "work" && entry.entry.sourceActivityKind === "context-compaction"),
     );
-    if (!hidesFoldableWork) {
+    if (!hidesNonCompactionWork) {
       continue;
     }
 
@@ -845,10 +855,10 @@ function deriveTurnFolds(input: {
         ? `Worked for ${duration}`
         : "Worked";
 
-    foldsByAnchorEntryId.set(firstEntry.id, {
+    foldsByAnchorEntryId.set(group.anchorEntryId, {
       runId,
-      anchorEntryId: firstEntry.id,
-      createdAt: firstEntry.createdAt,
+      anchorEntryId: group.anchorEntryId,
+      createdAt: group.startBoundary ?? firstEntry.createdAt,
       hiddenEntryIds,
       label,
     });
@@ -885,7 +895,7 @@ function attachTrailingToolGroupsToAssistant(
     let hasTrailingToolGroup = false;
     for (let index = messageIndex + 1; index < rows.length; index += 1) {
       const candidate = rows[index];
-      if (!candidate) {
+      if (!candidate || candidate.kind === "message") {
         break;
       }
       if (candidate.kind === "work-toggle" && candidate.runId === runId) {
@@ -960,6 +970,9 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt?: string | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   supportsConversationRollback: boolean;
+  /** Task ids of subagents still working, used by the active tool indicator. */
+  liveAgentTaskIds?: ReadonlySet<string> | undefined;
+  /** Live bootstrap progress. Renders a stage card under the first user message. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
 }): MessagesTimelineRow[] {
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1014,14 +1027,11 @@ export function deriveMessagesTimelineRows(input: {
     entry.toolLifecycleStatus === "inProgress" &&
     entry.runId === unsettledRunId;
 
-  // The active run's header row ("Working for ...") anchors right after the
-  // latest user message or notification, or at the run's first owned work entry when one
-  // already rendered above it.
-  let activeTurnHeaderIndex = input.timelineEntries.length;
-  if (input.isWorking) {
-    const latestResponseBoundaryIndex = lastResponseBoundaryIndex(input.timelineEntries);
-    activeTurnHeaderIndex = latestResponseBoundaryIndex + 1;
-  }
+  // A steer continues the current turn. Keep its elapsed-time header below
+  // the initiating prompt (or automatic wake), rather than moving it down.
+  const activeTurnHeaderIndex = input.isWorking
+    ? lastResponseBoundaryIndex(input.timelineEntries) + 1
+    : input.timelineEntries.length;
 
   // Contiguous trailing work entries of the active run collapse into one live
   // row that survives between actions: while a tool runs it shows that tool,
@@ -1073,6 +1083,7 @@ export function deriveMessagesTimelineRows(input: {
     latestVisibleToolEntry !== undefined &&
     latestVisibleToolEntry.entry.toolLifecycleStatus !== "declined" &&
     workEntryDisplayIndicatesToolFailure(latestVisibleToolEntry.entry);
+
   const activeWorkPlacementEntryId = latestVisibleToolEntry?.id;
   const activeWorkRow =
     activeWorkAnchor && latestVisibleToolEntry && !latestToolFailed
@@ -1118,7 +1129,6 @@ export function deriveMessagesTimelineRows(input: {
     );
   };
 
-  let scannedActivityThrough = -1;
   for (let index = 0; index < input.timelineEntries.length; index += 1) {
     const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
@@ -1415,19 +1425,12 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  if (input.isWorking && activeTurnHeaderIndex === input.timelineEntries.length) {
-    appendWorkingRow();
-  }
-  if (input.isWorking && !hasActiveCompaction && (!hasActivityRow || latestToolFailed)) {
-    nextRows.push({
-      kind: "thinking",
-      id: LIVE_ACTIVITY_ROW_ID,
-      createdAt: input.activeTurnStartedAt ?? null,
-    });
-  }
-
-  // Once the agent's run is live the setup card embeds under it: the card
-  // must not vanish in the gap between. A script that is still running is
+  // Until the agent's turn is live, the setup card sits under the send with
+  // the working header above it (the header reads "Setting up worktree…" and
+  // later swaps its text in place, so nothing moves at the handoff). "Live"
+  // means the turn is in the timeline, not just that the server dispatched
+  // it: the card must not vanish in the gap between. Once the turn is live
+  // the stage list leaves the timeline; a script that is still running is
   // surfaced by the working header itself. A failed or cancelled setup stays
   // under the send so its outcome and actions remain reachable.
   const setupHandedOff =
@@ -1472,12 +1475,46 @@ export function deriveMessagesTimelineRows(input: {
     }
   }
 
-  return attachTrailingToolGroupsToAssistant(
+  // A running setup owns the working slot above its card and shows no
+  // activity row of its own; every other state gets the usual tail.
+  const hasWorkingRow = nextRows.some((row) => row.kind === "working");
+  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === input.timelineEntries.length) {
+    appendWorkingRow();
+  }
+  if (
+    input.isWorking &&
+    !setupRunning &&
+    !hasActiveCompaction &&
+    (!hasActivityRow || latestToolFailed)
+  ) {
+    nextRows.push({
+      kind: "thinking",
+      id: LIVE_ACTIVITY_ROW_ID,
+      createdAt: input.activeTurnStartedAt ?? null,
+    });
+  }
+
+  const result = attachTrailingToolGroupsToAssistant(
     attachCreatedThreadSummaries(nextRows, input.timelineEntries),
+  );
+  return result.map((row, index) =>
+    timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
+      ? { ...row, continuesWorkLog: true }
+      : row,
   );
 }
 
-export const WORKTREE_SETUP_ROW_ID = "worktree-setup-row";
+/** Adjacent work stays one visual list even when virtualization splits its groups. */
+function timelineRowIsWorkLog(row: MessagesTimelineRow | undefined): boolean {
+  return (
+    row !== undefined &&
+    (row.kind === "work" ||
+      row.kind === "work-toggle" ||
+      row.kind === "work-live" ||
+      row.kind === "thinking" ||
+      (row.kind === "event" && row.projectedItem.item.type === "subagent"))
+  );
+}
 
 // Keep created chats below the final answer even when the work that created them folds away.
 function attachCreatedThreadSummaries(
@@ -1527,6 +1564,8 @@ function attachCreatedThreadSummaries(
     return [row];
   });
 }
+
+const WORKTREE_SETUP_ROW_ID = "worktree-setup-row";
 
 type MessagesTimelineRowsInput = Parameters<typeof deriveMessagesTimelineRows>[0];
 
@@ -1666,6 +1705,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "working":
     case "thinking":
       return a.createdAt === (b as typeof a).createdAt;
+    case "worktree-setup":
+      return a.snapshot === (b as typeof a).snapshot;
 
     case "assistant-meta": {
       const bm = b as typeof a;
@@ -1692,9 +1733,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       const bc = b as typeof a;
       return a.createdAt === bc.createdAt && a.label === bc.label && a.active === bc.active;
     }
-
-    case "worktree-setup":
-      return a.snapshot === (b as typeof a).snapshot;
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;

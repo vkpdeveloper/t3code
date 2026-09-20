@@ -3,6 +3,8 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
   EnvironmentId,
+  EventId,
+  IsoDateTime,
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderCapabilities,
@@ -10,7 +12,6 @@ import {
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ThreadProjection,
   OrchestratorMcpCreateThreadsResult,
-  OrchestratorMcpCreatedThread,
   OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpTaskCancelResult,
   OrchestratorMcpThreadInterruptResult,
@@ -24,6 +25,9 @@ import {
   type ProviderOptionDescriptor,
   ProviderThreadId,
   ProviderTurnId,
+  type ScheduledTask,
+  ScheduledTaskId,
+  type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
   ThreadMetadataMcpUpdateResult,
@@ -44,6 +48,7 @@ import { McpSchema, McpServer } from "effect/unstable/ai";
 import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { CodexOrchestratorReplayHarness } from "../orchestration-v2/Adapters/CodexAdapterV2.testkit.ts";
+import { EventSinkV2 } from "../orchestration-v2/EventSink.ts";
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
 import { layer as threadManagementServiceLayer } from "../orchestration-v2/ThreadManagementService.ts";
 import {
@@ -67,6 +72,7 @@ import {
   materializeReplayTranscriptWorkspace,
 } from "../orchestration-v2/testkit/ReplayTranscriptNdjson.ts";
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
+import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { delegatedTaskRun, hasPendingChildRuns } from "./OrchestratorMcpService.ts";
@@ -86,7 +92,6 @@ const queuedFollowupPrompt = "Complete the queued follow-up and return the final
 const queuedFollowupResult = "Queued delegated follow-up completed.";
 
 const decodeCreateThreadsResult = Schema.decodeUnknownEffect(OrchestratorMcpCreateThreadsResult);
-const decodeCreatedThread = Schema.decodeUnknownEffect(OrchestratorMcpCreatedThread);
 const decodeDelegateTaskResult = Schema.decodeUnknownEffect(OrchestratorMcpDelegateTaskResult);
 const decodeTaskCancelResult = Schema.decodeUnknownEffect(OrchestratorMcpTaskCancelResult);
 const decodeThreadInterruptResult = Schema.decodeUnknownEffect(
@@ -423,6 +428,45 @@ const client = McpSchema.McpServerClient.of({
   getClient: Effect.die("unused"),
 });
 
+/** Build a persisted-looking ScheduledTask from an upsert input for the in-memory stub. */
+function scheduledTaskFromUpsert(input: ScheduledTaskUpsertInput): ScheduledTask {
+  const timestamp = IsoDateTime.make("2026-07-01T09:00:00.000Z");
+  return {
+    id: input.id ?? ScheduledTaskId.make(`scheduled-task:${input.commandId ?? "stub"}`),
+    title: input.title,
+    prompt: input.prompt,
+    enabled: input.enabled,
+    schedule: input.schedule,
+    projectId: input.projectId,
+    threadId: input.threadId ?? null,
+    workspaceStrategy: input.workspaceStrategy,
+    modelSelection: input.modelSelection,
+    runtimeMode: input.runtimeMode,
+    interactionMode: input.interactionMode,
+    createdBy: input.createdBy ?? "user",
+    creationSource: input.creationSource ?? "web",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    nextRunAt: null,
+    lastRunAt: null,
+    lastRunStatus: "never",
+    lastRunError: null,
+    runCount: 0,
+  };
+}
+
+const unusedScheduledTaskStubLayer = Layer.succeed(
+  ScheduledTaskService,
+  ScheduledTaskService.of({
+    list: () => Effect.succeed({ tasks: [] }),
+    subscribeList: () => Stream.succeed({ tasks: [] }),
+    upsert: () => Effect.die("ScheduledTaskService.upsert is unused in this test"),
+    setEnabled: () => Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
+    delete: () => Effect.die("ScheduledTaskService.delete is unused in this test"),
+    runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
+  }),
+);
+
 describe("orchestrator MCP toolkit", () => {
   it.live(
     "delegates cross-provider tasks, polls and cancels children, and creates ordinary threads",
@@ -550,13 +594,41 @@ describe("orchestrator MCP toolkit", () => {
               model: "opencode/test",
             }),
           ]);
+          // In-memory ScheduledTaskService stub so the schedule/list/update/
+          // delete tools can be exercised without SQL/launch wiring.
+          const scheduledStore = yield* Ref.make<ReadonlyArray<ScheduledTask>>([]);
+          const scheduledTaskStubLayer = Layer.succeed(
+            ScheduledTaskService,
+            ScheduledTaskService.of({
+              list: () => Ref.get(scheduledStore).pipe(Effect.map((tasks) => ({ tasks }))),
+              subscribeList: () => Stream.empty,
+              upsert: (input) =>
+                Effect.gen(function* () {
+                  const task = scheduledTaskFromUpsert(input);
+                  yield* Ref.update(scheduledStore, (all) => [
+                    ...all.filter((candidate) => candidate.id !== task.id),
+                    task,
+                  ]);
+                  return { task };
+                }),
+              setEnabled: () =>
+                Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
+              delete: (input) =>
+                Ref.update(scheduledStore, (all) =>
+                  all.filter((candidate) => candidate.id !== input.id),
+                ).pipe(Effect.as({ id: input.id })),
+              runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
+            }),
+          );
           const testLayer = Layer.merge(
             McpHttpServer.OrchestratorToolkitRegistrationLive,
             McpHttpServer.ThreadToolkitRegistrationLive,
           ).pipe(
             Layer.provideMerge(McpServer.McpServer.layer),
             Layer.provideMerge(orchestrationLayer),
+            Layer.provide(registryLayer),
             Layer.provide(providerRegistryLayer),
+            Layer.provide(scheduledTaskStubLayer),
             Layer.provide(NodeServices.layer),
           );
 
@@ -939,6 +1011,28 @@ describe("orchestrator MCP toolkit", () => {
               )?.completionDelivery?.state,
             ).toBe("claimed");
 
+            const firstChunk = truncatedResultRead.items[0]!;
+            expect(firstChunk.nextTextOffset).toBe(1);
+            const remainderCall = yield* invoke("t3_thread_read", {
+              threadId: directChildThreadId,
+              itemId: firstChunk.itemId,
+              textOffset: firstChunk.nextTextOffset,
+              maxCharsPerItem: 50_000,
+            });
+            const remainder = yield* decodeThreadReadResult(remainderCall.structuredContent).pipe(
+              Effect.orDie,
+            );
+            expect(remainder.items[0]?.nextTextOffset).toBeNull();
+            expect(firstChunk.text + (remainder.items[0]?.text ?? "")).toBe(
+              "Claude completed: Complete before a parent reads this child result directly.",
+            );
+            // Reading a suffix alone cannot acknowledge a whole child result.
+            expect(
+              (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+                (task) => task.id === directRead.task.id,
+              )?.completionDelivery?.state,
+            ).toBe("claimed");
+
             const terminalResultReadCall = yield* invoke("t3_thread_read", {
               threadId: directChildThreadId,
               afterPosition: childPromptRead.nextPosition,
@@ -954,6 +1048,48 @@ describe("orchestrator MCP toolkit", () => {
                 textTruncated: false,
               },
             ]);
+            const longText = "界🧪\n".repeat(20_000) + "FINAL_CONSTRAINT";
+            const childProjection = yield* orchestrator.getThreadProjection(directChildThreadId);
+            const sourceItem = childProjection.turnItems.find(
+              (item) => item.type === "user_message",
+            )!;
+            const oversizedItem = {
+              ...sourceItem,
+              id: TurnItemId.make("item:oversized-retrieval"),
+              type: "assistant_message" as const,
+              text: longText,
+              streaming: false,
+              ordinal: 999,
+            };
+            yield* (yield* EventSinkV2).write({
+              events: [
+                {
+                  id: EventId.make("event:oversized-retrieval"),
+                  type: "turn-item.updated",
+                  threadId: directChildThreadId,
+                  occurredAt: yield* DateTime.now,
+                  payload: oversizedItem,
+                },
+              ],
+            });
+            let recovered = "";
+            let textOffset: number | null = 0;
+            while (textOffset !== null) {
+              const pageCall = yield* invoke("t3_thread_read", {
+                threadId: directChildThreadId,
+                itemId: oversizedItem.id,
+                textOffset,
+                maxCharsPerItem: 50_000,
+              });
+              const page: OrchestratorMcpThreadReadResult = yield* decodeThreadReadResult(
+                pageCall.structuredContent,
+              ).pipe(Effect.orDie);
+              expect(page.items).toHaveLength(1);
+              recovered += page.items[0]!.text;
+              textOffset = page.items[0]!.nextTextOffset ?? null;
+            }
+            expect(recovered).toBe(longText);
+
             const acknowledgedByDirectRead = yield* waitForProjection(
               orchestrator,
               parentThreadId,
@@ -1205,9 +1341,11 @@ describe("orchestrator MCP toolkit", () => {
                   providerInstanceId: claudeInstanceId,
                   canRunCrossProviderChildTask: true,
                 }),
+                // No opencode adapter is registered in this harness, so the
+                // capability view must not claim delegation can target it.
                 expect.objectContaining({
                   providerInstanceId: "opencode",
-                  canRunChildTask: true,
+                  canRunChildTask: false,
                 }),
                 // Models advertise their option descriptors so agents can
                 // discover valid target.options ids and values.
@@ -1222,6 +1360,84 @@ describe("orchestrator MCP toolkit", () => {
                 }),
               ]),
             });
+
+            const scheduleTool = server.tools.find(({ tool }) => tool.name === "schedule_task");
+            expect(scheduleTool?.tool.annotations?.destructiveHint).toBe(true);
+            const scheduleCall = yield* invoke("schedule_task", {
+              prompt: "wake up in this thread and say hello",
+              schedule: { type: "interval", everyMs: 60_000 },
+              clientRequestId: "schedule-hello-1",
+            });
+            expect(scheduleCall.isError).toBe(false);
+            expect(scheduleCall.structuredContent).toMatchObject({
+              // Defaults to binding the calling thread.
+              boundThreadId: parentThreadId,
+              projectId,
+              enabled: true,
+              schedule: { type: "interval", everyMs: 60_000 },
+              // Title is derived from the prompt when omitted.
+              title: "wake up in this thread and say hello",
+            });
+            const scheduledTaskId = (scheduleCall.structuredContent as { scheduledTaskId: string })
+              .scheduledTaskId;
+            const storedAfterCreate = yield* Ref.get(scheduledStore);
+            expect(storedAfterCreate).toHaveLength(1);
+            expect(storedAfterCreate[0]).toMatchObject({
+              threadId: parentThreadId,
+              projectId,
+              createdBy: "agent",
+              creationSource: "mcp",
+              // Inherits the parent thread's model selection.
+              modelSelection: codexSelection,
+            });
+
+            // list_scheduled_tasks returns the task scoped to this project.
+            const scheduledListCall = yield* invoke("list_scheduled_tasks", {});
+            expect(scheduledListCall.isError).toBe(false);
+            expect(scheduledListCall.structuredContent).toMatchObject({
+              tasks: [{ scheduledTaskId, boundThreadId: parentThreadId }],
+            });
+
+            // update_scheduled_task pauses without deleting.
+            const scheduledUpdateCall = yield* invoke("update_scheduled_task", {
+              scheduledTaskId,
+              enabled: false,
+            });
+            expect(scheduledUpdateCall.isError).toBe(false);
+            expect(scheduledUpdateCall.structuredContent).toMatchObject({
+              scheduledTaskId,
+              enabled: false,
+            });
+
+            // delete_scheduled_task removes it entirely.
+            const scheduledDeleteCall = yield* invoke("delete_scheduled_task", { scheduledTaskId });
+            expect(scheduledDeleteCall.isError).toBe(false);
+            expect(scheduledDeleteCall.structuredContent).toMatchObject({
+              scheduledTaskId,
+              deleted: true,
+            });
+            expect(yield* Ref.get(scheduledStore)).toHaveLength(0);
+
+            // OpenCode 1.15 has emitted this exact nested-object-as-JSON-string
+            // shape. Decode it at the MCP boundary rather than failing a task
+            // the model otherwise specified correctly.
+            const serializedScheduleCall = yield* invoke("schedule_task", {
+              prompt: "check for new pull requests",
+              schedule: '{"type":"interval","everyMs":3600000}',
+              clientRequestId: "schedule-opencode-compat-1",
+            });
+            expect(serializedScheduleCall.isError).toBe(false);
+            expect(serializedScheduleCall.structuredContent).toMatchObject({
+              schedule: { type: "interval", everyMs: 3_600_000 },
+              boundThreadId: parentThreadId,
+            });
+            const serializedScheduledTaskId = (
+              serializedScheduleCall.structuredContent as { scheduledTaskId: string }
+            ).scheduledTaskId;
+            yield* invoke("delete_scheduled_task", {
+              scheduledTaskId: serializedScheduledTaskId,
+            });
+            expect(yield* Ref.get(scheduledStore)).toHaveLength(0);
 
             const delegatedCall = yield* invoke("delegate_task", {
               task: delegatedPrompt,
@@ -1908,14 +2124,13 @@ describe("orchestrator MCP toolkit", () => {
               (yield* orchestrator.getThreadProjection(emptyThread.threadId)).runs,
             ).toHaveLength(1);
 
-            const activeThreadCall = yield* invoke("t3_thread_start", {
-              prompt: cancellationPrompt,
-              title: "Managed active thread",
+            const activeThreadCall = yield* invoke("create_threads", {
+              threads: [{ prompt: cancellationPrompt, title: "Managed active thread" }],
               clientRequestId: "managed-active-thread-1",
             });
-            const activeThread = yield* decodeCreatedThread(
+            const activeThread = (yield* decodeCreateThreadsResult(
               activeThreadCall.structuredContent,
-            ).pipe(Effect.orDie);
+            ).pipe(Effect.orDie)).threads[0]!;
             const activeThreadItem = (yield* orchestrator.getThreadProjection(
               parentThreadId,
             )).visibleTurnItems
@@ -2822,7 +3037,11 @@ describe("orchestrator MCP toolkit", () => {
         const testLayer = McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(
           Layer.provideMerge(McpServer.McpServer.layer),
           Layer.provideMerge(orchestrationLayer),
+          Layer.provide(
+            CodexOrchestratorReplayHarness.makeProviderAdapterRegistryLayer(transcript),
+          ),
           Layer.provide(providerRegistryLayer),
+          Layer.provide(unusedScheduledTaskStubLayer),
           Layer.provide(NodeServices.layer),
         );
 

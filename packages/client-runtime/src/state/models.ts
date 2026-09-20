@@ -15,6 +15,8 @@ import type {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
+import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
+
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
 }
@@ -88,13 +90,9 @@ export interface EnvironmentThreadShell {
   readonly modelSelection: OrchestrationV2ThreadShell["modelSelection"];
   readonly runtimeMode: OrchestrationV2ThreadShell["runtimeMode"];
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
-  readonly status: OrchestrationV2ThreadShell["status"];
-  readonly activityRunStatus: OrchestrationV2ThreadShell["activityRunStatus"];
-  readonly pendingRuntimeRequest: OrchestrationV2ThreadShell["pendingRuntimeRequest"];
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
-  readonly automationId: OrchestrationV2ThreadShell["automationId"];
   readonly usageLimitResume: {
     readonly blockedRunId: RunId;
     readonly resumeAt: string;
@@ -217,21 +215,20 @@ export function presentThreadShell(
     environmentId,
     id: thread.id,
     projectId: thread.projectId,
-    title: thread.title,
+    title:
+      thread.lineage.relationshipToParent === "subagent"
+        ? formatSubagentDisplayTitle(thread.title)
+        : thread.title,
     providerInstanceId: thread.providerInstanceId,
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
-    status: thread.status,
-    activityRunStatus: thread.activityRunStatus,
-    pendingRuntimeRequest: thread.pendingRuntimeRequest,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     pullRequests: threadPullRequestsOf(thread),
     linkedPullRequest: thread.linkedPullRequest ?? null,
     branchPullRequest: thread.branchPullRequest ?? null,
     lineage: thread.lineage,
-    automationId: thread.automationId ?? null,
     usageLimitResume:
       thread.usageLimitResume == null
         ? null

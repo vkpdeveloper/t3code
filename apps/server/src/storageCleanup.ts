@@ -1,3 +1,9 @@
+import {
+  OrchestrationV2AppThreadJson,
+  OrchestrationV2ProviderSessionJson,
+} from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type {
   OrchestrationV2ThreadShell,
   ProjectId,
@@ -10,38 +16,34 @@ import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
-import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schedule from "effect/Schedule";
-import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
+import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { OrchestratorV2 } from "./orchestration-v2/Orchestrator.ts";
 import { ProjectionStoreV2 } from "./orchestration-v2/ProjectionStore.ts";
-import { ProviderSessionManagerV2 } from "./orchestration-v2/ProviderSessionManager.ts";
-import { ProjectService } from "./project/ProjectService.ts";
+import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementService.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
-export class StorageCleanup extends Context.Service<
-  StorageCleanup,
-  {
-    readonly start: () => Effect.Effect<void, never, Scope.Scope>;
-    readonly drain: Effect.Effect<void>;
-  }
->()("t3/storageCleanup") {}
+const decodeCleanupThread = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationV2AppThreadJson),
+);
+const decodeCleanupSession = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationV2ProviderSessionJson),
+);
 
 const DAY_MS = 86_400_000;
 
@@ -78,19 +80,20 @@ function sameProjectWorktreePolicies(left: ServerSettings, right: ServerSettings
 }
 
 /** Live sessions keep their cwd even when no turn is currently running. */
-function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell): boolean {
+export function storageCleanupThreadIdle(thread: OrchestrationV2ThreadShell, now: number): boolean {
   return (
     thread.branch !== null &&
     thread.worktreePath !== null &&
-    thread.status === "idle" &&
     thread.activeRunId === null &&
+    (thread.status === "idle" || thread.status === "failed") &&
+    (thread.pendingBackgroundTasks?.length ?? 0) === 0 &&
     thread.pendingRuntimeRequest === null &&
-    (thread.pendingBackgroundTasks?.length ?? 0) === 0
+    !threadHasQueuedTurnStart(thread, now)
   );
 }
 
 /** PR metadata refreshes must not reset the inactivity clock. */
-function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): number {
+export function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): number {
   return Math.max(
     ...[
       thread.createdAt,
@@ -105,10 +108,10 @@ function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): number {
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const settingsService = yield* Settings.ServerSettingsService;
+  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const engine = yield* OrchestratorV2;
   const projections = yield* ProjectionStoreV2;
-  const providers = yield* ProviderSessionManagerV2;
-  const projects = yield* ProjectService;
+  const sql = yield* SqlClient.SqlClient;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const gitManager = yield* GitManager.GitManager;
   const terminals = yield* TerminalManager.TerminalManager;
@@ -146,14 +149,10 @@ export const make = Effect.gen(function* () {
       });
 
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
-    const [projectSnapshot, threadSnapshot] = yield* Effect.all([
-      projects.snapshot,
-      engine.getShellSnapshot(),
-    ]);
-    return {
-      projects: projectSnapshot.projects,
-      threads: [...threadSnapshot.threads, ...threadSnapshot.archivedThreads],
-    };
+    const active = yield* projections.getShellSnapshot();
+    const archived = yield* projections.getShellSnapshot({ location: "archive" });
+    const projects = yield* snapshots.getProjectShellsWithoutEnrichment();
+    return { projects, threads: [...active.threads, ...archived.threads] };
   });
 
   // Local threads under another project need not have a worktreePath of their own.
@@ -179,11 +178,24 @@ export const make = Effect.gen(function* () {
     if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)) return;
     if (!(yield* fs.exists(config.worktreesDir))) return;
     const hasDeleteRule = anyWorktreePolicy(serverSettings, (rules) => rules.worktreeOnDelete);
-    const deletedThreads = hasDeleteRule
-      ? (yield* projections.getDeletedWorktreeThreads ?? Effect.succeed([])).filter(
-          (thread) => resolveWorktreeCleanup(serverSettings, thread.projectId).worktreeOnDelete,
-        )
+    const deletedRows = hasDeleteRule
+      ? yield* sql<{ payload_json: string; workspaceRoot: string }>`
+          SELECT t.payload_json, p.workspace_root AS "workspaceRoot"
+          FROM orchestration_v2_projection_threads t
+          JOIN projection_projects p ON p.project_id = t.project_id
+          WHERE t.deleted_at IS NOT NULL
+        `
       : [];
+    const deletedThreads = (yield* Effect.forEach(deletedRows, (row) =>
+      decodeCleanupThread(row.payload_json).pipe(
+        Effect.map((thread) => ({ ...thread, workspaceRoot: row.workspaceRoot })),
+      ),
+    )).filter(
+      (thread) =>
+        thread.worktreePath !== null &&
+        thread.branch !== null &&
+        resolveWorktreeCleanup(serverSettings, thread.projectId).worktreeOnDelete,
+    );
     const snapshot = yield* readThreads();
     const root = yield* fs.realPath(config.worktreesDir);
     const refreshedDefaultRefs = new Map<string, Set<string>>();
@@ -192,22 +204,20 @@ export const make = Effect.gen(function* () {
       (thread) => path.resolve(thread.worktreePath!),
     );
     const candidates = [
-      ...[...groups.values()].flatMap((group) =>
-        group.length === 1 ? [{ deleted: false as const, thread: group[0]! }] : [],
-      ),
-      ...deletedThreads
-        .filter((thread) => !groups.has(path.resolve(thread.worktreePath)))
-        .map((thread) => ({ deleted: true as const, thread })),
+      ...[...groups.values()].flatMap((group) => (group.length === 1 ? [group[0]!] : [])),
+      ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath!))),
     ];
-    for (const candidate of candidates) {
-      const { deleted, thread } = candidate;
+    for (const thread of candidates) {
       const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
       if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
-      const project = snapshot.projects.find((entry) => entry.id === thread.projectId);
+      const deleted = "workspaceRoot" in thread;
+      const project = deleted
+        ? { workspaceRoot: thread.workspaceRoot }
+        : snapshot.projects.find((entry) => entry.id === thread.projectId);
       if (
         project === undefined ||
-        (!deleted && !storageCleanupThreadIdle(thread)) ||
+        (!deleted && !storageCleanupThreadIdle(thread, now)) ||
         hasTerminal(worktreePath)
       )
         continue;
@@ -294,22 +304,33 @@ export const make = Effect.gen(function* () {
               .worktreeOnDelete
           )
             return;
-          // A failed session stop is logged by the deletion reactor. Its drain
-          // alone is not proof that a provider released this checkout.
-          if (
-            (yield* providers.listLiveSessions ?? Effect.succeed([])).some(
-              (session) =>
-                session.attachedThreadIds.has(thread.id) ||
-                path.resolve(session.cwd) === worktreePath ||
-                inside(worktreePath, path.resolve(session.cwd)),
-            )
-          )
-            return;
+          // V2 deletion queues durable cleanup. Do not remove its checkout until
+          // every effect has finished successfully or was explicitly cancelled.
+          const pendingCleanup = yield* sql`
+            SELECT 1 FROM orchestration_v2_effect_outbox
+            WHERE thread_id = ${thread.id} AND status NOT IN ('succeeded', 'cancelled') LIMIT 1
+          `;
+          if (pendingCleanup.length > 0) return;
         } else if (
           latest.length !== 1 ||
           latest[0]!.id !== thread.id ||
-          !storageCleanupThreadIdle(latest[0]!) ||
+          !storageCleanupThreadIdle(latest[0]!, now) ||
           storageCleanupActivityAt(latest[0]!) !== storageCleanupActivityAt(thread)
+        )
+          return;
+        // Sessions can outlive their run and can be shared across app threads.
+        const sessionRows = yield* sql<{ payload_json: string }>`
+          SELECT payload_json FROM orchestration_v2_projection_provider_sessions
+          WHERE status != 'stopped'
+        `;
+        const sessions = yield* Effect.forEach(sessionRows, (row) =>
+          decodeCleanupSession(row.payload_json),
+        );
+        if (
+          sessions.some((session) => {
+            const cwd = path.resolve(session.cwd);
+            return cwd === worktreePath || inside(worktreePath, cwd);
+          })
         )
           return;
         const finalStatus = yield* git.statusDetailsLocal(worktreePath);
@@ -465,14 +486,16 @@ export const make = Effect.gen(function* () {
     );
     yield* forkParked(
       Stream.runForEach(events, (event) =>
-        event.type === "thread.deleted" &&
+        (event.type === "thread.deleted" || event.type === "provider-session.updated") &&
         anyWorktreePolicy(lastSettings, (rules) => rules.worktreeOnDelete)
           ? worker.enqueue(undefined)
           : Effect.void,
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Storage cleanup event stream failed", { cause }),
+        ),
       ),
     );
   });
-  return { start, drain: worker.drain } satisfies StorageCleanup["Service"];
+  return { start, drain: worker.drain };
 });
-
-export const layer = Layer.effect(StorageCleanup, make);

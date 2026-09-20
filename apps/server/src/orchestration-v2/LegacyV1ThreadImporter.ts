@@ -1,4 +1,7 @@
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import {
+  threadPullRequestKeysEqual,
+  threadPullRequestsOf,
+} from "@t3tools/shared/threadPullRequests";
 import {
   ChatAttachment,
   OrchestrationMessageContext,
@@ -27,14 +30,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { EventSinkV2 } from "./EventSink.ts";
-import { EventStoreV2 } from "./EventStore.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
-import {
-  ProjectionMaintenanceV2,
-  layer as projectionMaintenanceLayer,
-} from "./ProjectionMaintenance.ts";
-import { ProjectionStoreV2 } from "./ProjectionStore.ts";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
 const TRANSCRIPT_EVENT_BATCH_SIZE = 100;
@@ -197,6 +194,13 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     decodePullRequests(parseJson(row.pull_requests_json)),
     () => [],
   );
+  const linkedPullRequest = linkedPullRequestFor(row);
+  const legacyLink = threadPullRequestsOf({ linkedPullRequest })[0];
+  const importedPullRequests =
+    legacyLink !== undefined &&
+    !pullRequests.some((link) => threadPullRequestKeysEqual(link, legacyLink))
+      ? [...pullRequests, legacyLink]
+      : pullRequests;
   return {
     createdBy: "system",
     creationSource: "server",
@@ -209,11 +213,8 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     interactionMode: interactionModeFor(row.interaction_mode),
     branch,
     worktreePath,
-    linkedPullRequest: linkedPullRequestFor(row),
-    pullRequests:
-      pullRequests.length > 0
-        ? pullRequests
-        : threadPullRequestsOf({ linkedPullRequest: linkedPullRequestFor(row) }),
+    linkedPullRequest,
+    pullRequests: importedPullRequests,
     branchPullRequest: branchPullRequestFor(row),
     activeOrderKey: row.active_order_key?.trim() || null,
     activeProviderThreadId: null,
@@ -344,7 +345,6 @@ function chunks<A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const eventSink = yield* EventSinkV2;
-  const maintenance = yield* ProjectionMaintenanceV2;
   const transcriptImports = yield* makeKeyedSerialExecutor<ThreadId>();
 
   const listMessages = (threadId: ThreadId) =>
@@ -439,20 +439,6 @@ const make = Effect.gen(function* () {
     });
 
   const reconcileShellsBase = Effect.gen(function* () {
-    // Earlier imports appended shell events without projecting them. Replay the
-    // stored events so recovery preserves subsequent v2 edits and transcripts.
-    const missingShells = yield* sql<{ readonly count: number }>`
-      SELECT COUNT(*) AS count
-      FROM orchestration_v2_legacy_imports AS legacy_import
-      WHERE NOT EXISTS (
-        SELECT 1 FROM orchestration_v2_projection_threads AS projection
-        WHERE projection.thread_id = legacy_import.thread_id
-      )
-    `;
-    const recoveredThreadCount = missingShells[0]?.count ?? 0;
-    if (recoveredThreadCount > 0) {
-      yield* maintenance.rebuild;
-    }
     const now = DateTime.formatIso(yield* DateTime.now);
     const repairRows = yield* sql<LegacyRepairRow>`
       SELECT
@@ -491,16 +477,18 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.snoozedAt') IS NULL
          OR json_type(projection.payload_json, '$.unsettledAt') IS NULL
          OR json_type(projection.payload_json, '$.linkedPullRequest') IS NULL
+         OR json_type(projection.payload_json, '$.pullRequests') IS NULL
          OR json_type(projection.payload_json, '$.branchPullRequest') IS NULL
          OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
-    let repairedThreadCount = recoveredThreadCount;
+    let repairedThreadCount = 0;
     for (const row of repairRows) {
       const decoded = decodeStoredThread(row.payload_json);
       if (Option.isNone(decoded)) continue;
       const current = decoded.value;
       const legacy = importedThread(row);
+      const legacyPullRequests = legacy.pullRequests ?? [];
       const repaired: OrchestrationV2AppThread = {
         ...current,
         pinnedAt: current.pinnedAt === undefined ? legacy.pinnedAt : current.pinnedAt,
@@ -513,6 +501,19 @@ const make = Effect.gen(function* () {
           current.linkedPullRequest === undefined
             ? legacy.linkedPullRequest
             : current.linkedPullRequest,
+        pullRequests:
+          current.pullRequests === undefined
+            ? current.linkedPullRequest === null
+              ? []
+              : legacyPullRequests.length > 0
+                ? legacyPullRequests
+                : threadPullRequestsOf({
+                    linkedPullRequest:
+                      current.linkedPullRequest === undefined
+                        ? legacy.linkedPullRequest
+                        : current.linkedPullRequest,
+                  })
+            : current.pullRequests,
         branchPullRequest:
           current.branchPullRequest === undefined
             ? legacy.branchPullRequest
@@ -817,8 +818,5 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer: Layer.Layer<
-  LegacyV1ThreadImporter,
-  never,
-  EventSinkV2 | EventStoreV2 | ProjectionStoreV2 | SqlClient.SqlClient
-> = Layer.effect(LegacyV1ThreadImporter, make).pipe(Layer.provide(projectionMaintenanceLayer));
+export const layer: Layer.Layer<LegacyV1ThreadImporter, never, EventSinkV2 | SqlClient.SqlClient> =
+  Layer.effect(LegacyV1ThreadImporter, make);

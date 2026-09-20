@@ -14,12 +14,14 @@ import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "re
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { isConfiguredAcpRegistryAgent } from "./AddProviderInstanceDialog.logic";
-import { AcpRegistryAgentIcon } from "./AcpRegistryIcon";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 
 const SUGGESTED_SEARCHES = ["Codex", "Copilot", "Kimi"] as const;
 function errorMessage(error: unknown): string {
@@ -203,12 +205,9 @@ export function AcpRegistrySearchStep({
       </div>
 
       {search.error || prepareError ? (
-        <div
-          aria-live="polite"
-          className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-        >
-          {prepareError ?? search.error}
-        </div>
+        <Alert variant="error" role="status" aria-live="polite">
+          <AlertDescription>{prepareError ?? search.error}</AlertDescription>
+        </Alert>
       ) : null}
 
       {isInitialSearch ? (
@@ -240,7 +239,13 @@ export function AcpRegistrySearchStep({
                   <article className="grid min-w-0 gap-2 py-3 first:pt-2 last:pb-2" key={agent.id}>
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <AcpRegistryAgentIcon icon={agent.icon} />
+                        <ProviderInstanceIcon
+                          driverKind={ProviderDriverKind.make("acpRegistry")}
+                          displayName={agent.name}
+                          acpRegistryAgentId={agent.id}
+                          acpRegistryIconUrl={agent.icon ?? undefined}
+                          iconClassName="size-8 rounded-lg bg-muted text-muted-foreground"
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-baseline gap-2">
                             <h4 className="min-w-0 truncate text-sm font-medium text-foreground">

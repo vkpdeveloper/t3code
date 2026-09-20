@@ -1,9 +1,10 @@
+import * as StorageCleanup from "./storageCleanup.ts";
+import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import {
   EnvironmentHttpApi,
   ProviderDriverKind,
@@ -71,7 +72,6 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
-
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
@@ -81,6 +81,7 @@ import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as CodexResetCredit from "./provider/Layers/codexResetCredit.ts";
 import { AntigravityInstallation } from "./provider/AntigravityInstallation.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
+import { layerFromProviderInstanceRegistry as providerAdapterRegistryLayerFromProviderInstances } from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import { ProviderUsageLimitsIngestionLive } from "./provider/Layers/ProviderUsageLimitsIngestion.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
@@ -135,8 +136,6 @@ import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinar
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VibeProxyUsageService from "./usage/VibeProxyUsageService.ts";
-import * as WorktreeCleanup from "./worktreeCleanup.ts";
-import * as StorageCleanup from "./storageCleanup.ts";
 import { OrchestrationInfrastructureLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   OrchestrationV2ProductionLayerLive,
@@ -466,24 +465,13 @@ const ThreadPullRequestWorkerLive = Layer.effectDiscard(
   ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(PullRequestServiceLive), Layer.provide(OrchestrationInfrastructureLayerLive));
 
-// Usage-limit auto-resume: runs that fail on a provider usage-limit window
-// park the thread and continue it once the window resets (see
-// UsageLimitResumeService); the shell field survives restarts and holds
-// queued sends until the resume fires or the user cancels.
 const UsageLimitResumeWorkerLive = Layer.effectDiscard(
   UsageLimitResumeService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(OrchestrationInfrastructureLayerLive));
 
-// Transient provider-failure retry: retryable run failures (transport blips,
-// 5xx, capacity, timeouts) resend the turn's continue prompt after a short
-// backoff — the V2 port of the V1 turn-retry policy.
 const TransientFailureRetryWorkerLive = Layer.effectDiscard(
   TransientFailureRetryService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(OrchestrationInfrastructureLayerLive));
-
-const StorageCleanupWorkerLive = Layer.effectDiscard(
-  StorageCleanup.make.pipe(Effect.flatMap((service) => service.start())),
-).pipe(Layer.provide(ProjectionStoreV2.layer));
 
 const AntigravityInstallationRefreshLive = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -515,10 +503,12 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
 const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   AgentAwarenessRelay.layer,
   ThreadSettlementWorkerLive,
+  Layer.effectDiscard(StorageCleanup.make.pipe(Effect.flatMap((service) => service.start()))).pipe(
+    Layer.provide(ProjectionStoreV2.layer),
+  ),
   ThreadPullRequestWorkerLive,
   UsageLimitResumeWorkerLive,
   TransientFailureRetryWorkerLive,
-  StorageCleanupWorkerLive,
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -536,12 +526,8 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   // canonical project/thread snapshots while mutations flow through v2.
   Layer.provideMerge(OrchestrationInfrastructureLayerLive),
   Layer.provideMerge(ServerSettingsLayerLive),
-  Layer.provideMerge(CheckpointStoreLayerLive),
-  // `GitHubCli` is the registry's own instance, exposed because the asset route fetches
-  // GitHub-hosted pull request media with the repository's credential.
-  Layer.provideMerge(
-    Layer.mergeAll(SourceControlProviderRegistryLayerLive, PullRequestServiceLive, GitHubCli.layer),
-  ),
+  // The asset route uses the registry's GitHub credential for private PR media.
+  Layer.provideMerge(Layer.mergeAll(SourceControlProviderRegistryLayerLive, GitHubCli.layer)),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive, DeviceLayerLive)),
@@ -562,11 +548,6 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
 );
 
 const RuntimeCoreDependenciesLive = RuntimeCoreDependenciesBaseLive.pipe(
-  // The worktree cleanup worker reads persistence, settings, terminals, git,
-  // and setup-script services out of the base layer. It is merged before the
-  // driver-env tail merges so the base's unsatisfied requirements (which the
-  // tail stages fill) are reintroduced here rather than after them.
-  Layer.provideMerge(WorktreeCleanup.layer.pipe(Layer.provide(RuntimeCoreDependenciesBaseLive))),
   // Search, prepare, status inspection, and turn launch share one registry
   // cache so every client and provider instance sees the same prepared agents.
   Layer.provideMerge(AcpRegistryCatalogLive),
@@ -646,8 +627,11 @@ const makeRoutesLayer = Layer.mergeAll(
     websocketRpcRouteLayer,
   ),
   // The MCP session registry is provided globally (shared with V2 provider
-  // sessions) rather than inline here.
-  McpHttpServer.layer.pipe(Layer.provide(ImageGenerationService.layer)),
+  // sessions) rather than inline here. The orchestrator toolkit resolves
+  // delegation targets through the same live adapter facade the V2
+  // orchestrator uses, so MCP capability reporting can never drift from
+  // what dispatch can actually serve.
+  McpHttpServer.layer.pipe(Layer.provide(providerAdapterRegistryLayerFromProviderInstances)),
 ).pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
   // Both transports consume the same service instance, so caches single-flight across clients

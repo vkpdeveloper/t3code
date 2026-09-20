@@ -9,7 +9,6 @@ import {
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
-import * as EffectAcpSchemaGen from "effect-acp/schema";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -260,7 +259,13 @@ const runGrokCliCommand = (
   });
 
 const decodeAvailableCommands = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown));
-const decodeAvailableCommand = Schema.decodeUnknownOption(EffectAcpSchemaGen.AvailableCommand);
+const decodeAvailableCommand = Schema.decodeUnknownOption(
+  Schema.Struct({
+    name: Schema.String,
+    description: Schema.String,
+    input: Schema.optional(Schema.NullOr(Schema.Struct({ hint: Schema.String }))),
+  }),
+);
 
 export function grokSlashCommandsFromInitialize(
   initialized: EffectAcpSchema.InitializeResponse,

@@ -275,12 +275,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
       default:
         return Effect.succeed({
           status: "started",
+          async: false,
           scriptId: "setup",
           scriptName: "Setup",
           scriptCommand: "vp install",
           terminalId: "setup-terminal",
           cwd: input.worktreePath,
-          async: true,
         } as const);
     }
   });
@@ -396,7 +396,10 @@ describe("t3_worktree_handoff", () => {
       expect(result.baseRef).toBe("dev");
       expect(result.startedFromOrigin).toBe(false);
       expect(result.worktreePath).toBe("/worktrees/project/feature/handoff");
-      expect(result.setupScript).toMatchObject({ status: "started", scriptName: "Setup" });
+      expect(result.setupScript).toMatchObject({
+        status: "started",
+        scriptName: "Setup",
+      });
 
       expect(harness.fetchRemote).not.toHaveBeenCalled();
       expect(harness.createWorktree).toHaveBeenCalledWith({

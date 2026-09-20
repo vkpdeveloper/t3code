@@ -94,6 +94,8 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   const questionCount = props.pendingUserInput.questions.length;
   // Message responses start a new run and remain available after the provider exits.
   const canRespond = props.pendingUserInput.responseCapability !== "not_resumable";
+  const isResponding = props.respondingUserInputId === props.pendingUserInput.requestId;
+  const responseDisabled = !canRespond || isResponding;
 
   const cardCoverage = props.cardCoverage;
   const barHeightRef = useRef(0);
@@ -285,7 +287,9 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   return (
                     <Pressable
                       key={optionValue}
-                      disabled={!canRespond}
+                      accessibilityRole={question.multiSelect ? "checkbox" : "radio"}
+                      accessibilityState={{ checked: selected, disabled: responseDisabled }}
+                      disabled={responseDisabled}
                       className={cn(
                         "min-h-12 w-full rounded-2xl border px-3.5 py-3",
                         selected ? "border-primary bg-primary/10" : "border-border bg-input",
@@ -322,7 +326,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   requestId={props.pendingUserInput.requestId}
                   question={question}
                   questions={props.pendingUserInput.questions}
-                  disabled={!canRespond}
+                  disabled={responseDisabled}
                   value={draft?.customAnswer ?? ""}
                   onChangeText={(value) =>
                     props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
@@ -338,18 +342,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         label="Submit answers"
         size="large"
         tone={props.answers ? "primary" : "secondary"}
-        disabled={
-          !canRespond ||
-          props.answers === null ||
-          props.respondingUserInputId === props.pendingUserInput.requestId
-        }
+        disabled={responseDisabled || props.answers === null}
         onPress={() => void props.onSubmit()}
       />
       {props.pendingUserInput.dismissible ? (
         <Pressable
           accessibilityRole="button"
           className="items-center justify-center rounded-2xl px-4 py-2.5 active:opacity-70"
-          disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
+          disabled={isResponding}
           onPress={() => void props.onDismiss()}
         >
           <Text className="font-t3-bold text-sm text-foreground-muted">

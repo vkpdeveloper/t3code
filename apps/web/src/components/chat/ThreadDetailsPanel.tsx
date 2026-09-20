@@ -5,7 +5,6 @@ import type {
   ResolvedKeybindingsConfig,
   ThreadId,
 } from "@t3tools/contracts";
-import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { AlertTriangleIcon, XIcon } from "lucide-react";
 
 import type { DraftId } from "../../composerDraftStore";
@@ -22,6 +21,8 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { cn } from "../../lib/utils";
 import { OpenInPicker } from "./OpenInPicker";
+import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
 interface VersionMismatchIssue {
@@ -31,10 +32,10 @@ interface VersionMismatchIssue {
 }
 
 export interface ThreadDetailsPanelProps {
+  forceNewWorktree?: boolean;
   mode: "inline" | "popover";
   onClose?: () => void;
   environmentId: EnvironmentId;
-  environmentConnection: EnvironmentConnectionPresentation | null;
   threadId: ThreadId;
   draftId?: DraftId;
   activeProjectName: string | undefined;
@@ -47,6 +48,8 @@ export interface ThreadDetailsPanelProps {
   isGitRepo: boolean;
   envLocked: boolean;
   availableEnvironments: readonly EnvironmentOption[];
+  autoEnvironmentLabel?: string | undefined;
+  onAutoEnvironment?: (() => void) | undefined;
   onEnvironmentChange: (environmentId: EnvironmentId) => void;
   onEnvModeChange: (mode: EnvMode) => void;
   effectiveEnvModeOverride?: EnvMode;
@@ -57,8 +60,6 @@ export interface ThreadDetailsPanelProps {
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest: () => void;
   onOpenChanges?: () => void;
-  onReconnectEnvironment: () => void;
-  onOpenConnectionSettings: () => void;
   versionMismatch: VersionMismatchIssue | null;
   onDismissVersionMismatch: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
@@ -75,13 +76,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.environmentId,
     props.activeProjectScripts ? props.gitCwd : null,
   );
-  const connectionIssue =
-    props.environmentConnection !== null &&
-    props.environmentConnection.phase !== "connected" &&
-    props.environmentConnection.phase !== "available";
-  const isReconnecting =
-    props.environmentConnection?.phase === "connecting" ||
-    props.environmentConnection?.phase === "reconnecting";
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -100,6 +94,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       ? { onActiveThreadBranchOverrideChange: props.onActiveThreadBranchOverrideChange }
       : {}),
     envLocked: props.envLocked,
+    forceNewWorktree: props.forceNewWorktree ?? false,
     onComposerFocusRequest: props.onComposerFocusRequest,
     ...(props.onCheckoutPullRequestRequest
       ? { onCheckoutPullRequestRequest: props.onCheckoutPullRequestRequest }
@@ -125,45 +120,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       data-thread-details-card
     >
       <ScrollArea scrollFade className="min-h-0">
-        <section aria-labelledby="thread-details-workspace-heading">
-          <div className="flex min-h-10 items-center justify-between gap-3 px-3.5 pb-1 pt-3">
-            <h3
-              id="thread-details-workspace-heading"
-              className="text-[11px] font-medium text-muted-foreground"
-            >
-              Workspace
-            </h3>
-          </div>
-
-          {connectionIssue ? (
-            <div className="mx-3 mb-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
-              <div className="flex gap-2">
-                <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium">Environment unavailable</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    {props.environmentConnection?.error ??
-                      "Reconnect this environment before sending messages or running actions."}
-                  </p>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    <Button
-                      size="xs"
-                      disabled={isReconnecting}
-                      onClick={props.onReconnectEnvironment}
-                    >
-                      {isReconnecting ? "Reconnecting..." : "Reconnect"}
-                    </Button>
-                    <Button size="xs" variant="ghost" onClick={props.onOpenConnectionSettings}>
-                      Connections
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
+        <ThreadDetailsSection
+          headingId="thread-details-workspace-heading"
+          title="Workspace"
+          separated={false}
+        >
           {props.versionMismatch ? (
-            <div className="mx-3 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
+            <div className="mx-1 mb-2 flex gap-2 rounded-xl border border-warning/30 bg-warning/6 p-3">
               <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium">Client and server versions differ</p>
@@ -183,10 +146,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
             </div>
           ) : null}
 
-          <div className="flex flex-col px-2 pb-2.5">
+          <div className="flex flex-col">
             {props.availableEnvironments.length > 1 ? (
               <BranchToolbarEnvironmentSelector
                 displayMode="panel"
+                autoEnvironmentLabel={props.autoEnvironmentLabel}
+                onAutoEnvironment={props.onAutoEnvironment}
                 envLocked={props.envLocked}
                 environmentId={props.environmentId}
                 availableEnvironments={props.availableEnvironments}
@@ -220,22 +185,14 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
               />
             ) : null}
           </div>
-        </section>
+        </ThreadDetailsSection>
 
         {props.gitCwd ? (
-          <section
-            aria-labelledby="thread-details-version-control-heading"
-            className="border-t border-border/65"
+          <ThreadDetailsSection
+            headingId="thread-details-version-control-heading"
+            title="Version Control"
           >
-            <div className="px-3.5 pb-1 pt-3">
-              <h3
-                id="thread-details-version-control-heading"
-                className="text-[11px] font-medium text-muted-foreground"
-              >
-                Version Control
-              </h3>
-            </div>
-            <div className="flex flex-col px-2 pb-2.5">
+            <div className="flex flex-col">
               {props.isGitRepo ? (
                 <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
               ) : null}
@@ -249,7 +206,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 />
               ) : null}
             </div>
-          </section>
+          </ThreadDetailsSection>
+        ) : null}
+
+        {!props.draftId ? (
+          <ThreadAutomationsPanel environmentId={props.environmentId} threadId={props.threadId} />
         ) : null}
 
         {!props.draftId ? (

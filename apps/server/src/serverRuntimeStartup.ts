@@ -1,6 +1,5 @@
 import {
   CommandId,
-  EventId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_SERVER_SETTINGS,
@@ -18,7 +17,6 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -47,7 +45,6 @@ import { forkParked, forkParkedFiber } from "./serverActivation.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as WorktreeCleanup from "./worktreeCleanup.ts";
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -256,7 +253,7 @@ export const resolveWelcomeBase = Effect.gen(function* () {
   } as const;
 });
 
-export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
+const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -419,7 +416,6 @@ const make = (options?: StartupOptions) =>
     const providerRuntimeRecovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
-    const worktreeCleanup = yield* Effect.serviceOption(WorktreeCleanup.WorktreeCleanup);
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -538,9 +534,6 @@ const make = (options?: StartupOptions) =>
           const projects = yield* snapshots.getProjectShellsWithoutEnrichment();
           const settings = yield* serverSettings.getSettings;
           yield* autoPullProjects(projects, settings);
-          if (Option.isSome(worktreeCleanup)) {
-            yield* worktreeCleanup.value.start();
-          }
         }),
       );
 
