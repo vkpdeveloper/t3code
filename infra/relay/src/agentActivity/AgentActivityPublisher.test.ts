@@ -190,10 +190,7 @@ describe("AgentActivityPublisher", () => {
                     }),
                 }),
               ),
-              Layer.succeed(
-                WebPushDeliveries.WebPushDeliveries,
-                makeWebPushDeliveries(),
-              ),
+              Layer.succeed(WebPushDeliveries.WebPushDeliveries, makeWebPushDeliveries()),
               Layer.succeed(FcmDeliveries, {
                 enqueue: (input) =>
                   Effect.sync(() => {
