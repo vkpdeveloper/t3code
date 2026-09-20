@@ -18,12 +18,13 @@ import {
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
+  type ThreadContextRecord,
   type ThreadId,
   type ThreadLinkedPullRequest,
   type RunId,
-  WorktreeSetupSnapshot,
-  WORKTREE_SETUP_ACTIVITY_KIND,
+  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
+import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
@@ -279,6 +280,26 @@ export {
   resolveVisibleWorktreeSetup,
 } from "@t3tools/client-runtime/worktree-setup";
 
+/** Keep setup visible across local dispatch, durable preparation, and the live stream. */
+export function resolveWorktreeSetupProgress(input: {
+  threadId: ThreadId;
+  localPreparing: boolean;
+  runStatus: NonNullable<Thread["latestRun"]>["status"] | undefined;
+  latest: WorktreeSetupSnapshot | null | undefined;
+  held: WorktreeSetupSnapshot | null;
+}) {
+  const latest = input.latest?.threadId === input.threadId ? input.latest : null;
+  const held = input.held?.threadId === input.threadId ? input.held : null;
+  const snapshot = latest && (!held || latest.sequence >= held.sequence) ? latest : held;
+  return {
+    snapshot,
+    isPreparingWorktree:
+      input.localPreparing ||
+      input.runStatus === "preparing" ||
+      (snapshot?.phase === "running" && !worktreeSetupAgentStarted(snapshot)),
+  };
+}
+
 export function resolveDraftHeroState(input: {
   isLocalDraftThread: boolean;
   hasTimelineEntries: boolean;
@@ -433,7 +454,7 @@ export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input:
 
 export function resolveDraftPromotionNavigationTarget(input: {
   serverThreadRef: ScopedThreadRef | null;
-  serverThread: Pick<Thread, "latestRun"> | null | undefined;
+  serverThread: Pick<Thread, "latestRun" | "latestUserMessageAt"> | null | undefined;
   backgroundSubmissionPending: boolean;
 }): ScopedThreadRef | null {
   if (input.backgroundSubmissionPending) {
@@ -445,9 +466,10 @@ export function resolveDraftPromotionNavigationTarget(input: {
     latestRun?.status === "failed" ||
     latestRun?.status === "interrupted" ||
     latestRun?.status === "cancelled";
-  // Keep local preparation feedback mounted until the server can render the
-  // running turn or its startup error on the canonical thread route.
-  return runStarted || startupStopped ? input.serverThreadRef : null;
+  // Like main, promote once the server owns the send. The shared chat view
+  // keeps the optimistic message and setup progress mounted through the route swap.
+  const messagePersisted = input.serverThread?.latestUserMessageAt != null;
+  return runStarted || startupStopped || messagePersisted ? input.serverThreadRef : null;
 }
 
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {
@@ -1333,6 +1355,7 @@ export interface PlanFollowUpComposerSnapshot {
   readonly terminalContexts: ReadonlyArray<TerminalContextDraft>;
   readonly reviewComments: ReadonlyArray<ReviewCommentContext>;
   readonly previewAnnotations: ReadonlyArray<PreviewAnnotationPayload>;
+  readonly threadContexts: ReadonlyArray<ThreadContextRecord>;
 }
 
 /**
@@ -1346,6 +1369,7 @@ export function restorePlanFollowUpComposer(input: {
   readonly writeTerminalContexts: (contexts: ReadonlyArray<TerminalContextDraft>) => void;
   readonly writeReviewComments: (comments: ReadonlyArray<ReviewCommentContext>) => void;
   readonly writePreviewAnnotations: (annotations: ReadonlyArray<PreviewAnnotationPayload>) => void;
+  readonly writeThreadContexts: (records: ReadonlyArray<ThreadContextRecord>) => void;
   readonly resetCursor: (options: {
     cursor: number;
     prompt: string;
@@ -1356,6 +1380,7 @@ export function restorePlanFollowUpComposer(input: {
   input.writeTerminalContexts(input.snapshot.terminalContexts);
   input.writeReviewComments(input.snapshot.reviewComments);
   input.writePreviewAnnotations(input.snapshot.previewAnnotations);
+  input.writeThreadContexts(input.snapshot.threadContexts);
   input.resetCursor({
     cursor: collapseExpandedComposerCursor(input.snapshot.prompt, input.snapshot.prompt.length),
     prompt: input.snapshot.prompt,

@@ -4,7 +4,6 @@ import {
   type OrchestrationV2ShellSnapshot,
   ORCHESTRATION_PROTOCOL_VERSION,
   type ExecutionEnvironmentDescriptor,
-  type OrchestrationShellSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";

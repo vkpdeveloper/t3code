@@ -36,6 +36,7 @@ import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { EnvironmentCacheStore } from "../platform/persistence.ts";
+import { runCachePersistence } from "./cachePersistence.ts";
 import {
   isRpcClientError,
   request,
@@ -426,11 +427,18 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       );
     });
 
-    yield* Stream.fromQueue(persistence).pipe(
-      Stream.debounce("500 millis"),
-      Stream.runForEach(persistPending),
-      Effect.forkScoped,
+    yield* Effect.addFinalizer(() =>
+      Ref.get(pendingPersistence).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (config) => persist(config).pipe(Effect.asVoid),
+          }),
+        ),
+      ),
     );
+
+    yield* runCachePersistence(persistence, persistPending).pipe(Effect.forkScoped);
 
     yield* subscribe(WS_METHODS.subscribeServerConfig, {
       ...(subscription.environmentThemes === true ? { environmentThemes: true } : {}),
@@ -449,17 +457,6 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
         }),
       ),
       Effect.forkScoped,
-    );
-
-    yield* Effect.addFinalizer(() =>
-      Ref.get(pendingPersistence).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.void,
-            onSome: (config) => persist(config).pipe(Effect.asVoid),
-          }),
-        ),
-      ),
     );
 
     return state;
@@ -1044,6 +1041,11 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:process-resource-history",
       tag: WS_METHODS.serverGetProcessResourceHistory,
     }),
+    /** Live scheduled-task list: snapshot on subscribe, fresh list after every server-side change. */
+    scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:scheduled-tasks:live",
+      tag: WS_METHODS.scheduledTasksSubscribe,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan.
     usageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
@@ -1242,6 +1244,31 @@ export function createServerEnvironmentAtoms<R, E>(
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,
+    }),
+    upsertScheduledTask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:scheduled-task:upsert",
+      tag: WS_METHODS.scheduledTasksUpsert,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    setScheduledTaskEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:scheduled-task:set-enabled",
+      tag: WS_METHODS.scheduledTasksSetEnabled,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    deleteScheduledTask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:scheduled-task:delete",
+      tag: WS_METHODS.scheduledTasksDelete,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    // Deliberately not on the config lane: run-now blocks until the run is
+    // dispatched, and a slow run must not stall settings/keybinding/provider
+    // mutations (or other scheduled-task edits) queued behind it.
+    runScheduledTaskNow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:scheduled-task:run-now",
+      tag: WS_METHODS.scheduledTasksRunNow,
     }),
     refreshUsageRates: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-usage-rates",

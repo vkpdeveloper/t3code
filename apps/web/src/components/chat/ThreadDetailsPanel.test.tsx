@@ -20,6 +20,9 @@ vi.mock("../ProjectScriptsControl", () => ({
     return null;
   },
 }));
+vi.mock("./ThreadAutomationsPanel", () => ({
+  ThreadAutomationsPanel: () => null,
+}));
 vi.mock("./ThreadRelationshipsControl", () => ({
   ThreadRelationshipsPanel: () => null,
 }));
@@ -47,7 +50,6 @@ describe("ThreadDetailsPanel", () => {
     const props: ThreadDetailsPanelProps = {
       mode: "popover",
       environmentId,
-      environmentConnection: null,
       threadId: "thread:thread-details" as ThreadId,
       activeProjectName: undefined,
       activeProjectScripts: [],
@@ -64,8 +66,6 @@ describe("ThreadDetailsPanel", () => {
       startFromOrigin: false,
       onStartFromOriginChange: vi.fn(),
       onComposerFocusRequest: vi.fn(),
-      onReconnectEnvironment: vi.fn(),
-      onOpenConnectionSettings: vi.fn(),
       versionMismatch: null,
       onDismissVersionMismatch: vi.fn(),
       onRunProjectScript: vi.fn(),

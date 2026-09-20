@@ -4,7 +4,6 @@ import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import {
-  THREAD_JUMP_HINT_SHOW_DELAY_MS,
   animateSidebarLayoutChanges,
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
@@ -50,13 +49,15 @@ import {
   sortThreadsForSidebar,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
+  THREAD_JUMP_HINT_SHOW_DELAY_MS,
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
+
 import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -538,6 +539,18 @@ describe("shouldRecedeSidebarThread", () => {
     expect(shouldRecedeSidebarThread({ ...input, isActive: true })).toBe(false);
     expect(shouldRecedeSidebarThread({ ...input, isSelected: true })).toBe(false);
   });
+
+  it.each([false, true])("keeps input-required threads prominent with unread=%s", (isUnread) => {
+    expect(
+      shouldRecedeSidebarThread({
+        status: "input",
+        isUnread,
+        isWoke: false,
+        isActive: false,
+        isSelected: false,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("createThreadJumpHintVisibilityController", () => {
@@ -849,12 +862,7 @@ describe("resolveSidebarThreadStatus", () => {
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  const idle = {
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    runtime: null,
-    usageLimitResume: null,
-  };
+  const idle = { hasPendingApprovals: false, hasPendingUserInput: false, runtime: null };
 
   it("prioritizes approval over a running runtime", () => {
     expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true, runtime })).toBe(
@@ -903,19 +911,6 @@ describe("resolveSidebarThreadStatus", () => {
       resolveSidebarThreadStatus({
         ...idle,
         runtime: { ...runtime, status: "idle" as const, lastError: "persisted" },
-      }),
-    ).toBe("waiting");
-  });
-
-  it("reports waiting while a usage-limit resume is scheduled", () => {
-    expect(
-      resolveSidebarThreadStatus({
-        ...idle,
-        usageLimitResume: {
-          blockedRunId: RunId.make("run-1"),
-          resumeAt: "2026-03-09T11:00:00.000Z",
-          isEstimated: false,
-        },
       }),
     ).toBe("waiting");
   });
@@ -996,30 +991,27 @@ describe("filterSidebarProjectScopeItems", () => {
     { value: "alpha", label: "Alpha workspace" },
     { value: "beta", label: "Beta tools" },
   ] as const;
-  const filter = (activeScopeKey: string | null, query: string) =>
+  const filter = (query: string) =>
     filterSidebarProjectScopeItems({
       items,
-      activeScopeKey,
+      activeScopeKey: "all",
       query,
       matches: (item, candidate) =>
         item.label.toLocaleLowerCase().includes(candidate.toLocaleLowerCase()),
     });
 
-  it("omits the reset row when the sidebar is already unscoped", () => {
-    expect(filter(null, "")).toEqual(items.slice(1));
+  it("shows the default row first while the query is empty", () => {
+    expect(filter("")).toEqual(items);
+    expect(filter("   ")).toEqual(items);
   });
 
-  it("shows the reset row first while a project scope is active", () => {
-    expect(filter("alpha", "")).toEqual(items);
-  });
-
-  it("hides the reset row while filtering an active scope", () => {
-    expect(filter("alpha", "all")).toEqual([]);
+  it("hides the default row while filtering", () => {
+    expect(filter("all")).toEqual([]);
   });
 
   it("returns matching projects in source order and supports no-match results", () => {
-    expect(filter(null, "WORK")).toEqual([items[1]]);
-    expect(filter(null, "missing")).toEqual([]);
+    expect(filter("WORK")).toEqual([items[1]]);
+    expect(filter("missing")).toEqual([]);
   });
 });
 

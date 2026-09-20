@@ -38,7 +38,6 @@ import type { AnyProviderDriver } from "./ProviderDriver.ts";
  * layer must provide every service in this union.
  */
 export type BuiltInDriversEnv =
-  | AmpDriverEnv
   | AcpRegistryDriverEnv
   | AntigravityDriverEnv
   | ClaudeDriverEnv
@@ -62,7 +61,6 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   DevinDriver,
   OpenCodeDriver,
   AntigravityDriver,
-  AmpDriver,
   PiDriver,
   AcpRegistryDriver,
 ];

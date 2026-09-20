@@ -14,12 +14,7 @@ import {
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
-import {
-  useEnvironmentThreadRefs,
-  useThreadRefs,
-  useThreadShell,
-  useThreadStatus,
-} from "../state/entities";
+import { useEnvironmentThreadRefs, useThreadRefs, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 import {
@@ -76,8 +71,6 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
     serverThreadRef === null ? null : environmentShell.stateAtom(serverThreadRef.environmentId),
   );
   const serverThreadShell = serverThread;
-  const serverThreadDetail = useThreadShell(serverThreadRef);
-  const serverThreadStatus = useThreadStatus(serverThreadRef);
   const environmentThreadRefs = useEnvironmentThreadRefs(serverThreadRef?.environmentId ?? null);
   const bootstrapComplete = shell.data?.snapshot._tag === "Some";
   const draftThread = useComposerDraftStore((store) =>
@@ -108,10 +101,10 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadExists: serverThreadShell !== null,
-    serverThreadDeleted: serverThreadStatus === "deleted",
+    serverThreadDeleted: serverThreadShell?.deletedAt != null,
     draftThreadExists: draftThread !== null,
   });
-  const serverThreadStarted = threadHasStarted(serverThreadDetail);
+  const serverThreadStarted = threadHasStarted(serverThreadShell);
   const environmentHasAnyThreads = environmentThreadRefs.length > 0 || environmentHasDraftThreads;
 
   useEffect(() => {

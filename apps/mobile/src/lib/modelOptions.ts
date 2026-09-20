@@ -54,6 +54,9 @@ function normalizeSelectionOptions(
   if (!capabilities) {
     return selection;
   }
+  if (!selection.options?.length) {
+    return { instanceId: selection.instanceId, model: selection.model };
+  }
   const options = buildExplicitProviderOptionSelectionsFromDescriptors(
     getProviderOptionDescriptors({
       caps: capabilities,
@@ -190,11 +193,13 @@ export function resolveNewTaskModelSelection(input: {
 export function buildModelOptions(
   config: T3ServerConfig | null | undefined,
   fallbackModelSelection: ModelSelection | null,
+  providerInstanceId?: ModelSelection["instanceId"],
 ): ReadonlyArray<ModelOption> {
   const options = new Map<string, ModelOption>();
 
   for (const provider of config?.providers ?? []) {
     if (
+      (providerInstanceId !== undefined && provider.instanceId !== providerInstanceId) ||
       !provider.enabled ||
       !provider.installed ||
       provider.auth.status === "unauthenticated" ||
@@ -231,7 +236,10 @@ export function buildModelOptions(
     }
   }
 
-  if (fallbackModelSelection) {
+  if (
+    fallbackModelSelection &&
+    (providerInstanceId === undefined || fallbackModelSelection.instanceId === providerInstanceId)
+  ) {
     const key = `${fallbackModelSelection.instanceId}:${fallbackModelSelection.model}`;
     const existing = options.get(key);
     if (existing) {

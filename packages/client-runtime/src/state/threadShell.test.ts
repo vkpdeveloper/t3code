@@ -9,7 +9,6 @@ import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
-import type { EnvironmentCatalogState } from "./connections.ts";
 import { v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { applyShellStreamEvent } from "./shellReducer.ts";
 import { createEnvironmentThreadShellAtoms } from "./threadShell.ts";
@@ -22,7 +21,7 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
   const snapshotAtom = Atom.family((_environmentId: EnvironmentId) =>
     Atom.make<OrchestrationV2ShellSnapshot | null>(v2ShellSnapshot),
   );
-  const catalogValueAtom = Atom.make<EnvironmentCatalogState>({
+  const catalogValueAtom = Atom.make({
     isReady: true,
     entries: new Map(
       environmentIds.map((id) => [

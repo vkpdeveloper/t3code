@@ -100,9 +100,9 @@ export const OrchestrationProject = Schema.Struct({
 });
 export type OrchestrationProject = typeof OrchestrationProject.Type;
 
-/** `reasoning` carries a provider's thinking trace: a reasoning summary, or
- *  the raw chain of thought when the model exposes one. It is a sibling of the
- *  assistant text it precedes, not a replacement for it. */
+/** `reasoning` stays in the union so persisted v1 events written by builds that
+ *  emit thinking traces still decode. V2 carries reasoning as turn items and
+ *  never produces new reasoning messages here. */
 export const OrchestrationMessageRole = Schema.Literals([
   "user",
   "assistant",
@@ -537,29 +537,6 @@ export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.T
 
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
-  /** Opt in to reasoning roles; older clients receive system messages instead. */
-  reasoningMessages: Schema.optionalKey(Schema.Boolean),
-  /**
-   * When provided, the server skips the initial snapshot frame and instead
-   * replays events after this sequence before streaming live events. Clients
-   * that load the snapshot over HTTP pass the snapshot's sequence here so the
-   * live subscription resumes without a gap (overlapping events are deduped by
-   * sequence on the client).
-   */
-  afterSequence: Schema.optionalKey(NonNegativeInt),
-  /**
-   * Requests an explicit marker after the subscription has emitted its initial
-   * snapshot or catch-up replay and before it begins emitting live events.
-   */
-  requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
-  /**
-   * When provided, the fallback snapshot frame (sent when `afterSequence` is
-   * missing or the catch-up gap is too large) is windowed to the last
-   * `turnLimit` user-anchored turns and carries `page` metadata. Absent means
-   * the fallback snapshot is the full thread, preserving pre-pagination client
-   * behavior. Live events are unaffected either way.
-   */
-  turnLimit: Schema.optionalKey(PositiveInt),
 });
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type;
 
@@ -1244,8 +1221,6 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTitleRefineCommand,
   ThreadUsageLimitWaitScheduleCommand,
   ThreadUsageLimitWaitResumeCommand,
-  ThreadPullRequestSyncCommand,
-  ThreadPullRequestLinkSyncCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 

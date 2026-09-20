@@ -1,3 +1,4 @@
+import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
@@ -66,9 +67,9 @@ export interface BranchToolbarHandle {
 }
 
 interface BranchToolbarProps {
-  forceNewWorktree?: boolean;
   layout?: "composer" | "panel";
   panelSection?: "all" | "workspace" | "branch";
+  forceNewWorktree?: boolean;
   ref?: Ref<BranchToolbarHandle>;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -178,18 +179,10 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const triggerContent = (
     <>
       {icon}
-      <span
-        data-composer-label
-        className="min-w-0 max-w-[240px] group-data-[compact]/composer-context:max-w-0"
-      >
-        <span
-          data-composer-label-motion
-          className="block w-full min-w-0 max-w-[240px] truncate transition-opacity duration-180 ease-[cubic-bezier(0.32,0.72,0,1)] group-data-[compact]/composer-context:opacity-0 motion-reduce:transition-none"
-        >
-          {autoEnvironmentLabel ??
-            (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
-        </span>
-      </span>
+      <ComposerContextLabel>
+        {autoEnvironmentLabel ??
+          (showEnvironmentIndicator ? (activeEnvironment?.label ?? "Run on") : workspaceLabel)}
+      </ComposerContextLabel>
     </>
   );
 
@@ -483,9 +476,9 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 }
 
 export const BranchToolbar = memo(function BranchToolbar({
-  forceNewWorktree = false,
   layout = "composer",
   panelSection = "all",
+  forceNewWorktree = false,
   ref,
   environmentId,
   threadId,

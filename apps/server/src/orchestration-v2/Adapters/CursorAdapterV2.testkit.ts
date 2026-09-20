@@ -1,4 +1,5 @@
-import { Agent, type InteractionUpdate, type RunResult } from "@cursor/sdk";
+import type { InteractionUpdate, RunResult } from "@cursor/sdk";
+import { Agent } from "../../provider/cursorSdk.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProviderReplayEntry,
@@ -231,6 +232,7 @@ export function makeCursorAgentSdkReplayRunner(
 
   const recordFailure = <Error extends CursorAgentSdkReplayError>(error: Error): Error => {
     failure = error;
+    cursorAdvanced.resolve();
     return error;
   };
 
@@ -537,6 +539,7 @@ function makeReplayServerConfig(
     const providerLogsDir = path.join(logsDir, "provider");
     const terminalLogsDir = path.join(logsDir, "terminals");
     const attachmentsDir = path.join(stateDir, "attachments");
+    const imagesDir = path.join(stateDir, "images");
     const environmentThemesDir = path.join(stateDir, "themes");
     const worktreesDir = path.join(baseDir, "worktrees");
     const providerStatusCacheDir = path.join(baseDir, "caches");
@@ -546,6 +549,7 @@ function makeReplayServerConfig(
       providerLogsDir,
       terminalLogsDir,
       attachmentsDir,
+      imagesDir,
       environmentThemesDir,
       worktreesDir,
       providerStatusCacheDir,
@@ -560,12 +564,12 @@ function makeReplayServerConfig(
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
+      otlpProtocol: "http/json",
+      otlpHeaders: undefined,
       otlpMetricsUrl: undefined,
       otlpLogsUrl: undefined,
       otlpExportIntervalMs: 10_000,
       otlpServiceName: "t3-server",
-      otlpHeaders: undefined,
-      otlpProtocol: "http/protobuf",
       mode: "web",
       port: 0,
       host: undefined,
@@ -588,7 +592,7 @@ function makeReplayServerConfig(
       providerStatusCacheDir,
       worktreesDir,
       attachmentsDir,
-      imagesDir: path.join(stateDir, "images"),
+      imagesDir,
       browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
       environmentThemesDir,
       logsDir,

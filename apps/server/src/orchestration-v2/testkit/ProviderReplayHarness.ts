@@ -83,6 +83,7 @@ export function makeReplayServerConfig(
     const providerLogsDir = path.join(logsDir, "provider");
     const terminalLogsDir = path.join(logsDir, "terminals");
     const attachmentsDir = path.join(stateDir, "attachments");
+    const imagesDir = path.join(stateDir, "images");
     const environmentThemesDir = path.join(stateDir, "themes");
     const worktreesDir = path.join(baseDir, "worktrees");
     const providerStatusCacheDir = path.join(baseDir, "caches");
@@ -93,6 +94,7 @@ export function makeReplayServerConfig(
       providerLogsDir,
       terminalLogsDir,
       attachmentsDir,
+      imagesDir,
       environmentThemesDir,
       worktreesDir,
       providerStatusCacheDir,
@@ -108,12 +110,12 @@ export function makeReplayServerConfig(
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
       otlpTracesUrl: undefined,
+      otlpProtocol: "http/json",
+      otlpHeaders: undefined,
       otlpMetricsUrl: undefined,
       otlpLogsUrl: undefined,
       otlpExportIntervalMs: 10_000,
       otlpServiceName: "t3-server",
-      otlpHeaders: undefined,
-      otlpProtocol: "http/protobuf",
       mode: "web",
       port: 0,
       host: undefined,
@@ -136,7 +138,7 @@ export function makeReplayServerConfig(
       providerStatusCacheDir,
       worktreesDir,
       attachmentsDir,
-      imagesDir: path.join(stateDir, "images"),
+      imagesDir,
       browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
       environmentThemesDir,
       logsDir,
@@ -185,7 +187,6 @@ export function runOrchestratorV2ProviderReplayScenario<
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
   } = {},
 ): Effect.Effect<
@@ -224,7 +225,6 @@ export function makeOrchestratorV2ProviderReplayLayer<
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
     readonly replayGate?: ProviderReplayGate;
   } = {},
@@ -247,7 +247,6 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       SqlClient.SqlClient,
       MigrationError | PlatformError.PlatformError | SqlError
     >;
-    readonly enableLegacyTokenStreaming?: boolean;
     readonly runEffectWorker?: boolean;
   } = {},
 ): Layer.Layer<
@@ -266,7 +265,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         );
   const databaseLayer = options.databaseLayer ?? SqlitePersistenceMemory;
   const serverSettingsLayer = ServerSettingsService.layerTest({
-    responseStreamingMode: options.enableLegacyTokenStreaming ? "token" : "turn",
+    responseStreamingMode: "turn",
   }).pipe(Layer.orDie);
   const storesLayer = Layer.mergeAll(
     eventStoreLayer,

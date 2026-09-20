@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { CommandId, ProjectId, ThreadId } from "./baseSchemas.ts";
 
 import {
+  ProjectIconOverride,
   ClientOrchestrationCommand,
   OrchestrationCommand,
   OrchestrationDispatchCommandError,
@@ -36,7 +37,6 @@ import {
   SnapShotAccessibility,
 } from "./chatAttachment.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { ProjectIconOverride } from "./project.ts";
 import { DEFAULT_PROVIDER_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "./providerPolicy.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -591,6 +591,24 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+  }),
+);
+
+// Builds that emit thinking traces persist reasoning as message events; the
+// union must keep decoding them.
+it.effect("decodes message events with a reasoning role", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadMessageSentPayload({
+      threadId: "thread-1",
+      messageId: "reasoning:summary:1",
+      role: "reasoning",
+      text: "thinking",
+      turnId: null,
+      streaming: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.role, "reasoning");
   }),
 );
 

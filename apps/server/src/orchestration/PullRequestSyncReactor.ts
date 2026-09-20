@@ -24,6 +24,7 @@ import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -149,9 +150,7 @@ export const make = Effect.gen(function* () {
     <E>(cause: Cause.Cause<E>): Effect.Effect<void, E> =>
       Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.logWarning(message, fields);
 
-  const sweep = Effect.fn("PullRequestSyncReactor.sweep")(function* (
-    requestedKey: string | undefined,
-  ) {
+  const sweep = Effect.fn("PullRequestSyncReactor.sweep")(function* (requestedKey?: string) {
     const snapshot = yield* engine.getShellSnapshot();
     const now = yield* DateTime.now;
     const nowMs = DateTime.toEpochMillis(now);
@@ -315,6 +314,20 @@ export const make = Effect.gen(function* () {
   const start: PullRequestSyncReactor["Service"]["start"] = Effect.fn(
     "PullRequestSyncReactor.start",
   )(function* () {
+    const events = engine.streamDomainEvents;
+    yield* forkParked(
+      Stream.runForEach(events, (event) =>
+        event.type === "thread.pull-request-synced"
+          ? Effect.forEach(
+              visibleThreadPullRequests(event.payload.pullRequests ?? []).filter(
+                (link) => link.snapshot === null,
+              ),
+              requestSync,
+              { discard: true },
+            )
+          : Effect.void,
+      ).pipe(Effect.catchCause(logSkipped("pull request sync event stream failed", {}))),
+    );
     yield* forkParked(
       Effect.gen(function* () {
         yield* worker.enqueue(undefined);

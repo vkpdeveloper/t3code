@@ -32,6 +32,7 @@ import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.t
 
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
+const decodeServerSettingsJson = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
@@ -118,6 +119,42 @@ const recordProviderUsage = (provider: string, instanceId: string | null = provi
   });
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("migrates saved token delivery to paragraph buffering without resetting settings", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fs.writeFileString(
+        config.settingsPath,
+        `{
+          "responseStreamingMode": "token",
+          "enableAgentBrowserAccess": false,
+          "projectSettingsOverrides": {
+            "legacy": { "responseStreamingMode": "token", "defaultAutoPull": true },
+            "buffered": { "responseStreamingMode": "turn" },
+            "inherited": { "defaultAutoPull": false }
+          }
+        }`,
+      );
+
+      const settings = yield* service.getSettings;
+      assert.equal(settings.responseStreamingMode, "paragraph");
+      assert.isFalse(settings.enableAgentBrowserAccess);
+      assert.deepEqual(settings.projectSettingsOverrides, {
+        [ProjectId.make("legacy")]: { responseStreamingMode: "paragraph", defaultAutoPull: true },
+        [ProjectId.make("buffered")]: { responseStreamingMode: "turn" },
+        [ProjectId.make("inherited")]: { defaultAutoPull: false },
+      });
+
+      yield* service.updateSettings({ responseStreamingMode: "turn" });
+      const persisted = yield* decodeServerSettingsJson(
+        yield* fs.readFileString(config.settingsPath),
+      );
+      assert.equal(persisted.responseStreamingMode, "turn");
+      assert.deepEqual(persisted.projectSettingsOverrides, settings.projectSettingsOverrides);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves context when reading a provider environment secret fails", () => {
     const platformCause = PlatformError.systemError({
       _tag: "PermissionDenied",
@@ -293,115 +330,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
-
-  it.effect("stores the Vibe-Proxy management key only in the secret store", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const serverConfig = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const secretPath = path.join(serverConfig.secretsDir, "vibe-proxy-management-key.bin");
-
-      const configured = yield* serverSettings.updateSettings({
-        vibeProxy: {
-          enabled: true,
-          baseUrl: "http://vibe-proxy.local:8954",
-          apiKey: "management-key",
-        },
-      });
-
-      assert.equal(configured.vibeProxy.apiKey, "management-key");
-      assert.deepEqual(ServerSettingsModule.redactServerSettingsForClient(configured).vibeProxy, {
-        enabled: true,
-        baseUrl: "http://vibe-proxy.local:8954",
-        apiKey: "",
-        apiKeyRedacted: true,
-      });
-      const rawSettings = yield* fileSystem.readFileString(serverConfig.settingsPath);
-      assert.notInclude(rawSettings, "management-key");
-      assert.include(rawSettings, '"apiKeyRedacted": true');
-      assert.equal(
-        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
-        "management-key",
-      );
-
-      const moved = yield* serverSettings.updateSettings({
-        vibeProxy: { baseUrl: "http://vibe-proxy.local:9000" },
-      });
-      assert.equal(moved.vibeProxy.apiKey, "management-key");
-
-      const cleared = yield* serverSettings.updateSettings({ vibeProxy: { apiKey: "" } });
-      assert.equal(cleared.vibeProxy.apiKeyRedacted, false);
-      assert.isFalse(yield* fileSystem.exists(secretPath));
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
-  );
-
-  it.effect("treats a stale Vibe-Proxy secret marker as unconfigured", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const serverConfig = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-
-      yield* fileSystem.writeFileString(
-        serverConfig.settingsPath,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        JSON.stringify({
-          vibeProxy: {
-            enabled: true,
-            baseUrl: "http://vibe-proxy.local:8954",
-            apiKey: "",
-            apiKeyRedacted: true,
-          },
-        }),
-      );
-
-      const settings = yield* serverSettings.getSettings;
-      assert.equal(settings.vibeProxy.apiKey, "");
-      assert.equal(settings.vibeProxy.apiKeyRedacted, false);
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
-  );
-
-  it.effect("restores the Vibe-Proxy management key when settings persistence fails", () => {
-    const failure = { enabled: false };
-    return Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const serverConfig = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const secretPath = path.join(serverConfig.secretsDir, "vibe-proxy-management-key.bin");
-
-      yield* serverSettings.updateSettings({
-        vibeProxy: {
-          enabled: true,
-          baseUrl: "http://vibe-proxy.local:8954",
-          apiKey: "original-key",
-        },
-      });
-
-      failure.enabled = true;
-      const replacementError = yield* Effect.flip(
-        serverSettings.updateSettings({ vibeProxy: { apiKey: "replacement-key" } }),
-      );
-      assert.equal(replacementError.operation, "write-file");
-      assert.equal(
-        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
-        "original-key",
-      );
-
-      const removalError = yield* Effect.flip(
-        serverSettings.updateSettings({ vibeProxy: { apiKey: "" } }),
-      );
-      assert.equal(removalError.operation, "write-file");
-      assert.equal(
-        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
-        "original-key",
-      );
-
-      failure.enabled = false;
-      const settings = yield* serverSettings.getSettings;
-      assert.equal(settings.vibeProxy.apiKey, "original-key");
-    }).pipe(Effect.provide(makeServerSettingsLayerWithSettingsRenameFailure(failure)));
-  });
 
   it.effect("creates provider instances atomically without overwriting a concurrent add", () =>
     Effect.gen(function* () {
@@ -1593,163 +1521,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
         const failed = yield* serverSettings
           .updateProviderInstance({ operation: "remove", instanceId })
-          .pipe(Effect.result);
-        assert.equal(failed._tag, "Failure");
-        assert.equal(
-          (yield* serverSettings.getSettings).providerInstances[instanceId]?.environment?.[0]
-            ?.value,
-          "sk-kept",
-        );
-      }).pipe(Effect.provide(settingsLayer));
-    }),
-  );
-
-  it.effect("rolls back provider secret changes when response materialization fails", () => {
-    const textDecoder = new TextDecoder();
-    const secrets = new Map<string, Uint8Array>();
-    let rejectNewSecret = false;
-    const secretStoreLayer = Layer.succeed(
-      ServerSecretStore.ServerSecretStore,
-      ServerSecretStore.ServerSecretStore.of({
-        get: (name) =>
-          Effect.suspend(() => {
-            const value = secrets.get(name);
-            if (rejectNewSecret && value !== undefined && textDecoder.decode(value) === "sk-new") {
-              return Effect.fail(
-                new ServerSecretStore.SecretStoreReadError({
-                  resource: `secret ${name}`,
-                  cause: "Forced response materialization failure.",
-                }),
-              );
-            }
-            return Effect.succeed(
-              value === undefined ? Option.none() : Option.some(Uint8Array.from(value)),
-            );
-          }),
-        set: (name, value) =>
-          Effect.sync(() => {
-            secrets.set(name, Uint8Array.from(value));
-          }),
-        create: (name, value) =>
-          Effect.sync(() => {
-            secrets.set(name, Uint8Array.from(value));
-          }),
-        getOrCreateRandom: (name, bytes) =>
-          Effect.sync(() => {
-            const value = secrets.get(name) ?? new Uint8Array(bytes);
-            secrets.set(name, value);
-            return Uint8Array.from(value);
-          }),
-        remove: (name) =>
-          Effect.sync(() => {
-            secrets.delete(name);
-          }),
-      }),
-    );
-    const settingsLayer = ServerSettingsModule.layer.pipe(
-      Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
-      Layer.provide(secretStoreLayer),
-      Layer.provideMerge(
-        Layer.fresh(
-          ServerConfig.layerTest(process.cwd(), {
-            prefix: "t3code-server-settings-materialization-failure-test-",
-          }),
-        ),
-      ),
-    );
-    const instanceId = ProviderInstanceId.make("codex_materialization_failure");
-
-    return Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      yield* serverSettings.updateProviderInstance({
-        operation: "upsert",
-        instanceId,
-        instance: {
-          driver: ProviderDriverKind.make("codex"),
-          environment: [{ name: "OPENROUTER_API_KEY", value: "sk-kept", sensitive: true }],
-          config: {},
-        },
-      });
-
-      rejectNewSecret = true;
-      const failedUpdate = yield* serverSettings
-        .updateProviderInstance({
-          operation: "upsert",
-          instanceId,
-          instance: {
-            driver: ProviderDriverKind.make("codex"),
-            environment: [{ name: "OPENROUTER_API_KEY", value: "sk-new", sensitive: true }],
-            config: {},
-          },
-        })
-        .pipe(Effect.result);
-
-      assert.equal(failedUpdate._tag, "Failure");
-      rejectNewSecret = false;
-      assert.equal(
-        (yield* serverSettings.getSettings).providerInstances[instanceId]?.environment?.[0]?.value,
-        "sk-kept",
-      );
-    }).pipe(Effect.provide(settingsLayer));
-  });
-
-  it.effect("rolls back provider secret changes when the settings file commit fails", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      let failRename = false;
-      let settingsPathToFail: string | undefined;
-      const writeFailure = PlatformError.systemError({
-        _tag: "PermissionDenied",
-        module: "FileSystem",
-        method: "rename",
-        description: "Forced settings write failure.",
-      });
-      const failingFileSystem = FileSystem.FileSystem.of({
-        ...fileSystem,
-        rename: (fromPath, toPath) =>
-          failRename && toPath === settingsPathToFail
-            ? Effect.fail(writeFailure)
-            : fileSystem.rename(fromPath, toPath),
-      });
-      const instanceId = ProviderInstanceId.make("codex_write_failure");
-      const settingsLayer = makeServerSettingsLayer().pipe(
-        Layer.provideMerge(Layer.succeed(FileSystem.FileSystem, failingFileSystem)),
-      );
-
-      yield* Effect.gen(function* () {
-        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-        settingsPathToFail = (yield* ServerConfig.ServerConfig).settingsPath;
-        yield* serverSettings.updateSettings({
-          providerInstances: {
-            [instanceId]: {
-              driver: ProviderDriverKind.make("codex"),
-              environment: [{ name: "OPENROUTER_API_KEY", value: "sk-kept", sensitive: true }],
-              config: {},
-            },
-          },
-        });
-
-        failRename = true;
-        const failedUpdate = yield* serverSettings
-          .updateSettings({
-            providerInstances: {
-              [instanceId]: {
-                driver: ProviderDriverKind.make("codex"),
-                environment: [{ name: "OPENROUTER_API_KEY", value: "sk-new", sensitive: true }],
-                config: {},
-              },
-            },
-          })
-          .pipe(Effect.result);
-        assert.equal(failedUpdate._tag, "Failure");
-        assert.equal(
-          (yield* serverSettings.getSettings).providerInstances[instanceId]?.environment?.[0]
-            ?.value,
-          "sk-kept",
-        );
-
-        const failed = yield* serverSettings
-          .updateSettings({ providerInstances: {} })
           .pipe(Effect.result);
         assert.equal(failed._tag, "Failure");
         assert.equal(

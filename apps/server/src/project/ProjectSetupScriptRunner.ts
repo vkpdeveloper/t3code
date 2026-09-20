@@ -1,5 +1,5 @@
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ProjectId, type ProjectScript } from "@t3tools/contracts";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
@@ -59,6 +59,11 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectCwd?: string;
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
+  readonly project?: {
+    readonly id: ProjectId;
+    readonly workspaceRoot: string;
+    readonly scripts: ReadonlyArray<ProjectScript>;
+  };
   /**
    * Wrap the command so the shell reports its exit code back through the
    * terminal stream, and forward cleaned output lines while it runs. The
@@ -66,11 +71,6 @@ export interface ProjectSetupScriptRunnerInput {
    */
   readonly observeCompletion?: {
     readonly onOutputLine?: (line: string) => Effect.Effect<void>;
-  };
-  readonly project?: {
-    readonly id: ProjectId;
-    readonly workspaceRoot: string;
-    readonly scripts: ReadonlyArray<ProjectScript>;
   };
 }
 

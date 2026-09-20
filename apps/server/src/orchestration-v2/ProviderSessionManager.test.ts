@@ -1,3 +1,4 @@
+import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -28,7 +29,6 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 import { HttpServer } from "effect/unstable/http";
-import * as NetAddress from "effect/unstable/net/NetAddress";
 
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import { ServerEnvironment } from "../environment/ServerEnvironment.ts";

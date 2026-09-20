@@ -1,6 +1,4 @@
 import * as Layer from "effect/Layer";
-import * as Effect from "effect/Effect";
-import { SourceControlProviderError, type SourceControlProviderKind } from "@t3tools/contracts";
 import {
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationLayerLive,
@@ -8,7 +6,6 @@ import {
 import { ProjectionProjectRepositoryLive } from "../persistence/Layers/ProjectionProjects.ts";
 import { layer as providerSessionRuntimeLayer } from "../persistence/ProviderSessionRuntime.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import { ProviderAuthServiceLive } from "../provider/Layers/ProviderAuthService.ts";
 import { layer as agentSessionImporterLayer } from "../project/AgentSessionImporter.ts";
 import * as AgentSessionScanner from "../project/AgentSessionScanner.ts";
@@ -51,6 +48,7 @@ import { layer as threadLaunchServiceLayer } from "./ThreadLaunchService.ts";
 import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.ts";
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
+import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
 
 const runtimePolicyProvided = runtimePolicyLayerFromProjectRepository.pipe(
   Layer.provide(ProjectionProjectRepositoryLive),
@@ -76,7 +74,7 @@ export const OrchestrationV2EventSinkLayerLive = eventSinkLayer.pipe(Layer.provi
 const eventSinkProvided = OrchestrationV2EventSinkLayerLive;
 const projectionMaintenanceProvided = projectionMaintenanceLayer.pipe(Layer.provide(storesLayer));
 const legacyV1ThreadImporterProvided = legacyV1ThreadImporterLayer.pipe(
-  Layer.provide(Layer.mergeAll(eventSinkProvided, eventStoreProvided, projectionStoreLayer)),
+  Layer.provide(eventSinkProvided),
 );
 
 export const ProjectServiceLayerLive = projectServiceLayer.pipe(
@@ -238,44 +236,17 @@ const threadLaunchProvided = threadLaunchServiceLayer.pipe(
 const threadLifecycleProvided = threadLifecycleServiceLayer.pipe(
   Layer.provide(threadManagementProvided),
 );
+const scheduledTaskProvided = scheduledTaskServiceLayer.pipe(
+  Layer.provide(Layer.mergeAll(threadLaunchProvided, threadManagementProvided)),
+);
 const providerContinuationWorkerProvided = providerContinuationWorkerLive.pipe(
   Layer.provide(
     Layer.mergeAll(providerContinuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
   ),
 );
-// Title-link enrichment resolves through the source-control registry when a
-// full registry is ambient (server.ts wires the real one for ws handlers).
-// The internal TextGeneration instance uses an empty registry so this layer
-// adds no new requirements.
-const sourceControlProviderRegistryStub = Layer.sync(
-  SourceControlProviderRegistry.SourceControlProviderRegistry,
-  () => {
-    const unavailable = (kind: SourceControlProviderKind, operation: string, cwd: string) =>
-      new SourceControlProviderError({
-        provider: kind,
-        operation,
-        cwd,
-        detail: "Source control providers are not wired into this layer.",
-      });
-    return {
-      resolveLink: () => undefined,
-      get: (kind) => unavailable(kind, "get", ""),
-      resolveHandle: (input) => unavailable("unknown", "resolveHandle", input.cwd),
-      resolve: (input) => unavailable("unknown", "resolve", input.cwd),
-      discover: Effect.succeed([]),
-    };
-  },
-);
-const textGenerationProvided = TextGeneration.layer.pipe(
-  Layer.provide(sourceControlProviderRegistryStub),
-);
 const threadTitleRegenerationProvided = threadTitleRegenerationServiceLayer.pipe(
   Layer.provide(
-    Layer.mergeAll(
-      threadManagementProvided,
-      ProjectionProjectRepositoryLive,
-      textGenerationProvided,
-    ),
+    Layer.mergeAll(threadManagementProvided, ProjectionProjectRepositoryLive, TextGeneration.layer),
   ),
 );
 const effectExecutorProvided = effectExecutorLayer.pipe(
@@ -323,6 +294,7 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   ProjectServiceLayerLive,
   threadLaunchProvided,
   threadLifecycleProvided,
+  scheduledTaskProvided,
   providerContinuationWorkerProvided,
   agentSessionImporterProvided,
 ).pipe(Layer.provideMerge(OrchestrationLayerLive));

@@ -123,15 +123,6 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       `,
   });
 
-  const deleteProjectionProjectRow = SqlSchema.void({
-    Request: DeleteProjectionProjectInput,
-    execute: ({ projectId }) =>
-      sql`
-        DELETE FROM projection_projects
-        WHERE project_id = ${projectId}
-      `,
-  });
-
   const upsert: ProjectionProjectRepositoryShape["upsert"] = (row) =>
     upsertProjectionProjectRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.upsert:query")),
@@ -149,16 +140,10 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.listAll:query")),
     );
 
-  const deleteById: ProjectionProjectRepositoryShape["deleteById"] = (input) =>
-    deleteProjectionProjectRow(input).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionProjectRepository.deleteById:query")),
-    );
-
   return {
     upsert,
     getById,
     listAll,
-    deleteById,
   } satisfies ProjectionProjectRepositoryShape;
 });
 

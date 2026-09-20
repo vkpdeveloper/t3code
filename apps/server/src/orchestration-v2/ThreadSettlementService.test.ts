@@ -23,7 +23,6 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { TestClock } from "effect/testing";
 
 import { GitManager, type GitBranchPullRequest } from "../git/GitManager.ts";
@@ -501,6 +500,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
         ),
     }),
     Layer.mock(OrchestratorV2)({
+      streamDomainEvents: Stream.empty,
       dispatch,
     }),
     Layer.mock(GitManager)({
@@ -516,8 +516,6 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     Layer.succeed(ServerSettingsService, serverSettings),
     Layer.succeed(ServerActivation, Deferred.await(activation)),
     Layer.succeed(Crypto.Crypto, testCrypto),
-    Layer.succeed(SqlClient.SqlClient, (() =>
-      Effect.succeed([])) as unknown as SqlClient.SqlClient),
     FileSystem.layerNoop({
       exists: (path) => Effect.succeed(options.existingWorktreePaths?.includes(path) ?? false),
     }),
@@ -556,6 +554,49 @@ const startHarness = Effect.fn("startThreadSettlementHarness")(function* (
 });
 
 describe("ThreadSettlementServiceV2 worker", () => {
+  it.effect("settles a merged pull request stored only in the thread links", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const thread = makeThread("merged-link", {
+          pullRequests: [
+            {
+              host: "example.test",
+              repository: "owner/repository",
+              number: 42,
+              url: "https://example.test/owner/repository/pull/42",
+              source: "manual",
+              linkedAt: "2026-08-20T00:00:00.000Z",
+              snapshot: {
+                state: "merged",
+                title: "Pull request",
+                headBranch: "feature",
+                baseBranch: "main",
+                isDraft: false,
+                updatedAt: NOW,
+                syncedAt: NOW,
+                mergedAt: NOW,
+              },
+              stack: null,
+            },
+          ],
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+        });
+
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          expect((yield* Ref.get(fixture.commands)).map((command) => command.threadId)).toEqual([
+            thread.id,
+          ]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("settles only the project opted in while environment settlement is disabled", () =>
     Effect.scoped(
       Effect.gen(function* () {

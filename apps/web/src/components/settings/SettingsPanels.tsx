@@ -97,15 +97,6 @@ import { isMacPlatform } from "../../lib/utils";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
@@ -129,7 +120,6 @@ import {
   resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../../appearanceFonts";
-import { WorkspaceBackgroundSection } from "./WorkspaceBackgroundSection";
 import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import {
@@ -183,14 +173,11 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
   paragraph: "Show finished paragraphs",
-  token: "Token by token (legacy)",
 };
 
 const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
   turn: "Text appears once the agent finishes its turn.",
   paragraph: "Each paragraph or code block appears as soon as it is complete.",
-  token:
-    "Every token repaints the answer as it arrives. Slower and harder to read. Thinking traces still arrive a paragraph at a time.",
 };
 
 const TIMESTAMP_FORMAT_LABELS = {
@@ -599,10 +586,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
         : []),
-      ...(settings.autoContinueAfterUsageLimitReset !==
-      DEFAULT_UNIFIED_SETTINGS.autoContinueAfterUsageLimitReset
-        ? ["Automatically continue after usage limits reset"]
-        : []),
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
         ? ["Continue threads after restarts"]
@@ -614,9 +597,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.newWorktreesStartFromOrigin !==
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
-        : []),
-      ...(settings.worktreeCleanupAfterDays !== DEFAULT_UNIFIED_SETTINGS.worktreeCleanupAfterDays
-        ? ["Inactive worktree cleanup"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
@@ -636,15 +616,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
         ? ["Agent browser access"]
         : []),
-      ...(settings.enableImageGeneration !== DEFAULT_UNIFIED_SETTINGS.enableImageGeneration
-        ? ["Image generation"]
-        : []),
-      ...(settings.imageGenerationProvider !== DEFAULT_UNIFIED_SETTINGS.imageGenerationProvider
-        ? ["Image provider"]
-        : []),
-      ...(settings.imageGenerationGrokModel !== DEFAULT_UNIFIED_SETTINGS.imageGenerationGrokModel
-        ? ["Grok Imagine model"]
-        : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -658,9 +629,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.appearanceContrast,
       settings.diffColorScheme,
       settings.enableAgentBrowserAccess,
-      settings.enableImageGeneration,
-      settings.imageGenerationProvider,
-      settings.imageGenerationGrokModel,
       settings.confirmQuit,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -672,7 +640,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
-      settings.worktreeCleanupAfterDays,
       settings.diffFilesCollapsed,
       settings.diffIgnoreWhitespace,
       settings.diffLayout,
@@ -692,7 +659,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.responseStreamingMode,
       settings.persistComposerContextStrip,
       settings.enableProviderUpdateChecks,
-      settings.autoContinueAfterUsageLimitReset,
       settings.continueThreadsAfterServerUpdate,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
@@ -778,8 +744,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
-      diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
+      diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
@@ -798,7 +764,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-      autoContinueAfterUsageLimitReset: DEFAULT_UNIFIED_SETTINGS.autoContinueAfterUsageLimitReset,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
@@ -806,7 +771,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-      worktreeCleanupAfterDays: DEFAULT_UNIFIED_SETTINGS.worktreeCleanupAfterDays,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -831,9 +795,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
-      enableImageGeneration: DEFAULT_UNIFIED_SETTINGS.enableImageGeneration,
-      imageGenerationProvider: DEFAULT_UNIFIED_SETTINGS.imageGenerationProvider,
-      imageGenerationGrokModel: DEFAULT_UNIFIED_SETTINGS.imageGenerationGrokModel,
     });
     onRestored?.();
   }, [
@@ -852,44 +813,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     changedSettingLabels,
     restoreDefaults,
   };
-}
-
-/**
- * Gate in front of the legacy token-by-token mode. The primary action steers
- * the user to paragraph streaming; the legacy path is the quiet option.
- */
-function TokenStreamingWarningDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  onUseParagraphs,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-  onUseParagraphs: () => void;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogPopup className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Token by token is a worse experience</AlertDialogTitle>
-          <AlertDialogDescription>
-            Token streaming repaints the message on every delta. It is slower, harder to read, and
-            costs more CPU on every connected device. This mode stays only for backwards
-            compatibility. Use paragraph streaming instead.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <Button variant="ghost-muted" className="sm:mr-auto" onClick={onConfirm}>
-            Use token by token
-          </Button>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button onClick={onUseParagraphs}>Use paragraphs</Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
-    </AlertDialog>
-  );
 }
 
 function BackgroundActivityAdvancedDialog({
@@ -1222,8 +1145,6 @@ export function AppearanceSettingsPanel() {
           />
         </div>
       </SettingsSection>
-
-      <WorkspaceBackgroundSection />
 
       <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow
@@ -2199,7 +2120,6 @@ export function GeneralSettingsPanel() {
   const isEnvironmentScope = scope.environmentIds.length === 1 && environmentId !== null;
   const hasServerTargets = connectedEnvironments.length > 0;
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
-  const [tokenStreamingWarningOpen, setTokenStreamingWarningOpen] = useState(false);
   const mixedResponseStreamingMode = useScopedSettingsMixed(["responseStreamingMode"]);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
@@ -2466,52 +2386,30 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <>
-              <Select
-                value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
-                onValueChange={(value) => {
-                  if (value === "token") {
-                    // The legacy path needs an explicit confirmation.
-                    setTokenStreamingWarningOpen(true);
-                    return;
+            <Select
+              value={mixedResponseStreamingMode ? null : settings.responseStreamingMode}
+              onValueChange={(value) => {
+                if (value === "turn" || value === "paragraph") {
+                  updateSettings({ responseStreamingMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
+                <SelectValue>
+                  {(value: ResponseStreamingMode | null) =>
+                    value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
                   }
-                  if (value === "turn" || value === "paragraph") {
-                    updateSettings({ responseStreamingMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
-                  <SelectValue>
-                    {(value: ResponseStreamingMode | null) =>
-                      value === null ? "Mixed" : RESPONSE_STREAMING_MODE_LABELS[value]
-                    }
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="turn">
-                    {RESPONSE_STREAMING_MODE_LABELS.turn}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="paragraph">
-                    {RESPONSE_STREAMING_MODE_LABELS.paragraph}
-                  </SelectItem>
-                  <SelectItem hideIndicator value="token">
-                    {RESPONSE_STREAMING_MODE_LABELS.token}
-                  </SelectItem>
-                </SelectPopup>
-              </Select>
-              <TokenStreamingWarningDialog
-                open={tokenStreamingWarningOpen}
-                onOpenChange={setTokenStreamingWarningOpen}
-                onConfirm={() => {
-                  updateSettings({ responseStreamingMode: "token" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-                onUseParagraphs={() => {
-                  updateSettings({ responseStreamingMode: "paragraph" });
-                  setTokenStreamingWarningOpen(false);
-                }}
-              />
-            </>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="turn">
+                  {RESPONSE_STREAMING_MODE_LABELS.turn}
+                </SelectItem>
+                <SelectItem hideIndicator value="paragraph">
+                  {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow
@@ -2842,34 +2740,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("auto-continue-usage-limits")}
-          description="Resume interrupted Codex and Claude subscription turns when their limits reset."
-          resetAction={
-            settings.autoContinueAfterUsageLimitReset !==
-            DEFAULT_UNIFIED_SETTINGS.autoContinueAfterUsageLimitReset ? (
-              <SettingResetButton
-                label="automatic continuation after usage limits"
-                onClick={() =>
-                  updateSettings({
-                    autoContinueAfterUsageLimitReset:
-                      DEFAULT_UNIFIED_SETTINGS.autoContinueAfterUsageLimitReset,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.autoContinueAfterUsageLimitReset}
-              onCheckedChange={(checked) =>
-                updateSettings({ autoContinueAfterUsageLimitReset: Boolean(checked) })
-              }
-              aria-label="Automatically continue after usage limits reset"
-            />
-          }
-        />
-
-        <SettingsRow
           {...searchableSetting("continue-threads-after-server-update")}
           serverScoped
           settingKeys={["continueThreadsAfterServerUpdate"]}
@@ -3032,58 +2902,6 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("inactive-worktree-cleanup")}
-          description="Removes generated dependencies when a chat is settled or inactive. Safe worktrees are removed after 7 days; chats and branches stay."
-          resetAction={
-            settings.worktreeCleanupAfterDays !==
-            DEFAULT_UNIFIED_SETTINGS.worktreeCleanupAfterDays ? (
-              <SettingResetButton
-                label="inactive worktree cleanup"
-                onClick={() =>
-                  updateSettings({
-                    worktreeCleanupAfterDays: DEFAULT_UNIFIED_SETTINGS.worktreeCleanupAfterDays,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.worktreeCleanupAfterDays?.toString() ?? "never"}
-              onValueChange={(value) => {
-                if (value === "never") {
-                  updateSettings({ worktreeCleanupAfterDays: null });
-                  return;
-                }
-                const days = Number(value);
-                if (Number.isInteger(days) && days >= 1 && days <= 7) {
-                  updateSettings({ worktreeCleanupAfterDays: days });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Inactive worktree cleanup">
-                <SelectValue>
-                  {settings.worktreeCleanupAfterDays === null
-                    ? "Never"
-                    : `After ${settings.worktreeCleanupAfterDays} ${settings.worktreeCleanupAfterDays === 1 ? "day" : "days"}`}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {Array.from({ length: 7 }, (_, index) => index + 1).map((days) => (
-                  <SelectItem hideIndicator key={days} value={days.toString()}>
-                    After {days} {days === 1 ? "day" : "days"}
-                  </SelectItem>
-                ))}
-                <SelectItem hideIndicator value="never">
-                  Never
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
         <SettingsRow
           serverScoped
           settingKeys={["addProjectBaseDirectory"]}

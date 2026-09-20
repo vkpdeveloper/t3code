@@ -30,18 +30,12 @@ export type OrchestrationClientOrigin = typeof OrchestrationClientOrigin.Type;
 
 /** Metadata retained by the shared application event source. */
 export const ApplicationEventMetadata = Schema.Struct({
+  deferredTurn: Schema.optional(Schema.Boolean),
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
   adapterKey: Schema.optional(TrimmedNonEmptyString),
   requestId: Schema.optional(ApprovalRequestId),
   ingestedAt: Schema.optional(IsoDateTime),
-  historyImport: Schema.optional(Schema.Boolean),
-  /**
-   * The user message was persisted ahead of its turn (worktree bootstrap).
-   * Reactors that key off a user message as "turn is starting" wait for the
-   * turn-start event instead.
-   */
-  deferredTurn: Schema.optional(Schema.Boolean),
   origin: Schema.optional(OrchestrationClientOrigin),
 });
 export type ApplicationEventMetadata = typeof ApplicationEventMetadata.Type;

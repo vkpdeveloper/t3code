@@ -27,6 +27,7 @@ import {
   type UploadChatAttachment,
 } from "@t3tools/contracts";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 
@@ -150,11 +151,12 @@ interface StartThreadBootstrap {
     readonly createdAt: string;
   };
   readonly prepareWorktree?: {
+    /** V2 worktree launches always fail rather than falling back to the project checkout. */
+    readonly requireWorktree?: boolean;
     readonly projectCwd: string;
     readonly baseBranch: string;
     readonly branch?: string;
     readonly startFromOrigin?: boolean;
-    readonly requireWorktree?: boolean;
   };
   readonly runSetupScript?: boolean;
 }
@@ -770,6 +772,20 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
         run.status === "running" ||
         run.status === "waiting",
     )?.id;
+    if (runId === undefined) {
+      const latestRun = projection.runs.at(-1);
+      if (
+        derivePendingBackgroundWork({
+          latestRun,
+          providerThreads: projection.providerThreads,
+          turnItems: projection.turnItems,
+          activeProviderThreadId: projection.thread.activeProviderThreadId,
+          runs: projection.runs,
+        }).length > 0
+      ) {
+        runId = latestRun?.id;
+      }
+    }
   }
   if (runId === undefined) return { sequence: 0 };
   return yield* dispatch({
@@ -909,6 +925,16 @@ export const mergeThreadBack = Effect.fn("EnvironmentCommands.mergeThreadBack")(
     sourceThreadId: input.sourceThreadId,
     targetThreadId: input.targetThreadId,
     sourcePoint: { type: "run", runId: input.runId },
+  });
+});
+
+export const resumeThreadQueue = Effect.fn("EnvironmentCommands.resumeThreadQueue")(function* (
+  input: ThreadCommandInput,
+) {
+  return yield* dispatch({
+    type: "queue.resume",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
   });
 });
 

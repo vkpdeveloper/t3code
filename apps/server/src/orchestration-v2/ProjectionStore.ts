@@ -6,6 +6,7 @@ import type {
   OrchestrationV2ConversationMessage,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
   OrchestrationV2Subagent,
@@ -14,7 +15,6 @@ import type {
   OrchestrationV2ThreadShell,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
-  ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -239,16 +239,6 @@ export interface ProjectionStoreV2Shape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
-  readonly getDeletedWorktreeThreads?: Effect.Effect<
-    ReadonlyArray<{
-      readonly id: ThreadId;
-      readonly projectId: ProjectId;
-      readonly branch: string;
-      readonly worktreePath: string;
-      readonly deletedAt: DateTime.Utc;
-    }>,
-    ProjectionStoreV2Error
-  >;
   readonly getSettlementCandidates: () => Effect.Effect<
     ReadonlyArray<ProjectionSettlementCandidate>,
     ProjectionStoreV2Error
@@ -462,6 +452,16 @@ export function emptyProjection(
   };
 }
 
+// A future queued provider has a reserved thread record but is not active until delivery.
+function isQueuedProviderThreadPlaceholder(providerThread: OrchestrationV2ProviderThread): boolean {
+  return (
+    providerThread.status === "not_loaded" &&
+    providerThread.firstRunOrdinal === null &&
+    providerThread.nativeThreadRef === null &&
+    providerThread.providerSessionId === null
+  );
+}
+
 export function applyToProjection(
   projection: OrchestrationV2ThreadProjection,
   event: OrchestrationV2DomainEvent,
@@ -559,7 +559,8 @@ export function applyToProjection(
       return {
         ...base,
         thread:
-          event.payload.appThreadId === base.thread.id
+          event.payload.appThreadId === base.thread.id &&
+          !isQueuedProviderThreadPlaceholder(event.payload)
             ? {
                 ...base.thread,
                 activeProviderThreadId: event.payload.id,
@@ -1170,7 +1171,6 @@ export function threadShellFromProjection(
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
     lineage: projection.thread.lineage,
-    automationId: projection.thread.automationId ?? null,
     usageLimitResume: projection.thread.usageLimitResume ?? null,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -1847,7 +1847,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 updated_at = excluded.updated_at,
                 payload_json = excluded.payload_json
             `;
-            if (event.payload.appThreadId !== null) {
+            if (
+              event.payload.appThreadId !== null &&
+              !isQueuedProviderThreadPlaceholder(event.payload)
+            ) {
               const threadRows = yield* sql<PayloadRow>`
                 SELECT payload_json
                 FROM orchestration_v2_projection_threads
@@ -3265,29 +3268,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
 
-    const getDeletedWorktreeThreads: ProjectionStoreV2Shape["getDeletedWorktreeThreads"] =
-      Effect.gen(function* () {
-        const rows = yield* sql<PayloadRow>`
-          SELECT payload_json
-          FROM orchestration_v2_projection_threads
-          WHERE deleted_at IS NOT NULL
-        `;
-        const threads = yield* Effect.forEach(rows, (row) => decodeThreadPayload(row.payload_json));
-        return threads.flatMap((thread) =>
-          thread.deletedAt === null || thread.branch === null || thread.worktreePath === null
-            ? []
-            : [
-                {
-                  id: thread.id,
-                  projectId: thread.projectId,
-                  branch: thread.branch,
-                  worktreePath: thread.worktreePath,
-                  deletedAt: thread.deletedAt,
-                },
-              ],
-        );
-      }).pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
-
     const getRuntimeRecoveryProjection: ProjectionStoreV2Shape["getRuntimeRecoveryProjection"] = (
       threadId,
     ) =>
@@ -4544,7 +4524,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getShellSnapshot,
       getThreadShell,
       getThread,
-      getDeletedWorktreeThreads,
       getSettlementCandidates,
       getThreadProjection,
       getRuntimeRecoveryProjection,
@@ -4634,23 +4613,6 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           return projection.thread;
         }),
-      getDeletedWorktreeThreads: Ref.get(replayState).pipe(
-        Effect.map((state) =>
-          [...state.projections.values()].flatMap(({ thread }) =>
-            thread.deletedAt === null || thread.branch === null || thread.worktreePath === null
-              ? []
-              : [
-                  {
-                    id: thread.id,
-                    projectId: thread.projectId,
-                    branch: thread.branch,
-                    worktreePath: thread.worktreePath,
-                    deletedAt: thread.deletedAt,
-                  },
-                ],
-          ),
-        ),
-      ),
       getSettlementCandidates: () =>
         Effect.gen(function* () {
           const projections = (yield* Ref.get(replayState)).projections;

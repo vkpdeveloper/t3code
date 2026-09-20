@@ -1,8 +1,4 @@
 import * as Schema from "effect/Schema";
-import {
-  threadPullRequestKeysEqual,
-  visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
 
 import {
   PullRequestDetail,
@@ -18,17 +14,21 @@ import {
   type PullRequestDetailView,
   type PullRequestMergeability,
   type PullRequestReaction,
-  type PullRequestRef,
   type PullRequestMergeMethod,
+  type PullRequestRef,
+  type RepositoryIdentity,
   type PullRequestReviewThread,
   type PullRequestState,
   type PullRequestUpdateMethod,
   type SourceControlProviderKind,
-  type RepositoryIdentity,
   type ThreadLinkedPullRequest,
   type ThreadPullRequestLink,
   type VcsRef,
 } from "@t3tools/contracts";
+import {
+  threadPullRequestKeysEqual,
+  visibleThreadPullRequests,
+} from "@t3tools/shared/threadPullRequests";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
 import { reviewCommentContextId } from "~/lib/composerContextRecords";
@@ -167,26 +167,6 @@ export function editPullRequestThreadComment<
   T extends { readonly id: string; readonly body: string },
 >(comments: ReadonlyArray<T>, commentId: string, body: string): ReadonlyArray<T> {
   return comments.map((comment) => (comment.id === commentId ? { ...comment, body } : comment));
-}
-
-/** Whether the pull request on a right-panel surface belongs to the open thread checkout. */
-export function isThreadOwnPullRequest(
-  thread: {
-    readonly projectId: string | null;
-    readonly repository: string | null;
-    readonly number: number | null;
-  },
-  surface: {
-    readonly projectId: string;
-    readonly repository: string;
-    readonly number: number;
-  },
-): boolean {
-  return (
-    thread.projectId === surface.projectId &&
-    thread.repository === surface.repository &&
-    thread.number === surface.number
-  );
 }
 
 type LegacyLinkedPullRequest = Pick<ThreadLinkedPullRequest, "repository" | "number">;
@@ -336,7 +316,9 @@ export function classifyPullRequestChecks(
   if (checks.some((check) => check.status === "failure" || check.status === "cancelled")) {
     return "failing";
   }
-  if (checks.some((check) => check.status === "pending")) return "pending";
+  if (checks.some((check) => check.status === "pending" || check.status === "action-required")) {
+    return "pending";
+  }
   return "passing";
 }
 
@@ -351,16 +333,28 @@ export function describePullRequestChecks(checks: ReadonlyArray<PullRequestCheck
     (check) => check.status === "failure" || check.status === "cancelled",
   ).length;
   const pending = checks.filter((check) => check.status === "pending").length;
+  const actionRequired = checks.filter((check) => check.status === "action-required").length;
   const passed = checks.filter((check) => check.status === "success").length;
   const parts: string[] = [];
   if (pending > 0) parts.push(`${pending} of ${checks.length} running`);
+  if (actionRequired > 0) parts.push(`${actionRequired} of ${checks.length} awaiting action`);
   if (failed > 0) {
-    parts.push(pending > 0 ? `${failed} failed` : `${failed} of ${checks.length} failing`);
+    parts.push(parts.length > 0 ? `${failed} failed` : `${failed} of ${checks.length} failing`);
   }
   if (parts.length === 0) {
     return passed === checks.length ? "All checks passed" : `${passed} of ${checks.length} passing`;
   }
   return parts.join(" · ");
+}
+
+export function groupPullRequestChecks(checks: ReadonlyArray<PullRequestCheck>) {
+  return {
+    attention: checks.filter((check) =>
+      ["failure", "cancelled", "action-required"].includes(check.status),
+    ),
+    running: checks.filter((check) => check.status === "pending"),
+    completed: checks.filter((check) => ["success", "skipped", "neutral"].includes(check.status)),
+  };
 }
 
 export type ThreadPanelPullRequestAction = "resolve" | "ready" | "fix" | "merge";

@@ -14,6 +14,7 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
+import { FolderGit2Icon, TerminalIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
@@ -25,7 +26,6 @@ import {
   visibleThreadPullRequests,
   type ThreadPullRequestBadge,
 } from "@t3tools/shared/threadPullRequests";
-import { FolderGit2Icon, GitPullRequestArrowIcon, LayersIcon, TerminalIcon } from "lucide-react";
 import { type MouseEvent } from "react";
 import { buttonVariants, InlineButton } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -44,7 +44,6 @@ import {
   useRetainedValue,
   useSidebarRowSubscriptionLease,
 } from "./Sidebar.logic";
-import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 
 import type { SidebarThreadSummary } from "../types";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
@@ -55,6 +54,7 @@ import {
   PullRequestGlyph,
   type PullRequestGlyphIcon,
 } from "./pullRequest/pullRequestIcons";
+import { resolvePullRequestState } from "./pullRequest/pullRequestPresentation";
 
 export interface PrStatusIndicator {
   label: string;
@@ -204,6 +204,7 @@ export function resolveThreadPullRequestBadgePresentation({
 export function ThreadPullRequestBadgeControl({
   variant,
   badge,
+  pullRequests,
   number,
   url,
   status,
@@ -212,15 +213,17 @@ export function ThreadPullRequestBadgeControl({
 }: {
   variant: "underline" | "ghost";
   badge: ThreadPullRequestBadge | null;
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
   number?: number | undefined;
   url?: string | undefined;
   status: PrStatusIndicator | null;
   onOpenStack: () => void;
-  onOpenPullRequest: (event: MouseEvent<HTMLAnchorElement>) => void;
+  onOpenPullRequest: (event: MouseEvent<HTMLAnchorElement>, url?: string) => void;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
   if (presentation === null) return null;
   const isStack = badge?.kind === "stack";
+  const showList = isStack || (badge?.kind === "pull-request" && badge.others > 0);
   const className = cn(
     variant === "ghost"
       ? buttonVariants({ variant: "ghost", size: "xs" })
@@ -266,7 +269,24 @@ export function ThreadPullRequestBadgeControl({
       >
         {content}
       </TooltipTrigger>
-      <TooltipPopup side="top">{presentation.label}</TooltipPopup>
+      <TooltipPopup
+        side="top"
+        variant={showList ? "glass" : "default"}
+        className={
+          showList
+            ? "pointer-events-auto w-80 max-w-[calc(100vw-2rem)] text-left whitespace-normal"
+            : undefined
+        }
+      >
+        {showList ? (
+          <ThreadPullRequestsMiniList
+            pullRequests={pullRequests}
+            onOpenPullRequest={onOpenPullRequest}
+          />
+        ) : (
+          presentation.label
+        )}
+      </TooltipPopup>
     </Tooltip>
   );
 }
@@ -277,8 +297,10 @@ export function ThreadPullRequestBadgeControl({
  */
 export function ThreadPullRequestsMiniList({
   pullRequests,
+  onOpenPullRequest,
 }: {
   pullRequests: ReadonlyArray<ThreadPullRequestLink>;
+  onOpenPullRequest?: (event: MouseEvent<HTMLAnchorElement>, url: string) => void;
 }) {
   const lines = useMemo(
     () =>
@@ -294,14 +316,8 @@ export function ThreadPullRequestsMiniList({
           snapshot === null
             ? null
             : resolvePullRequestState({ state: snapshot.state, isDraft: snapshot.isDraft });
-        return (
-          <li
-            key={`${line.link.host}/${line.link.repository}#${line.link.number}`}
-            className="flex min-w-0 items-center gap-2"
-            // Capped like the panel: past a few layers the indent only repeats "still in the
-            // stack", and sixteen of them would walk the titles off the popover.
-            style={{ paddingLeft: `${Math.min(line.depth, 3) * 0.75}rem` }}
-          >
+        const content = (
+          <>
             {presentation ? (
               <presentation.Icon
                 aria-hidden
@@ -322,28 +338,32 @@ export function ThreadPullRequestsMiniList({
                 {line.stack.kind === "native" ? "stack" : "chain"} · {line.stack.size}
               </span>
             ) : null}
+          </>
+        );
+        return (
+          <li
+            key={`${line.link.host}/${line.link.repository}#${line.link.number}`}
+            style={{ paddingLeft: `${Math.min(line.depth, 3) * 0.75}rem` }}
+          >
+            {onOpenPullRequest ? (
+              <a
+                href={line.link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex min-w-0 items-center gap-2 rounded-sm px-1 py-1 hover:bg-accent focus-visible:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => onOpenPullRequest(event, line.link.url)}
+              >
+                {content}
+              </a>
+            ) : (
+              <div className="flex min-w-0 items-center gap-2">{content}</div>
+            )}
           </li>
         );
       })}
     </ul>
   );
-}
-
-export function settledPrHoverColorClass(
-  state: NonNullable<ThreadPr>["state"],
-  isDraft = false,
-): string {
-  switch (state) {
-    case "open":
-      if (isDraft) {
-        return "group-hover/sidebar-row:text-zinc-500 dark:group-hover/sidebar-row:text-zinc-400/80";
-      }
-      return "group-hover/sidebar-row:text-emerald-600 dark:group-hover/sidebar-row:text-emerald-300/90";
-    case "merged":
-      return "group-hover/sidebar-row:text-violet-600 dark:group-hover/sidebar-row:text-violet-300/90";
-    case "closed":
-      return "group-hover/sidebar-row:text-red-600 dark:group-hover/sidebar-row:text-red-300/90";
-  }
 }
 
 export function prStatusIndicator(

@@ -7,6 +7,8 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
+  formatCodexModelName,
+  formatModelSlugName,
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
@@ -14,102 +16,28 @@ import {
   toCustomModelSetting,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
-  modelChangeRequiresNewThread,
-  modelSelectionsEqual,
   normalizeCustomModelSlug,
   normalizeModelSlug,
-  providerInteractionModeControlsEnabled,
+  modelSelectionsEqual,
 } from "./model.ts";
 
-describe("provider interaction mode controls", () => {
-  it("requires both the preference and the selected provider capability", () => {
-    const grokInstanceId = ProviderInstanceId.make("grok");
-    const providers = [
-      {
-        instanceId: ProviderInstanceId.make("codex"),
-        showInteractionModeToggle: true,
-      },
-      { instanceId: grokInstanceId, showInteractionModeToggle: false },
-    ];
-
-    expect(
-      providerInteractionModeControlsEnabled({
-        planModeEnabled: true,
-        providers,
-        modelSelection: { instanceId: grokInstanceId },
-      }),
-    ).toBe(false);
-    expect(
-      providerInteractionModeControlsEnabled({
-        planModeEnabled: false,
-        providers: [],
-        modelSelection: { instanceId: ProviderInstanceId.make("codex") },
-      }),
-    ).toBe(false);
-    expect(
-      providerInteractionModeControlsEnabled({
-        planModeEnabled: true,
-        providers: [],
-        modelSelection: { instanceId: ProviderInstanceId.make("codex") },
-      }),
-    ).toBe(true);
-  });
+it("keeps the Codex catalog display formatting", () => {
+  expect(formatCodexModelName("gpt-5.3-codex-spark")).toBe("GPT-5.3-Codex-Spark");
+  expect(formatCodexModelName("GPT Test")).toBe("GPT Test");
 });
 
-describe("model session compatibility", () => {
-  const instanceId = ProviderInstanceId.make("grok");
-  const providers = [
-    {
-      instanceId,
-      models: [
-        {
-          slug: "grok-build",
-          name: "Grok Build",
-          isCustom: false,
-          sessionCompatibilityGroup: "grok-stock",
-          capabilities: null,
-        },
-        {
-          slug: "grok-build-plan",
-          name: "Grok Build Plan",
-          isCustom: false,
-          sessionCompatibilityGroup: "grok-stock",
-          capabilities: null,
-        },
-        {
-          slug: "grok-codex",
-          name: "Grok Codex",
-          isCustom: false,
-          sessionCompatibilityGroup: "grok-strict:codex",
-          capabilities: null,
-        },
-      ],
-    },
-  ];
-
-  const requiresNewThread = (nextModel: string, hasConversationHistory: boolean) =>
-    modelChangeRequiresNewThread({
-      providers,
-      currentModelSelection: { instanceId, model: "grok-build" },
-      nextModelSelection: { instanceId, model: nextModel },
-      hasConversationHistory,
-    });
-
-  it("allows stock Grok harness changes after conversation history", () => {
-    expect(requiresNewThread("grok-build-plan", true)).toBe(false);
-  });
-
-  it("requires a new thread when changing to a strict harness after conversation history", () => {
-    expect(requiresNewThread("grok-codex", true)).toBe(true);
-  });
-
-  it("allows strict harness changes before the first turn", () => {
-    expect(requiresNewThread("grok-codex", false)).toBe(false);
-  });
-
-  it("allows changes when either model has unknown compatibility metadata", () => {
-    expect(requiresNewThread("custom-grok-model", true)).toBe(false);
-  });
+it.each([
+  ["gpt-5.4", "GPT-5.4"],
+  ["claude-opus-4-6", "Claude Opus 4.6"],
+  ["claude-sonnet-4-20250514", "Claude Sonnet 4 20250514"],
+  ["claude-opus-4-6[1m]", "Claude Opus 4.6[1m]"],
+  ["openai/gpt-5.4-mini", "openai/GPT-5.4-Mini"],
+  ["gemini-2.5-pro-preview-06-05", "Gemini 2.5 Pro Preview 06 05"],
+  ["custom/model-v2", "custom/model-v2"],
+  ["gpt-proxy", "gpt-proxy"],
+  ["My Custom Model", "My Custom Model"],
+])("formats a known model ID without losing its qualifiers: %s", (slug, expected) => {
+  expect(formatModelSlugName(slug)).toBe(expected);
 });
 
 const codexCaps: ModelCapabilities = createModelCapabilities({

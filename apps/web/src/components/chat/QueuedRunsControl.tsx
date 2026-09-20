@@ -13,8 +13,9 @@ import {
   GripVerticalIcon,
   ListOrderedIcon,
   PencilIcon,
+  PauseIcon,
 } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 
 import { useAssetUrls } from "../../assets/assetUrls";
 import { threadEnvironment } from "../../state/threads";
@@ -41,7 +42,16 @@ interface QueuedRowThumbnail {
 
 const QUEUED_RUN_DRAG_TYPE = "application/x-t3code-queued-run";
 
-export function QueuedRunsControl(props: {
+export interface QueuedRunsControlHandle {
+  steerNext: (repeat: boolean) => boolean;
+}
+
+export function QueuedRunsControl({
+  ref,
+  ...props
+}: {
+  readonly ref?: Ref<QueuedRunsControlHandle>;
+  readonly steerShortcutLabel?: string | null;
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly optimisticMessages: ReadonlyArray<
@@ -58,6 +68,8 @@ export function QueuedRunsControl(props: {
   const reorder = useAtomCommand(threadEnvironment.reorderQueuedRun);
   const promote = useAtomCommand(threadEnvironment.promoteQueuedRun);
   const cancel = useAtomCommand(threadEnvironment.cancelQueuedRun);
+  const resume = useAtomCommand(threadEnvironment.resumeThreadQueue);
+  const [resuming, setResuming] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const queueListId = useId();
   const [busyRunId, setBusyRunId] = useState<RunId | null>(null);
@@ -153,8 +165,6 @@ export function QueuedRunsControl(props: {
     })),
   ];
 
-  if (items.length === 0) return null;
-
   const move = async (runId: RunId, beforeRunId: RunId | null) => {
     setBusyRunId(runId);
     try {
@@ -178,8 +188,10 @@ export function QueuedRunsControl(props: {
     void move(runId, queued[insertIndex]?.run.id ?? null);
   };
 
+  const steerInFlightRef = useRef(false);
   const steer = async (queuedRunId: RunId) => {
-    if (activeRun === null) return;
+    if (activeRun === null || !workflow?.canPromoteToSteer || steerInFlightRef.current) return;
+    steerInFlightRef.current = true;
     setBusyRunId(queuedRunId);
     try {
       await promote({
@@ -187,9 +199,21 @@ export function QueuedRunsControl(props: {
         input: { threadId: props.threadId, queuedRunId, targetRunId: activeRun.id },
       });
     } finally {
+      steerInFlightRef.current = false;
       setBusyRunId(null);
     }
   };
+
+  useImperativeHandle(ref, () => ({
+    steerNext(repeat) {
+      const next = queued[0];
+      if (!next || !workflow?.canPromoteToSteer) return false;
+      if (!repeat && busyRunId === null) void steer(next.run.id);
+      return true;
+    },
+  }));
+
+  if (items.length === 0) return null;
 
   const remove = async (runId: RunId) => {
     setBusyRunId(runId);
@@ -223,12 +247,38 @@ export function QueuedRunsControl(props: {
           <ComposerBanner.Icon>
             <ListOrderedIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content className="text-muted-foreground">Queued</ComposerBanner.Content>
+          <ComposerBanner.Content className="text-muted-foreground">
+            {workflow?.isHeld ? "Queue held after restart" : "Queued"}
+          </ComposerBanner.Content>
           <ComposerBanner.Actions>
             <ComposerBanner.Count>{items.length}</ComposerBanner.Count>
             <ComposerBanner.ToggleIcon expanded={expanded} />
           </ComposerBanner.Actions>
         </ComposerBanner.Row>
+        {workflow?.isHeld && (
+          <ComposerBanner.Row layout="wrap-actions">
+            <ComposerBanner.Icon>
+              <PauseIcon />
+            </ComposerBanner.Icon>
+            <ComposerBanner.Content>Messages stay saved until you resume.</ComposerBanner.Content>
+            <ComposerBanner.Actions>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={resuming || busyRunId !== null}
+                onClick={() => {
+                  setResuming(true);
+                  void resume({
+                    environmentId: props.environmentId,
+                    input: { threadId: props.threadId },
+                  }).finally(() => setResuming(false));
+                }}
+              >
+                Resume queue
+              </Button>
+            </ComposerBanner.Actions>
+          </ComposerBanner.Row>
+        )}
         <ComposerBanner.Scroll className={cn("max-h-32", !expanded && "hidden")}>
           <ComposerBanner.Children render={<ol />} id={queueListId}>
             {items.map((item) => {
@@ -420,7 +470,7 @@ export function QueuedRunsControl(props: {
                           <TooltipPopup>
                             {activeRun === null
                               ? "There is no active run to steer"
-                              : "Send as a steer instead"}
+                              : `Send as a steer instead${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>

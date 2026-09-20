@@ -1,5 +1,7 @@
 "use client";
 
+import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { CheckIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -19,7 +21,7 @@ import {
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { Button } from "../ui/button";
-import { Gemini, GithubCopilotIcon, PiAgentIcon, type Icon } from "../Icons";
+import { Gemini, GithubCopilotIcon, type Icon } from "../Icons";
 import { Dialog } from "../ui/dialog";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
@@ -43,15 +45,6 @@ import {
 import { AddProviderInstanceWizardSteps } from "./AddProviderInstanceWizardSteps";
 import { AcpRegistrySearchStep } from "./AcpRegistrySearchStep";
 import { resolveOfficialAcpRegistryIconUrl } from "./AcpRegistryIcon";
-
-const PROVIDER_ACCENT_SWATCHES = [
-  "#2563eb",
-  "#16a34a",
-  "#ea580c",
-  "#dc2626",
-  "#7c3aed",
-  "#0891b2",
-] as const;
 
 /**
  * Normalize a user-provided label into a slug suffix for the instance id.
@@ -358,14 +351,17 @@ export function AddProviderInstanceDialog({
               className="grid grid-cols-1 gap-2 sm:grid-cols-2"
             >
               {DRIVER_OPTIONS.map((option) => {
-                const IconComponent = option.icon;
                 return (
                   <RadioPrimitive.Root
                     key={option.value}
                     value={option.value}
                     className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
                   >
-                    <IconComponent className="size-4 shrink-0" aria-hidden />
+                    <ProviderInstanceIcon
+                      driverKind={option.value}
+                      displayName={option.label}
+                      iconClassName="size-4"
+                    />
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {option.label}
                     </span>
@@ -529,44 +525,12 @@ export function AddProviderInstanceDialog({
 
           <div className={cn("grid gap-2", wizardStep !== identityStep && "hidden")}>
             <span className="text-xs font-medium text-foreground">Accent color</span>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <input
-                type="color"
-                value={normalizeProviderAccentColor(accentColor) ?? PROVIDER_ACCENT_SWATCHES[0]}
-                onChange={(event) => setIdentityDraft({ accentColor: event.target.value })}
-                aria-label="Provider instance accent color"
-                className="h-8 w-10 cursor-pointer rounded-xl border border-input bg-background p-0.5"
-              />
-              <div className="flex flex-wrap gap-1.5">
-                {PROVIDER_ACCENT_SWATCHES.map((swatch) => {
-                  const selected = accentColor.toLowerCase() === swatch;
-                  return (
-                    <button
-                      key={swatch}
-                      type="button"
-                      className={cn(
-                        "size-6 cursor-pointer rounded-full border transition",
-                        selected
-                          ? "scale-110 border-foreground ring-2 ring-ring ring-offset-1 ring-offset-background"
-                          : "border-black/10 hover:scale-105 dark:border-white/20",
-                      )}
-                      style={{ backgroundColor: swatch }}
-                      onClick={() => setIdentityDraft({ accentColor: swatch })}
-                      aria-label={`Use ${swatch} accent`}
-                    />
-                  );
-                })}
-              </div>
-              {accentColor ? (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setIdentityDraft({ accentColor: "" })}
-                >
-                  Clear
-                </Button>
-              ) : null}
-            </div>
+            <ProviderAccentColorPicker
+              displayName={label || driverOption.label}
+              value={accentColor || undefined}
+              onCommit={(value) => setIdentityDraft({ accentColor: value })}
+              layout="inline"
+            />
             <span className="text-[11px] text-muted-foreground">
               Optional marker shown in the picker.
             </span>

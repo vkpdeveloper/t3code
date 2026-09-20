@@ -2,12 +2,6 @@ import { ProjectId, type PullRequestSummary, type VcsStatusResult } from "@t3too
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";
-import {
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestDraftIcon,
-  GitPullRequestIcon,
-} from "lucide-react";
 
 import {
   ChangeRequestStatusIcon,
@@ -16,7 +10,6 @@ import {
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
   resolveThreadPr,
-  settledPrHoverColorClass,
   threadChangeRequestSnapshotsEqual,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
