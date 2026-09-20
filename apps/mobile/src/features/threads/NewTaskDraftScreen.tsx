@@ -109,7 +109,6 @@ import { projectEnvironment } from "../../state/projects";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectCloneBanner } from "../../components/ProjectCloneBanner";
-import { useEnvironmentServerConfig, useProjects, useThreadShells } from "../../state/entities";
 import {
   isModelSelectionUnavailable,
   resolveSelectableModelSelection,
@@ -450,7 +449,6 @@ export function NewTaskDraftScreen(props: {
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
     environmentId: selectedProject?.environmentId ?? null,
-    threadShells: useThreadShells(),
     pullRequestProjectId: selectedEnvironmentServerConfig?.environment.capabilities.pullRequests
       ? (selectedProject?.id ?? null)
       : null,

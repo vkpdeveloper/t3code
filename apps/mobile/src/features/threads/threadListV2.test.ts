@@ -15,7 +15,6 @@ import {
   EnvironmentId,
   MessageId,
   ProjectId,
-  ProviderDriverKind,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -25,7 +24,6 @@ import { describe, expect, it } from "vite-plus/test";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { makeThreadShellFixture } from "../../test-fixtures";
 import { threadJumpTarget } from "../keyboard/threadKeyboardShortcuts";
-import { makeThreadShellFixture } from "../../test-fixtures";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,

@@ -670,63 +670,62 @@ function AutoSettleSettingsRows() {
 
   return (
     <>
-      <SettingsSection title="Interface">
-        <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
-        {Platform.OS === "ios" ? (
-          <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection title="Automations">
-        <SettingsRow icon="clock" label="Scheduled tasks" target="SettingsScheduledTasks" />
-      </SettingsSection>
-
-      <SettingsSection title="Projects & threads">
-        {selectedProjectKey !== null ? (
-          <SettingsRow
-            icon="folder"
-            label="Overview"
-            value={projectLabel}
-            target="SettingsProjectOverview"
+      <SettingsSwitchRow
+        icon="arrow.triangle.branch"
+        label="Auto-settle merged threads"
+        value={referenceSettings.sidebarAutoSettleOnMerge}
+        onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
+      />
+      <SettingsSwitchRow
+        icon="clock"
+        label="Auto-settle inactive threads"
+        subtitle={afterDays === null ? undefined : `After ${afterDays} days without activity`}
+        value={afterDays !== null}
+        onValueChange={(value) =>
+          writeToAll({ sidebarAutoSettleAfterDays: value ? AUTO_SETTLE_DEFAULT_DAYS : null })
+        }
+      />
+      {afterDays !== null ? (
+        <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
+          <Text className="flex-1 text-lg text-foreground">Days before auto-settle</Text>
+          <TextInput
+            className="min-h-10 w-20 rounded-xl px-3 py-2 text-center text-base"
+            keyboardType="number-pad"
+            returnKeyType="done"
+            value={daysDraft ?? String(afterDays)}
+            onChangeText={setDaysDraft}
+            onBlur={commitDays}
+            onSubmitEditing={commitDays}
+            accessibilityLabel="Days before auto-settle"
           />
-        ) : null}
-        <SettingsRow icon="folder" label="Organization" target="SettingsOrganization" />
-        <SettingsRow icon="text.bubble" label="Thread behavior" target="SettingsThreads" />
-        <SettingsRow icon="arrow.turn.left.up" label="Follow-ups" target="SettingsFollowUp" />
-        <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
-      </SettingsSection>
-
-      <SettingsSection title="Server settings">
-        <SettingsRow
-          icon="text.bubble"
-          label="New threads"
-          target="SettingsEnvironmentNewThreads"
-          disabled={noServerTargets}
-        />
-        <SettingsRow
-          icon="arrow.triangle.branch"
-          label="Source control"
-          target="SettingsEnvironmentSourceControl"
-          disabled={noServerTargets}
-        />
-        <SettingsRow
-          icon="text.alignleft"
-          label="Agent behavior"
-          target="SettingsEnvironmentAgentBehavior"
-          disabled={noServerTargets}
-        />
-        <SettingsRow
-          icon="arrow.clockwise"
-          label="Maintenance"
-          target="SettingsEnvironmentMaintenance"
-          disabled={noServerTargets}
-        />
-      </SettingsSection>
-
-      <SettingsSection title="App">
-        <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
-        <SettingsRow icon="info.circle" label="About T3 Code" target="SettingsAbout" />
-      </SettingsSection>
+        </View>
+      ) : null}
+      {mismatches.length > 0 ? (
+        <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
+          <View className="min-w-0 flex-1">
+            <Text className="text-lg text-foreground">Auto-settle defaults differ</Text>
+            <Text className="text-sm text-foreground-muted">
+              {mismatches.map((mismatch) => mismatch.label).join(", ")}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              for (const mismatch of mismatches) {
+                void updateSettings({
+                  environmentId: mismatch.environmentId,
+                  input: { patch: autoSettlePatch },
+                });
+              }
+            }}
+            className="rounded-full bg-subtle px-4 py-2 active:opacity-70"
+          >
+            <Text className="text-base font-t3-medium text-foreground">
+              Apply auto-settle defaults
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </>
   );
 }

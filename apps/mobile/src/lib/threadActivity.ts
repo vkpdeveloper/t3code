@@ -11,6 +11,10 @@ import {
   commandProgramName,
 } from "@t3tools/client-runtime/work-log/command-label";
 import {
+  extractGeneratedImage,
+  type GeneratedImageRef,
+} from "@t3tools/client-runtime/generated-image";
+import {
   contextCompactionLabel,
   toolItemForDisplay,
   workEntryDisplayIndicatesToolFailure,
@@ -92,6 +96,7 @@ export interface ThreadFeedActivity {
   readonly workEntry: WorkLogPresentationEntry;
   readonly groupedToolDetail?: boolean;
   readonly live?: boolean;
+  readonly generatedImage?: GeneratedImageRef;
   readonly projectedItem: OrchestrationV2ProjectedTurnItem;
 }
 
@@ -255,6 +260,10 @@ export function isContextHandoffActivityGroup(entry: ThreadFeedActivityGroup): b
   return (
     entry.activities.length === 1 && entry.activities[0]?.projectedItem.item.type === "handoff"
   );
+}
+
+function isUserInputActivityGroup(entry: ThreadFeedActivityGroup): boolean {
+  return entry.activities.some((activity) => activity.workEntry.questionAnswer !== undefined);
 }
 
 function normalizeDraftAnswer(value: string | undefined): string | null {
@@ -670,6 +679,7 @@ function toFeedActivity(
     status: workEntryDisplayIndicatesToolFailure(workEntry) ? "failure" : itemStatus(item),
     lifecycleStatus: itemLifecycleStatus(item),
     workEntry,
+    generatedImage: extractGeneratedImage(item),
     projectedItem: row,
   };
 }

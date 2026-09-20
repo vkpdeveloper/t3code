@@ -81,7 +81,6 @@ import {
   type ActiveTurnComposerAction,
 } from "@t3tools/client-runtime/state/composer-dispatch";
 import { Atom } from "effect/unstable/reactivity";
-import { AsyncResult } from "effect/unstable/reactivity";
 import { prepareTurnAttachments } from "../lib/attachmentUpload";
 import { DEFAULT_FOLLOW_UP_BEHAVIOR } from "../lib/followUpBehavior";
 import { mobilePreferencesAtom } from "./preferences";
@@ -103,7 +102,6 @@ import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { resolveMobileThreadInteractionMode } from "./thread-interaction-mode";
 import { useEnvironmentServerConfig } from "./entities";
-import { mobilePreferencesAtom } from "./preferences";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";

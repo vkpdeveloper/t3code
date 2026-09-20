@@ -19,6 +19,7 @@ import {
   flattenThemeColor,
   getMobileThemePreviewColors,
   getMobileThemeVariables,
+  MOBILE_THEME_VARIABLE_NAMES,
   normalizeMobileThemeId,
   normalizeMobileThemeMode,
   resolveMobileThemeIds,
@@ -80,7 +81,7 @@ describe("mobile themes", () => {
     for (const appearance of ["light", "dark"] as const) {
       const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId);
       const colors = theme
-        ? getThemeColorsForAppearance(theme, appearance)!
+        ? (getThemeColorsForAppearance(theme, appearance) ?? theme.colors)
         : appearance === "dark"
           ? T3_CODE_DARK_THEME_COLORS
           : T3_CODE_LIGHT_THEME_COLORS;
@@ -293,7 +294,7 @@ describe("mobile themes", () => {
 
   it("maps semantic palette roles onto every mobile color variable", () => {
     const variables = createMobileThemeVariables(T3_CHAT_THEME.colors, "light");
-    expect(Object.keys(variables)).toHaveLength(76);
+    expect(Object.keys(variables)).toHaveLength(MOBILE_THEME_VARIABLE_NAMES.length);
     expect(variables["--color-sheet-solid"]).toBe(
       themeColorToNativeColor(T3_CHAT_THEME.colors.chrome),
     );

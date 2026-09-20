@@ -443,6 +443,7 @@ export function collapsedWorkLogHeight(
 
 interface ThreadWorkLogProps {
   readonly continuesWorkLog?: boolean | undefined;
+  readonly environmentId: EnvironmentId;
   readonly activities: ReadonlyArray<ThreadFeedActivity>;
   readonly anchorKey: string;
   readonly copiedRowId: string | null;
@@ -1011,6 +1012,15 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
           </View>
         </View>
       </WorkLogPressable>
+
+      {row.generatedImage ? (
+        <WorkLogGeneratedImage
+          environmentId={props.environmentId}
+          imageId={row.generatedImage.imageId}
+          filename={row.generatedImage.filename}
+          onPress={props.onPressImage}
+        />
+      ) : null}
 
       {expanded && (reasoning || fullDetail || viewedImagePath || row.workEntry.questionAnswer) ? (
         <Animated.View

@@ -342,6 +342,10 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const cancelUsageLimitResume = useAtomCommand(
+    threadEnvironment.cancelUsageLimitResume,
+    "cancel usage-limit resume",
+  );
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,

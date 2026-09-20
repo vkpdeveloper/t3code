@@ -1,4 +1,3 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
   EnvironmentId,
   ProjectId,
@@ -157,7 +156,7 @@ export function resolveComposerCommandSelection(input: {
   let replacement = "";
   if (item.type === "path") {
     replacement = `${serializeComposerFileLink(item.path)} `;
-  } else if (item.type === "thread") {
+  } else if (item.type === "thread-reference") {
     replacement = `${serializeComposerThreadLink({
       environmentId: item.environmentId,
       threadId: item.threadId,
@@ -187,7 +186,6 @@ export function useComposerCommandMenu({
   pullRequestProjectId = null,
   pullRequestRepository = null,
   selectedProviderStatus,
-  threadShells = [],
   hasThread,
   hasCompactableConversation,
   offersUsageLimits = false,
@@ -200,7 +198,6 @@ export function useComposerCommandMenu({
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
   /** Candidates for `@` thread suggestions; the caller reads them from the entity store. */
-  readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
   /** Left out of `@` thread suggestions: a thread is never context for itself. */
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
@@ -503,7 +500,7 @@ export function useComposerCommandMenu({
     if (trigger.kind === "thread") {
       return searchTaskReferences(taskReferenceIndex, trigger.query).map((thread) => ({
         id: `thread:${thread.environmentId}:${thread.id}`,
-        type: "thread" as const,
+        type: "thread-reference" as const,
         environmentId: thread.environmentId,
         threadId: thread.id,
         title: thread.title,

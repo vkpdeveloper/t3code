@@ -1,8 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
-import type { WorktreeSetupCardProps } from "./worktree-setup-card";
-import { useNavigation } from "@react-navigation/native";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
@@ -119,6 +117,7 @@ import {
   ThreadComposer,
 } from "./ThreadComposer";
 import { ThreadFeed, type ThreadFeedHistoryControls } from "./ThreadFeed";
+import { ThreadRelationshipsBanner } from "./ThreadRelationshipsBanner";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
@@ -1030,6 +1029,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             }
             contentMaxWidth={contentMaxWidth}
             historyControls={props.historyControls}
+            topAccessory={
+              <ThreadRelationshipsBanner
+                environmentId={props.environmentId}
+                threadId={props.selectedThread.id}
+              />
+            }
             layoutVariant={layoutVariant}
             usesAutomaticContentInsets={props.usesAutomaticContentInsets}
             onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
@@ -1236,7 +1241,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     : undefined
                 }
               >
-                <>
+                <GlassBlurTargetContext value={feedBlurTarget}>
                   <ThreadComposer
                     editorRef={composerEditorRef}
                     draftMessage={props.draftMessage}
@@ -1288,7 +1293,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onExpandedChange={setComposerExpanded}
                     onEditorFocusChange={handleComposerFocusChange}
                   />
-                </>
+                </GlassBlurTargetContext>
               </View>
             </View>
           </Animated.View>

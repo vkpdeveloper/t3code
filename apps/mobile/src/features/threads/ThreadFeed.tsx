@@ -176,7 +176,6 @@ import {
   THREAD_DISCLOSURE_TRANSITION_MS,
   ThreadWorkGroupToggle,
   ThreadThinkingRow,
-  ShimmeringWorkContent,
   ThreadWorkLog,
   WORK_GROUP_TOGGLE_HEIGHT,
 } from "./thread-work-log";
@@ -238,8 +237,6 @@ function formatMessageTime(input: string): string {
 
 const TURN_FOLD_HEIGHT = 42;
 
-const THREAD_FEED_LAYOUT_TRANSITION = LinearTransition.duration(THREAD_DISCLOSURE_TRANSITION_MS);
-const THREAD_FEED_IMMEDIATE_TRANSITION = LinearTransition.duration(0);
 // Tailwind spacing on the mobile 14px rem: px-3.5 on the user bubble, px-1 on
 // assistant rows. Images size their frame from these before their own layout.
 const USER_BUBBLE_HORIZONTAL_PADDING = 3.5 * 3.5;
@@ -288,6 +285,7 @@ export interface ThreadFeedProps {
   readonly contentTopInset?: number;
   readonly contentBottomInset?: number;
   readonly historyControls?: ThreadFeedHistoryControls;
+  readonly topAccessory?: ReactNode;
   readonly contentMaxWidth?: number;
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
@@ -1468,6 +1466,7 @@ function renderFeedEntry(
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey?: string) => void;
     readonly onToggleTurnFold: (runId: RunId) => void;
+    readonly onPressImage: (uri: string) => void;
     readonly onPressPreview: (source: FilePreviewSource) => void;
     readonly onPressVideo: (attachment: ChatFileAttachment, sourceIdentifier: string) => void;
     readonly markdownLinkHandlers: MarkdownLinkHandlers;
@@ -2600,6 +2599,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.latestRun,
     ],
   );
+  const setupAnchorIndex = presentedFeed.findIndex(
+    (entry) => entry.type === "message" && entry.message.role === "user",
+  );
   // The empty↔filled key below remounts the list and resets its imperative
   // content-inset override. Seed the fresh instance synchronously with the
   // current overlay height before the scroll integration's next reaction;
@@ -2879,6 +2881,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             onToggleWorkGroup,
             onToggleWorkRow,
             onToggleTurnFold,
+            onPressImage,
             onPressPreview,
             onPressVideo,
             markdownLinkHandlers,
@@ -2898,10 +2901,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             skills: props.skills,
             workspaceRoot: props.workspaceRoot,
           })}
+          {props.worktreeSetup && info.index === setupAnchorIndex ? (
+            <WorktreeSetupCard key={props.threadId} {...props.worktreeSetup} />
+          ) : props.setupWorkingStartedAt && info.index === setupAnchorIndex ? (
+            <WorktreeWorkingHeader startedAt={props.setupWorkingStartedAt} />
+          ) : null}
         </ThreadMediaVisibility>
       </Animated.View>
     ),
     [
+      props.worktreeSetup,
+      props.setupWorkingStartedAt,
+      setupAnchorIndex,
       props.dispatchingMessageId,
       props.onEditPendingMessage,
       copiedRowId,

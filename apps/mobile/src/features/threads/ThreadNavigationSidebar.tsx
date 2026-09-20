@@ -1,4 +1,3 @@
-import { resolveThreadProviderInstance } from "./thread-provider-instance";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { createThreadMovePlanner } from "./threadOrder";
 import type {
@@ -88,7 +87,6 @@ import {
   buildThreadListV2Items,
   getThreadListV2OrderedSection,
   buildThreadListV2ListItems,
-  resolveThreadListV2ProviderDrivers,
   THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   type ThreadListV2ListItem,
@@ -849,13 +847,6 @@ function ThreadNavigationSidebarPane(
             : threadMovePlanners.active;
           const movedId = `${thread.environmentId}:${thread.id}`;
           const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
-          const provider = serverConfigs
-            .get(thread.environmentId)
-            ?.providers.find(
-              (candidate) =>
-                candidate.instanceId ===
-                (thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId),
-            );
           return (
             <ThreadListV2Row
               onNewThreadOnBranch={props.onNewThreadOnBranch}

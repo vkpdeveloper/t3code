@@ -64,7 +64,7 @@ export type ComposerCommandItem =
     }
   | {
       readonly id: string;
-      readonly type: "thread";
+      readonly type: "thread-reference";
       readonly environmentId: EnvironmentId;
       readonly threadId: ThreadId;
       readonly title: string;
@@ -116,11 +116,10 @@ function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
       return "terminal";
     case "skill":
       return SKILL_SOURCE_SYMBOL_BY_KIND[resolveProviderSkillSourceKind(item.skill)];
-    case "thread":
-      return "text.bubble" as const;
     case "path":
       return null;
     case "thread":
+    case "thread-reference":
       return "text.bubble";
   }
 }
