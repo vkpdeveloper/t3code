@@ -154,6 +154,7 @@ interface StartThreadBootstrap {
     readonly baseBranch: string;
     readonly branch?: string;
     readonly startFromOrigin?: boolean;
+    readonly requireWorktree?: boolean;
   };
   readonly runSetupScript?: boolean;
 }

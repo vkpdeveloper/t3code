@@ -97,13 +97,6 @@ export function resolveAutoSettlementAt(input: {
           };
   }
   if (!isAutoSettlementCandidate(thread, input.now)) return null;
-  if (thread.automationId != null) {
-    return thread.latestTurn?.state === "completed" &&
-      thread.session?.status !== "error" &&
-      !thread.hasActionableProposedPlan
-      ? thread.latestTurn.completedAt
-      : null;
-  }
   const activityAt = latestTimestamp([
     thread.latestUserMessageAt,
     thread.latestTurn?.requestedAt,

@@ -51,7 +51,6 @@ import { layer as threadLaunchServiceLayer } from "./ThreadLaunchService.ts";
 import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.ts";
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
-import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
 
 const runtimePolicyProvided = runtimePolicyLayerFromProjectRepository.pipe(
   Layer.provide(ProjectionProjectRepositoryLive),
@@ -239,9 +238,6 @@ const threadLaunchProvided = threadLaunchServiceLayer.pipe(
 const threadLifecycleProvided = threadLifecycleServiceLayer.pipe(
   Layer.provide(threadManagementProvided),
 );
-const scheduledTaskProvided = scheduledTaskServiceLayer.pipe(
-  Layer.provide(Layer.mergeAll(threadLaunchProvided, threadManagementProvided)),
-);
 const providerContinuationWorkerProvided = providerContinuationWorkerLive.pipe(
   Layer.provide(
     Layer.mergeAll(providerContinuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
@@ -327,7 +323,6 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   ProjectServiceLayerLive,
   threadLaunchProvided,
   threadLifecycleProvided,
-  scheduledTaskProvided,
   providerContinuationWorkerProvided,
   agentSessionImporterProvided,
 ).pipe(Layer.provideMerge(OrchestrationLayerLive));

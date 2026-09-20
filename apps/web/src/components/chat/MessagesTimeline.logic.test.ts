@@ -2695,13 +2695,6 @@ describe("resolveTimelineToolPresentation", () => {
     });
   });
 
-  it("pretty prints bare T3 MCP toolkit names", () => {
-    expect(resolveTimelineToolPresentation("list_scheduled_tasks")).toEqual({
-      displayName: "List scheduled tasks",
-      logo: "t3-code",
-    });
-  });
-
   it("keeps unknown MCP tools on the generic renderer path", () => {
     expect(resolveTimelineToolPresentation("mcp__github__search_issues")).toBeNull();
   });

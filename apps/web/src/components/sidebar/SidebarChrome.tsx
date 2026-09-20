@@ -1,6 +1,5 @@
 import {
   ArrowLeftIcon,
-  AlarmClockIcon,
   ChartNoAxesColumnIcon,
   GitPullRequestIcon,
   SettingsIcon,
@@ -146,11 +145,9 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/usage"
             ? "usage"
-            : location.pathname === "/automations"
-              ? "automations"
-              : location.pathname === "/pull-requests"
-                ? "pull-requests"
-                : null,
+            : location.pathname === "/pull-requests"
+              ? "pull-requests"
+              : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -169,10 +166,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       to: "/pull-requests",
       search: readPullRequestListPreferences(),
     });
-  }, [closeMobileSidebar, navigate]);
-  const handleAutomationsClick = useCallback(() => {
-    closeMobileSidebar();
-    void navigate({ to: "/automations" });
   }, [closeMobileSidebar, navigate]);
   const handleSettingsClick = useCallback(() => {
     closeMobileSidebar();
@@ -210,11 +203,6 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<SettingsIcon />}
             label="Settings"
             onClick={handleSettingsClick}
-          />
-          <SidebarUtilityItem
-            icon={<AlarmClockIcon />}
-            label="Automations"
-            onClick={handleAutomationsClick}
           />
           {pullRequestsSupported ? (
             <SidebarUtilityItem

@@ -140,6 +140,12 @@ export type ProviderSessionManagerV2Error = typeof ProviderSessionManagerV2Error
 
 export interface ProviderSessionManagerV2Shape {
   readonly shutdown: Effect.Effect<void>;
+  readonly listLiveSessions?: Effect.Effect<
+    ReadonlyArray<{
+      readonly attachedThreadIds: ReadonlySet<ThreadId>;
+      readonly cwd: string;
+    }>
+  >;
   readonly open: (input: {
     readonly threadId: ThreadId;
     readonly providerSessionId: ProviderSessionId;
@@ -1531,6 +1537,14 @@ export const layerWithOptions = (
 
       return ProviderSessionManagerV2.of({
         shutdown,
+        listLiveSessions: Ref.get(sessions).pipe(
+          Effect.map((entries) =>
+            [...entries.values()].map((entry) => ({
+              attachedThreadIds: entry.attachedThreadIds,
+              cwd: entry.runtime.providerSession.cwd,
+            })),
+          ),
+        ),
         open: (input) =>
           sessionOpen.withLock(
             input.providerSessionId,

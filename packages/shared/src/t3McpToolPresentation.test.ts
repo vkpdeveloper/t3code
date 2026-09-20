@@ -24,13 +24,6 @@ describe("resolveT3McpToolPresentation", () => {
     });
   });
 
-  it("pretty prints bare T3 MCP toolkit names", () => {
-    expect(resolveT3McpToolPresentation("list_scheduled_tasks")).toEqual({
-      displayName: "List scheduled tasks",
-      logo: "t3-code",
-    });
-  });
-
   it("pretty prints worktree T3 MCP tool names", () => {
     expect(resolveT3McpToolPresentation("mcp__t3-code__t3_worktree_handoff")).toEqual({
       displayName: "Hand off thread to a git worktree",

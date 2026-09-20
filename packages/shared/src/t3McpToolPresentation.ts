@@ -34,17 +34,6 @@ const T3_MCP_TOOLS: Record<
   delegate_task: { displayName: "Delegate a child task", summaryAction: "delegate" },
   task_status: { displayName: "Get delegated task status", summaryAction: "task-status" },
   task_cancel: { displayName: "Cancel delegated task", summaryAction: "task-cancel" },
-  run_scheduled_task_now: { displayName: "Run scheduled task now" },
-  schedule_task: { displayName: "Schedule a recurring task", summaryAction: "schedule-create" },
-  list_scheduled_tasks: { displayName: "List scheduled tasks", summaryAction: "schedule-list" },
-  update_scheduled_task: {
-    displayName: "Update a scheduled task",
-    summaryAction: "schedule-update",
-  },
-  delete_scheduled_task: {
-    displayName: "Delete a scheduled task",
-    summaryAction: "schedule-delete",
-  },
   create_threads: { displayName: "Create T3 threads", summaryAction: "thread-create" },
   t3_thread_start: { displayName: "Start a T3 thread", summaryAction: "thread-create" },
   t3_thread_list: { displayName: "List T3 threads", summaryAction: "thread-list" },

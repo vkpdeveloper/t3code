@@ -1,530 +1,104 @@
-# Provider architecture
+# Provider constraints
 
-<<<<<<< HEAD
+Orchestration records intent and state without knowing which provider runs a thread. Provider
+protocols, account ownership, permissions, and capabilities belong at the adapter boundary. The
+V2 adapters live in `apps/server/src/orchestration-v2/Adapters`; shared provider installation,
+authentication, and maintenance services live under `apps/server/src/provider`.
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
-> \=======
-> Orchestration records intent and state without knowing which provider runs a thread. Provider
-> protocols, account ownership, permissions, and capabilities belong at the
-> [adapter boundary](../../apps/server/src/orchestration-v2/ProviderAdapter.ts). Normalize there
-> instead of spreading provider checks through reactors and clients.
->
-> > > > > > > upstream/t3code/codex-turn-mapping
-
-A provider is the agent runtime that does the actual work. T3 Code supports several, and the
-orchestration layer does not know which one is behind a thread.
+A driver kind identifies an integration. An instance identifies one configuration and account
+lifecycle. Route work by instance so two accounts using the same driver do not share mutable
+session or catalog state.
 
 ## Built-in drivers
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with eight entries:
+The fork supports Codex, Claude Agent, Cursor, Grok, Devin, Amp, OpenCode, and Antigravity. A new
+driver needs an adapter and registry entry. Provider-specific behavior stays at that boundary so
+the orchestration model and clients do not grow provider checks for the common path.
 
-<<<<<<< HEAD
+## Process and account isolation
 
-| Driver kind   | Driver source                                 |
-| ------------- | --------------------------------------------- |
-| `codex`       | [`Drivers/CodexDriver.ts`][codex]             |
-| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]           |
-| `cursor`      | [`Drivers/CursorDriver.ts`][cursor]           |
-| `grok`        | [`Drivers/GrokDriver.ts`][grok]               |
-| `devin`       | [`Drivers/DevinDriver.ts`][devin]             |
-| `amp`         | [`Drivers/AmpDriver.ts`][amp]                 |
-| `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode]       |
-| `antigravity` | [`Drivers/AntigravityDriver.ts`][antigravity] |
+T3-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped,
+while T3's MCP connection is thread-scoped. Sharing a chat server between threads in one directory
+would let them replace each other's connection. Catalog and text-generation work can share the
+instance-owned helper, which closes after an idle period. External OpenCode servers remain
+externally owned and can require an external restart to pick up configuration changes.
 
-Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
-adapter in a child scope. Adapter implementations live beside them in
-`apps/server/src/provider/Layers/` (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on) and conform to
-[`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
-transport, config, and event shapes are mapped.
-=======
-
-OpenCode also stores persistent approval grants per directory. Automatic full-access replies use
-`once` so they cannot widen a supervised thread's permissions on a shared external server.
-See the [adapter](../../apps/server/src/orchestration-v2/Adapters/OpenCodeAdapterV2.ts).
-
-Pi runs the user's own `pi` install in RPC mode and owns native extension, package, and project
-trust discovery. T3 injects only its namespaced MCP bridge, so a Pi session behaves as it does in
-the Pi TUI. Pi session files back native resume, rollback, and same-instance thread forks.
-Forks use Pi's CLI in the destination directory because RPC session switching retains the source
-session's cwd. Provider switches still use portable handoff summaries.
-See the [adapter](../../apps/server/src/orchestration-v2/Adapters/PiAdapterV2.ts).
-
-> > > > > > > upstream/t3code/codex-turn-mapping
+OpenCode stores persistent approval grants per directory. Automatic full-access replies use `once`
+so they cannot widen a supervised thread's permissions on a shared external server.
 
 Antigravity separates account profiles per instance while sharing installed executables across the
-environment. It forces file-based credential storage because the native macOS keychain entry would
-otherwise be shared across instances. The launch environment removes ambient Google credentials,
-so an instance cannot silently use another account or billing project. The agent also resolves
-its user-global skill directories under that profile, so the profile links those two directories
-back to the user's real `~/.gemini`; MCP servers, hooks, and rules there stay out of the profile.
-See [profile isolation](../../apps/server/src/provider/antigravityAuthSupport.ts).
+environment. It uses file-based credential storage because the native macOS keychain entry would
+otherwise be shared across profiles. The isolated profile links user-global skills back to the
+real Gemini home without importing user MCP servers, hooks, or rules into the profile.
 
-## Registry and routing
+The Antigravity installer outlives client connections and provider-instance rebuilds. Releases are
+immutable, with an atomic pointer selecting the version for new processes. Running processes hold
+leases on their version. Updates and removal must respect those leases instead of replacing
+executables under a running agent.
 
-Two registries separate configuration from live processes:
+## Setup must not happen as a health-check side effect
 
-- [`ProviderInstanceRegistry`][instances] keys configured instances by `ProviderInstanceId`. Creating
-  one looks up the driver by `driverKind`, decodes `entry.config` with that driver's schema, opens a
-  child scope, and calls `driver.create`.
-- [`ProviderAdapterRegistry`][registry] resolves an instance ID to its live adapter via
-  `getByInstance`.
+Opening a provider session can start MCP servers, run hooks, or launch a login browser. Grok probes
+therefore use version, model, and initialization checks without authenticating or creating a
+session. A failed initialization can degrade to a warning when the installed CLI and model catalog
+are still usable.
 
-[`ProviderService`][service] sits on top. It combines the adapter registry with the provider session
-directory to route session and turn operations for a thread, so callers name a thread, not an agent.
+Antigravity reserves authenticated catalog sessions for explicit setup or model refresh.
+Background checks use initialization only. Sign-in belongs to the initiating T3 auth session. The
+client carries the return URL back to the environment because the provider's loopback listener may
+be on another machine. A successful callback HTTP request is not proof that authentication
+finished. The native process owns token exchange and storage.
 
-`ProviderService.sendTurn` expands [assistant citations](./assistant-citations.md) into quoted
-reference data before dispatching to any adapter. Bound user comments remain distinct from the quoted
-assistant text. Persisted messages keep their serialized links.
+Sign-out closes admission to new processes and stops existing processes before clearing account
+metadata. Cached model lists do not establish current access, and an authoritative empty catalog
+must clear the old list.
 
-Adding a driver means writing the driver plus adapter and adding it to `BUILT_IN_DRIVERS`. No
-orchestration, contract, or client change is required for the common case.
+Text-generation helpers deny tool requests, but native hooks and MCP configuration can run before
+the prompt. They reject profiles with such configuration before launch. Prompt instructions and
+tool denial do not create a native sandbox.
 
-### Grok health check
+## Provider updates run only through the owning installer
 
-`checkGrokProviderStatus` never opens an ACP session. It runs `grok --version`, then `grok models`
-for login state and model slugs, then a single ACP `initialize` and reads models from
-`_meta.modelState`. `authenticate` and `session/new` are skipped on purpose: `authenticate` can open
-a browser login and `session/new` boots every configured MCP server, both of which made background
-probes hang or surprise the user. A failed `initialize` degrades to `warning` with the CLI's model
-list instead of persisting `error` over a working install. The built-in `grok-build` slug is the
-CLI's product name, not an ACP model id. `applyGrokAcpModelSelection` treats it as "keep the
-session's current model" and never sends it in `session/set_model`.
+A one-click update is offered only when the resolved executable path proves which installer owns
+it. Homebrew and npm ownership use real paths, including versioned kegs and global package roots.
+Native installer layouts and the global bin directories of pnpm, Bun, and Vite+ may match the
+resolved path or its real target. Anything unproven stays manual-only but can still report a
+version gap.
 
-## Devin ACP session and models
+Ownership is cached per instance and re-read immediately before an update. The runner refuses when
+the lock key changed since the advisory and reports success only when the refreshed provider is
+still installed with a readable, current version.
 
-The Devin driver runs `devin acp`, a stock ACP agent, so the shared runtime handles streaming,
-tool calls, permissions, usage, and titles. Three Devin decisions live in
-[`DevinAcpSupport`][devin-support]:
-
-<<<<<<< HEAD
-
-- The runtime is started without an `authMethodId`, so it never sends ACP `authenticate`. Devin's
-  only auth method is `devin-browser`, which starts a browser PKCE flow on every call even when the
-  CLI already holds credentials. Sessions rely on `devin auth login` credentials instead, and the
-  health check reports a logged-out CLI before any session is opened.
-- Modes are mapped explicitly. The generic alias resolver would send Supervised (`approval-required`) to Devin's
-  read-only Ask mode. Devin has no ask-before-edit mode over ACP, so Supervised and
-  Auto-accept edits both use Code, Auto uses Smart, and Full access uses Bypass Permissions.
-- The model catalog is read only from the session's `model` config option. `devin models list`
-  prints the full catalog including models the account cannot use, while the session advertises
-  exactly what a prompt would accept. The health check opens a throwaway session for this and
-  deletes it with `session/delete` so probes do not accumulate in `devin ls`.
-
-Devin sends ask-user-question as an ACP form elicitation under `elicitation/create` and
-`_session/elicitation` rather than `session/elicitation`; the adapter registers both as extension
-requests and maps the JSON-schema form onto T3 user-input questions.
-=======
+## Protocol traps
 
 Codex async questions arrive as notifications and are answered with a new user message. There is
-no pending RPC response to send. The
-[adapter](../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts) persists them as
-`user_input_request` turn items and runtime requests with `responseCapability: { type: "message" }`.
-Their execution nodes do not block the run. Web, desktop, and mobile use their normal question
-panels, and requests remain pending after a turn finishes, a provider exits, or the server restarts.
-
-`runtime-request.respond` reads the persisted request and question item, validates required
-answers, and commits the resolution and a user message in one transaction. Repeating the same
-command returns its receipt without posting the answer twice. The normal message path starts or
-resumes a run, queues behind active work, or steers when the adapter supports it. Blocking questions
-retain the provider's live response path. Do not infer that a request has disappeared merely because
-it is outside the recent history window.
-
-> > > > > > > upstream/t3code/codex-turn-mapping
-
-## Antigravity ownership and protocol
-
-[`AntigravityDriver`][antigravity] uses Google's official ACP executable. The instance config
-selects the ACP auth method: `oauth-personal` (default), `oauth-business`, `gemini-api-key`, or
-`agent-platform`. The two OAuth methods share the loopback sign-in flow below. The API key
-methods pass the configured key to the agent as `GEMINI_API_KEY` or `GOOGLE_API_KEY` and never
-open a browser. A GCP project and location are written to the profile's `settings.json` on each
-launch. The driver never reuses CLI credentials or ambient `GOOGLE_*` variables and never falls
-back to another method. Antigravity is disabled by default and supports multiple provider
-instances. The open driver and instance identifiers require no database migration.
-
-<<<<<<< HEAD
-
-### Runtime installation
-
-=======
-Attachments live outside the project workspace. The
-[attachment boundary](../../apps/server/src/orchestration-v2/AttachmentClaims.ts) validates and claims
-uploads for a thread; adapters choose native input formats for those environment-local files.
-A path in the prompt does not grant filesystem access. Keep provider sandbox and approval rules
-in force; copying uploads into the project to bypass them changes that boundary.
-
-> > > > > > > upstream/t3code/codex-turn-mapping
-
-[`AntigravityInstallation`][antigravity-installation] belongs to the environment, outside
-WebSocket and provider-instance scopes. Instances share an explicit download operation and the
-completed runtime. Client disconnects and instance rebuilds do not cancel installation.
-
-<<<<<<< HEAD
-The fixed [release table][antigravity-release] contains official Google URLs, SHA-256 hashes,
-archive sizes, and the exact executable pair for each published host. Downloads stream to disk.
-Lazy `yauzl` entry streams extract only that pair, with member names, types, duplicates, and
-sizes checked. Validation runs ACP `initialize` in a temporary profile without authentication
-or a session. Progress updates are bounded, not sent for every network chunk.
-
-Complete releases live in immutable version directories under the T3 home
-`tools/antigravity-acp/<platform>-<arch>/versions`. An atomic `active.json` change selects the
-release for new processes. Each process holds a version lease until it exits. Updates do not
-replace running executables. Removal refuses active leases or explicit binary paths that still
-reference the managed files. Failure or cancellation removes owned partial files, not the
-previous release or account data.
-
-Resolution order is explicit `binaryPath`, active managed release, then the instance's `PATH`.
-An invalid explicit path fails without fallback. Manual installations are never changed by the
-installer. Every launch pins `ANTIGRAVITY_HARNESS_PATH` to the selected executable's sibling.
-
-### Google profiles and sign-in
-
-Each instance owns a stable profile at
-`<stateDir>/providers/antigravity/<sha256(instanceId)>`.
-[`antigravityAuthSupport.ts`][antigravity-auth-support] sets `GEMINI_HOME` to this directory and
-`AGY_ACP_FORCE_FILE_STORAGE=1` after merging instance environment variables. File storage avoids
-the official macOS keychain entry being shared across instances. Profile directories use mode
-`0700` on POSIX. This is file storage, not an encrypted keychain. Windows uses the host profile's
-filesystem permissions.
-
-The launch environment removes API-key and cloud-billing variables, disables inherited
-environment extension, sets `PYTHONUNBUFFERED=1`, and controls `BROWSER`. A tested Node or
-Electron-as-Node helper prevents the official agent from opening a browser on the environment.
-The same launch factory serves setup, health checks, chat, and text generation.
-
-The official agent prints one non-JSON OAuth line on stdout. Only the exact known prefix is
-filtered before ACP decoding. Fragmented lines are joined and bounded. Other malformed
-protocol output remains fatal. Authorization URLs are validated before use. Native stderr is
-drained without logging because it can contain OAuth data. Normal work rejects an interactive
-login request with a sign-in-required error instead of waiting for consent.
-
-[`AntigravityAuth`][antigravity-auth] owns each sign-in process and deadline in the instance
-scope. Only the initiating T3 auth session receives its URL and flow ID or can complete or
-cancel it. Other clients receive busy state without those values. Subscriptions follow
-controller replacement when settings rebuild an instance.
-
-For remote completion, the client sends the full return URL through the typed setup RPC.
-The server validates the pending loopback origin, port, root path, and single matching state
-before forwarding once to the owned listener. It does not probe the listener or follow
-redirects. Google's process owns PKCE, token exchange, refresh, and storage. Callback HTTP
-success is not authentication success. The controller waits for authenticated session setup
-and catalog discovery. Cancellation closes the process instead of sending a synthetic denial.
-
-Auth RPCs `provider.auth.start`, `complete`, `cancel`, `logout`, and `subscribe` require
-`orchestration:operate`. Install `start`, `cancel`, and `remove` use that scope too.
-`provider.install.subscribe` and public provider snapshots require `orchestration:read`.
-[`providerSetup.ts`][provider-setup] defines the operation IDs, states, and safe errors.
-
-Sign-out closes process admission for the instance, stops provider bindings through
-[`ProviderAuthService`][provider-auth-service], then stops owned startup and helper processes.
-A fresh official process calls `initialize` and native `logout` without authenticating.
-Only then does the provider clear auth, models, commands, skills, and workspace metadata.
-Thread history and native session files remain. Settings sign-out and a text-only `/logout`
-use this same path. The command is handled before model prompting or title generation.
-Disabling an instance closes its processes but keeps credentials. Account replacement is
-explicit sign-out followed by sign-in.
-
-### Sessions, models, and client capabilities
-
-[`AntigravityAdapter`][antigravity-adapter] owns one ACP process per active thread. It uses
-native `session/resume` without transcript replay and reapplies the persisted model and
-permission mode after new or resumed setup. An unavailable explicit model fails instead of
-accepting the native default. Steering cancels the previous prompt, waits for its result and
-event drain, then sends the replacement. Native background commands use T3's existing
-background-task state.
-
-The permission mapping is `approval-required` and `auto` to `default`, `auto-accept-edits` to
-`auto_edit`, and `full-access` to `yolo`. Native requests still need replies in `yolo`.
-`interaction_` requests are user questions, not approvals. T3 keeps opaque option IDs in
-`UserInputQuestion.options[].value` and sets `allowCustomAnswer=false`. Both clients preserve
-these values. Ordinary approval replies use only offered option IDs, including `allow_always`
-only when present. Existing providers keep their prior behavior when the optional fields are
-absent.
-
-`showInteractionModeToggle=false` keeps native `/plan` separate from T3 Plan mode.
-`supportsConversationRollback=false` hides unsupported client actions and makes checkpoint
-revert fail before filesystem changes. Checkpoint capture and diffs remain supported.
-
-Automatic status refreshes, reconnects, and workspace checks do not open catalog sessions.
-Health probes use `initialize` only. Disabled instances do not run background probes.
-An explicit `serverRefreshProviders` request with `refreshModels: true` calls the driver's
-optional `refreshModels` operation. Antigravity opens a short-lived catalog session under the
-instance's process admission guard, uses saved credentials, publishes models and commands,
-then closes the process. An interactive login request fails with sign-in required. Web's
-**Refresh provider status** and mobile's **Refresh models** actions request this operation.
-Account access starts unknown and becomes authenticated after successful session setup,
-including an explicit model refresh.
-The [provider snapshot][antigravity-provider] takes models and commands from setup and native
-updates. It preserves returned Gemini model IDs, labels, order, and thinking-level choices.
-The registry treats a successful empty catalog as authoritative and clears cached metadata
-after sign-out. It must not retain a previous account's models. Cached models do not prove
-current access. The auth response does not supply an email, plan tier, or reliable quota.
-
-Some upstream failures arrive as assistant text followed by `end_turn`. Preserve that message
-without treating model-written text as a structured error or successful task completion.
-
-### Text generation
-
-[`AntigravityTextGeneration`][antigravity-text] implements titles, branch names, commit text,
-and PR text through the same instance and Google sign-in. Each helper uses a temporary empty
-workspace, no injected MCP servers, native `default` mode, and explicit denial of tools and
-questions. Output is bounded, parsed against the existing schemas, and sanitized. Cancellation,
-timeout, and sign-out close the process. Cleanup removes only that helper's verified temporary
-native session files.
-
-The official agent has no verified hard no-tools setting. Global hooks and MCP configuration
-can run before a prompt. Helpers check the profile's `config/hooks.json` and
-`config/mcp_config.json` before launch and reject nonempty, malformed, or oversized
-configuration. `supportsTextGeneration=false` keeps such an instance out of system-model
-pickers. Empty managed profiles are supported. Do not describe prompt-time denial as a native
-sandbox.
-
-## OpenCode server ownership and catalog
-
-Each OpenCode provider instance owns one lazy local server for catalog discovery and
-text-generation helpers through [`OpenCodeServerOwner.ts`][opencode-server-owner]. Concurrent
-borrowers share startup. The server closes 30 seconds after the last borrower releases it, or
-when the provider instance closes. A failed or exited process can be started again on the next
-use. An externally configured OpenCode server remains externally owned.
-
-The local server and its SDK clients use one resolved password. An explicit provider password
-overrides `OPENCODE_SERVER_PASSWORD` in the spawned environment. Without an explicit password,
-the client uses the password from the environment that the process inherits. External servers use
-only their explicit provider password and never inherit the host's local password.
-
-Every server connection must pass the authenticated `/global/health` check before inventory or
-session operations start. The response must contain a valid version at or above 1.14.19. Local
-owners cache this result for the lifetime of the spawned process. External actions check once when
-they create their server connection, not for each model or SDK request.
-
-Chat adapters keep their own server per thread. They register a thread-specific `t3-code` MCP
-connection, while OpenCode stores MCP connections by directory. Sharing these chat servers
-without changing MCP routing would let two threads in one directory replace each other's
-connection.
-
-Chat adapters send the runtime mode as a session ruleset, but upstream OpenCode evaluates
-doom-loop and subagent asks against the agent ruleset only. In full access the adapter answers
-those asks itself so the user never sees an approval they already granted. It replies `once`
-rather than `always` because OpenCode stores `always` grants per directory, and on a shared
-external server that would widen what a supervised thread in the same directory may do.
-
-OpenCode loads its catalog through the HTTP API when an enabled provider instance starts. The
-provider registry keeps the snapshot in memory and persists it in the existing per-instance cache.
-Each `subscribeServerConfig` connection refreshes all providers, so a client reconnect reloads the
-OpenCode catalog from the current helper. The `serverRefreshProviders` request also refreshes it.
-Periodic OpenCode probes remain disabled. OpenCode reads credentials for each inventory request,
-but its native configuration files can remain cached for the lifetime of the helper process. The
-helper closes 30 seconds after its last inventory or text-generation borrower releases it. A
-refresh after that idle period starts a new helper and reads file changes. Repeated refreshes and
-active text-generation work can extend process reuse. Changes to the provider configuration or
-environment replace the instance and start a new discovery. Changes to unrelated settings only
-update snapshot enrichment. Other providers retain their existing refresh policy.
-
-T3 Code does not own an external OpenCode process. Native configuration changes there can require
-an external reload or restart before T3 Code's next refresh sees them.
-
-The shared server's idle shutdown does not clear the catalog. Failed discovery keeps the last
-known models, slash commands, and skills through the registry's existing merge rules. A successful
-empty inventory is authoritative. Existing threads keep their explicit model identifier and
-options when catalog metadata is missing; the catalog is not permission to choose a different
-model for a thread.
-
-## Model manifest
-
-The model picker's legacy section is driven by `apps/server/src/provider/model-manifest.json`, which
-lists the current (non-legacy) model slugs per driver kind. The `ModelManifest` service
-(`apps/server/src/provider/ModelManifest.ts`) refreshes that data from the same file on `main` via
-raw.githubusercontent.com, so moving a model in or out of the legacy section is a commit, not a
-release. Preference order is remote fetch, then the on-disk copy of the last successful fetch (in
-the state directory), then the bundled copy. Fetches are TTL-gated, run concurrently with provider
-probes, respect the `enableProviderUpdateChecks` setting, and never fail a provider check. The
-Codex and Claude drivers apply the classification to every snapshot with `applyModelManifest`;
-driver kinds absent from the manifest have no legacy concept.
-
-## Attachment access
-
-The server stores uploaded attachments in its attachment directory, outside the project workspace.
-`ProviderService` adds the absolute path of each attachment to the turn text, then passes every
-attachment to the provider adapter. Each adapter decides what its provider ingests natively:
-
-- Codex, Claude, Cursor, and Grok send images as native image inputs and skip generic files. For
-  these providers, generic files reach the agent only as file paths in the turn text.
-- Antigravity sends BMP, JPEG, PNG, and WebP images and common audio formats as native blocks,
-  text files as embedded resources, and PDFs as resource links. Other files are rejected with an
-  error instead of being dropped. The session advertises the ACP client file system capability,
-  so workspace reads and writes come back through `fs/read_text_file` and `fs/write_text_file`
-  and are confined to the workspace and the attachments directory.
-- OpenCode sends PNG/JPEG/GIF/WebP images, text files, and PDFs up to 20 MB as native file parts
-  with their real mime type. Everything else (ZIP and other binaries, image formats model APIs
-  reject, oversized files) falls back to the file path in the turn text, like the other providers.
-- Antigravity sends BMP/JPEG/PNG/WebP images as native image blocks, UTF-8 text as embedded
-  resources, and PDFs as local resource links. Text is limited to 1 MiB per file, images to
-  10 MiB each, and all attachments to 50 MiB per turn. Unsupported formats or oversized inputs
-  fail explicitly. Native path permissions still apply to PDFs.
-
-Claude receives the attachment directory as an allowed additional directory. Codex keeps its
-configured sandbox policy, so access depends on that policy and the selected runtime mode. OpenCode
-allows all paths in full-access mode and requests approval for directories outside the workspace in
-restricted modes. Cursor and Grok use their own provider permission rules.
-
-The server does not copy attachments into a project or bypass provider approval rules. If an agent
-cannot read an attachment, the user must approve the access or select a runtime mode that permits it.
-
-Updated attachment schemas tolerate unknown attachment members, but old image-only clients still
-cannot decode messages that contain file attachments. Client file-picking rollouts must account for
-this limit.
-
-Do not run an old image-only server against state that contains file attachments. Replay decodes
-each persisted event before projection. A file-bearing event can make `ProjectionPipeline` bootstrap
-and `OrchestrationEngine` startup fail for the entire environment, not only the affected thread.
-
-## Provider update ownership
-
-A one-click provider update is offered only when the resolved executable path proves which installer
-owns it. Homebrew and npm ownership follow the real path, while native installs and the global bin
-directories of pnpm, Bun, and Vite+ may match the resolved path or its real target. Unproven
-installations remain manual-only but still report version gaps.
-
-Ownership is cached per instance and checked again immediately before the update. The maintenance
-runner refuses to continue if the lock key changed since the advisory, and reports success only when
-the refreshed provider remains installed at a readable, current version. npm updates pin the prefix
-that owns the provider so a different Node installation on `PATH` cannot receive the update.
-
-## How provider work is requested
-
-Clients never call a provider directly. They dispatch orchestration commands over the RPC method
-`orchestration.dispatchCommand`, defined with the rest of the orchestration surface in
-[`orchestration.ts`][contracts]. The client-dispatchable provider-facing commands are
-`thread.turn.start`, `thread.turn.interrupt`, `thread.approval.respond`,
-`thread.user-input.respond`, `thread.checkpoint.revert`, and `thread.session.stop`, plus the mode
-setters `thread.runtime-mode.set` and `thread.interaction-mode.set`.
-
-The engine persists an event for the command, and a server-side reactor performs the provider call.
-Provider output comes back as internal commands such as `thread.message.assistant.delta` and
-`thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
-[overview.md](./overview.md) for the command/event loop.
-
-Codex async questions arrive as notifications and are answered with a new user message, not an RPC
-response. Blocking questions still use the request and response path. An async question can outlive
-its turn or a server restart, so the engine resolves it against durable activity instead of assuming
-it disappeared when it falls outside the recent in-memory window.
-
-## Server-side workers
-
-Provider work flows through three queue-backed workers. All three are built with
-`makeDrainableWorker` from [`DrainableWorker.ts`][worker] and expose `drain` for deterministic test
-synchronization.
-
-1. [`ProviderRuntimeIngestion`][ingest] consumes provider runtime streams and emits orchestration
-   commands.
-2. [`ProviderCommandReactor`][cmd] reacts to orchestration intent events and dispatches provider
-   calls.
-3. [`CheckpointReactor`][checkpoint] captures workspace checkpoints on turn start and completion, and
-   performs reverts.
-
-### Buffered assistant delivery
-
-A thread in `buffered` assistant delivery mode accumulates assistant text instead of streaming each
-delta. The buffer is not held until turn completion. In [`ProviderRuntimeIngestion`][ingest],
-`MAX_BUFFERED_ASSISTANT_CHARS` is 24,000: the append that would exceed it invalidates the buffer and
-spills the whole accumulated text as one delta. The buffer also flushes at interaction boundaries,
-when a request opens (approval) or user input is requested, via
-`flushBufferedAssistantMessagesForTurn`.
-
-## Grok Build ACP mapping
-
-The Grok driver runs `grok agent stdio`. The shared ACP runtime owns protocol negotiation, session
-setup, replay, configuration state, and standard session updates. The Grok adapter adds the xAI
-extensions that have stable wire shapes and a direct canonical T3 meaning.
-
-| Grok Build input                   | T3 behavior                                                    |
-| ---------------------------------- | -------------------------------------------------------------- |
-| ACP model state and model metadata | Provider models, context windows, and reasoning choices        |
-| `session/set_model`                | Atomic model plus `_meta.reasoningEffort` selection            |
-| `agent_thought_chunk`              | Canonical reasoning item and delta events                      |
-| `session_info_update`              | Thread title update                                            |
-| `usage_update`                     | Context-window update                                          |
-| Prompt response `usage`            | Turn completion usage                                          |
-| Prompt response xAI `_meta`        | Context usage, last-call tokens, model usage, and trusted cost |
-| xAI `model_changed`                | Live model and reasoning synchronization                       |
-| xAI `ask_user_question`            | Structured T3 user-input request and response                  |
-| xAI prompt-complete notification   | Fallback settlement when the standard prompt RPC hangs         |
-
-`grok-build` is a compatibility sentinel in T3, not a model forced onto the CLI. When selected, the
-adapter retains the model reported by session setup. A concrete model or reasoning change uses
-`session/set_model`; changing effort on the same model still sends the request.
-
-### Deliberate boundaries
-
-Several Grok Build notifications do not yet have a truthful adapter-only mapping:
-
-- ACP `available_commands_update` is session and workspace scoped, while provider slash commands in
-  T3 are currently instance-wide. This needs a per-session command contract before it can be shown.
-- xAI model-catalog update notifications arrive on a live adapter session, while provider snapshots
-  are owned by the driver. Dynamic refresh needs an explicit adapter-to-driver invalidation channel.
-- Grok Build 1.0.5 does not advertise ACP modes. Newer source accepts `session/set_mode`, but its
-  `x.ai/exit_plan_mode` approval request needs a dedicated T3 plan-approval flow. The Plan control
-  stays hidden until both mode switching and exit approval can be represented truthfully.
-- Private xAI hooks, MCP status, queue, subagent, and workflow notifications need pinned schemas and
-  canonical lifecycle semantics before ingestion. Unknown extension notifications remain available
-  in native provider logs.
-- ACP reasoning deltas are canonical runtime events, but provider-runtime ingestion currently
-  materializes only assistant text as conversation messages. Rendering stored reasoning is a shared
-  cross-provider change, not a Grok-only adapter rule.
-- Prompt `_meta` fields for structured output, cancellation categories, cancel triggers, and tool
-  overrides have no corresponding provider completion contract yet. The adapter keeps the raw
-  response in its thread snapshot without projecting invented fields.
-- Per-model xAI `response_completed` notifications describe model calls inside a tool loop. T3 uses
-  the prompt response as the authoritative turn boundary to avoid duplicate turn completion.
-
-[drivers]: ../../apps/server/src/provider/builtInDrivers.ts
-[codex]: ../../apps/server/src/provider/Drivers/CodexDriver.ts
-[claude]: ../../apps/server/src/provider/Drivers/ClaudeDriver.ts
-[cursor]: ../../apps/server/src/provider/Drivers/CursorDriver.ts
-[grok]: ../../apps/server/src/provider/Drivers/GrokDriver.ts
-[devin]: ../../apps/server/src/provider/Drivers/DevinDriver.ts
-[devin-support]: ../../apps/server/src/provider/acp/DevinAcpSupport.ts
-[amp]: ../../apps/server/src/provider/Drivers/AmpDriver.ts
-[opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
-[antigravity]: ../../apps/server/src/provider/Drivers/AntigravityDriver.ts
-[antigravity-adapter]: ../../apps/server/src/provider/Layers/AntigravityAdapter.ts
-[antigravity-provider]: ../../apps/server/src/provider/Layers/AntigravityProvider.ts
-[antigravity-installation]: ../../apps/server/src/provider/AntigravityInstallation.ts
-[antigravity-release]: ../../apps/server/src/provider/antigravityRelease.ts
-[antigravity-auth]: ../../apps/server/src/provider/AntigravityAuth.ts
-[antigravity-auth-support]: ../../apps/server/src/provider/antigravityAuthSupport.ts
-[antigravity-text]: ../../apps/server/src/textGeneration/AntigravityTextGeneration.ts
-[provider-auth-service]: ../../apps/server/src/provider/Layers/ProviderAuthService.ts
-[provider-setup]: ../../packages/contracts/src/providerSetup.ts
-[opencode-server-owner]: ../../apps/server/src/provider/OpenCodeServerOwner.ts
-[adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
-[instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
-[registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts
-[service]: ../../apps/server/src/provider/Layers/ProviderService.ts
-[contracts]: ../../packages/contracts/src/orchestration.ts
-[worker]: ../../packages/shared/src/DrainableWorker.ts
-[ingest]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
-[cmd]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-[checkpoint]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
-
-=======
-
-## Provider diagnostics
-
-Native event logs retain lifecycle events, responses, and failures. Token deltas and duplicate raw
-frames are filtered before adapters copy or redact payloads. The filter accepts both legacy native
-events and v2 protocol envelopes; decode failures remain visible through diagnostic frames.
-
-Log payloads have a 64 KiB encoded budget. Large or deeply nested payloads become structural
-summaries that retain routing identifiers, methods, status, and error fields. Traversal is bounded
-before redaction and serialization, so logging a large response does not require several full
-copies. These limits apply to diagnostics; provider event handling is unchanged.
-
-Codex resumes with metadata-only reads when it needs a thread's identity and update time. Its
-initialization capabilities opt out of `turn/diff/updated`: T3 derives diffs from checkpoints.
-The logger filters those notifications before traversal when an older provider still sends them.
-
-Model classification has its own [manifest constraints](./model-manifest.md). Assistant-reference
-handling is documented under [citations](./assistant-citations.md).
-
-> > > > > > > upstream/t3code/codex-turn-mapping
+no pending RPC response to send. Blocking questions still use the request-response path. Async
+questions can outlive a turn, provider process, or server restart, so their durable runtime request
+must remain the source of truth.
+
+Grok's built-in `grok-build` slug is a product label, not an ACP model identifier. Selecting it
+keeps the session's current model instead of sending it to `session/set_model`.
+
+Devin runs as an ACP agent but should not receive ACP `authenticate` during ordinary session
+startup because its browser method starts a new PKCE flow on every call. Sessions use existing CLI
+credentials. Mode mapping is explicit: Devin has no ask-before-edit mode, and its session model
+option is authoritative because the CLI catalog can include models unavailable to the account.
+
+Amp emits complete content blocks rather than token deltas. Its adapter normalizes those blocks at
+the provider boundary so orchestration and clients keep the same streaming model.
+
+Capabilities must describe what a provider can actually do. Antigravity can capture workspace
+checkpoints but cannot roll back its conversation, so revert is rejected before touching files.
+Native permission and question option IDs must survive normalization because a display label is not
+necessarily a valid reply.
+
+## Attachments and stored history
+
+Attachments live outside the project workspace. The attachment boundary validates and claims
+uploads for a thread; adapters choose native input formats for those environment-local files. A
+path in the prompt does not grant filesystem access. Keep provider sandbox and approval rules in
+force. Copying uploads into the project to bypass them changes that boundary.
+
+Provider-native session files are not orchestration truth. Checkpoints, portable handoffs, runtime
+requests, and projected conversation state remain durable T3 records even when a native session can
+resume or fork directly.

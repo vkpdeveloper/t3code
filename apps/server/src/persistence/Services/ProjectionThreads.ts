@@ -103,22 +103,6 @@ export interface ProjectionThreadRepositoryShape {
   readonly getById: (
     input: GetProjectionThreadInput,
   ) => Effect.Effect<Option.Option<ProjectionThread>, ProjectionRepositoryError>;
-
-  /**
-   * List projected threads for a project.
-   *
-   * Returned in deterministic creation order.
-   */
-  readonly listByProjectId: (
-    input: ListProjectionThreadsByProjectInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>;
-
-  /**
-   * Soft-delete a projected thread row by id.
-   */
-  readonly deleteById: (
-    input: DeleteProjectionThreadInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**

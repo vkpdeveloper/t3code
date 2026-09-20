@@ -6,7 +6,7 @@ import * as Notifications from "expo-notifications";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useEffect, useMemo, useRef } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { getMobileThemeRuntimeVariables } from "../../lib/mobileThemeVariables";
@@ -139,7 +139,7 @@ export function useAgentStatusNotifications(): void {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const { themeAppearance, themeId } = useAppearancePreferences();
   const notificationTheme = useMemo(() => {
-    const colors = getMobileThemeRuntimeVariables(themeId, themeAppearance);
+    const colors = getMobileThemeRuntimeVariables(themeId, themeAppearance, Platform.OS);
     return { accentColor: colors["--color-primary"] };
   }, [themeAppearance, themeId]);
   const statusEnabled =

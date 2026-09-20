@@ -1,4 +1,5 @@
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
+import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import { useNavigation } from "@react-navigation/native";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -70,6 +71,9 @@ import { useWorkspaceContentWidth } from "../layout/workspace-content-width";
 
 import { AppText as Text } from "../../components/AppText";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
+import { deviceEnvironment } from "../../state/device";
+import { useEnvironmentQuery } from "../../state/query";
+import { threadDevicePreviews } from "../devices/threadDevicePreviews";
 import { collectProviderUsageLimits } from "@t3tools/shared/usageLimits";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
@@ -116,6 +120,8 @@ import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
 
 export interface ThreadDetailScreenProps {
+  readonly worktreeSetup?: WorktreeSetupCardProps | null;
+  readonly setupWorkingStartedAt?: string | null;
   readonly selectedThread: EnvironmentThreadShell;
   readonly contentPresentation: ThreadContentPresentation;
   readonly screenTone: StatusTone;
@@ -270,6 +276,21 @@ const USER_INPUT_TOGGLE_TIMING = {
 };
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  const navigation = useNavigation();
+  const deviceState = useEnvironmentQuery(
+    deviceEnvironment.state({ environmentId: props.environmentId, input: {} }),
+  );
+  const devicePreviews = useMemo(
+    () => threadDevicePreviews(deviceState.data, props.selectedThread.id),
+    [deviceState.data, props.selectedThread.id],
+  );
+  const openDevicePreview = useCallback(() => {
+    Keyboard.dismiss();
+    navigation.navigate("ThreadDevicePreview", {
+      environmentId: props.environmentId,
+      threadId: props.selectedThread.id,
+    });
+  }, [navigation, props.environmentId, props.selectedThread.id]);
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const liveKeyboardHeight = useKeyboardState((state) => state.height);
@@ -308,7 +329,6 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const navigationHeaderHeight = useContext(HeaderHeightContext) || insets.top + 44;
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
-  const navigation = useNavigation();
   const queuedCount = useThreadQueuedCount({
     environmentId: props.environmentId,
     threadId: props.selectedThread.id,
@@ -385,6 +405,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       return null;
     }
     if (props.creationState?.kind === "preparing") {
+      // The setup header already reports progress in the feed.
+      if (props.worktreeSetup) return null;
       return {
         kind: "preparing",
         label: props.creationState.preparingWorktree ? "Setting up worktree…" : "Starting…",
@@ -409,6 +431,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   // stable when reconnecting hands off to syncing and then to a running turn.
   const showFloatingStatus =
     showWorkingControl ||
+    devicePreviews.length > 0 ||
     queuedCount > 0 ||
     props.connectionStateLabel !== "connected" ||
     props.queuedMessages.length > 0 ||
@@ -896,7 +919,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, [freeze, scrollMessageToEnd]);
 
   const showScrollToEndButton = contentPresentationKind === "ready" && !endFollowEnabled;
-  const { themeAppearance, materialYouStyleLayoutActive } = useAppearancePreferences();
+  const { themeAppearance } = useAppearancePreferences();
   const isDarkMode = themeAppearance === "dark";
 
   const handleFeedTouchStart = useCallback((event: GestureResponderEvent) => {
@@ -944,7 +967,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           <View
             pointerEvents="none"
             className={
-              materialYouStyleLayoutActive
+              Platform.OS === "android"
                 ? "absolute inset-0 bg-thread-canvas"
                 : "absolute inset-0 bg-screen"
             }
@@ -955,6 +978,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
             threadId={props.selectedThread.id}
             workspaceRoot={props.threadCwd}
             feed={props.selectedThreadFeed}
+            worktreeSetup={props.worktreeSetup}
+            setupWorkingStartedAt={props.setupWorkingStartedAt}
             queuedMessages={props.queuedMessages}
             dispatchingMessageId={props.dispatchingMessageId}
             onEditPendingMessage={handleEditPendingMessage}
@@ -1062,6 +1087,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               <FloatingWorkingControl
                 colorScheme={isDarkMode ? "dark" : "light"}
                 status={floatingStatus}
+                devicePreview={
+                  devicePreviews.length > 0
+                    ? { count: devicePreviews.length, onPress: openDevicePreview }
+                    : null
+                }
                 showScrollToEnd={showScrollToEndButton}
                 onScrollToEnd={handleScrollToEnd}
                 queuedCount={queuedCount}

@@ -18,7 +18,6 @@ import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagem
 import * as ProjectService from "../../../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
 import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../../vcs/VcsStatusBroadcaster.ts";
 import * as McpHttpServer from "../../McpHttpServer.ts";
@@ -32,7 +31,6 @@ const StubServicesLive = Layer.mergeAll(
   Layer.mock(DeviceService)({}),
   Layer.mock(ThreadManagementService)({}),
   Layer.mock(ProviderRegistry)({}),
-  Layer.mock(ScheduledTaskService)({}),
   Layer.mock(ProjectService.ProjectService)({}),
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),

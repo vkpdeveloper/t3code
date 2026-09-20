@@ -9,15 +9,6 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
-  Automation,
-  AutomationCreateInput,
-  AutomationEmptyResult,
-  AutomationIdInput,
-  AutomationListResult,
-  AutomationOperationError,
-  AutomationUpdateInput,
-} from "./automation.ts";
-import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
   ProviderAuthState,
@@ -152,8 +143,10 @@ import {
   PullRequestCommentInput,
   PullRequestCommentUpdateInput,
   PullRequestDetail,
+  PullRequestPreview,
   PullRequestDiffFileContentsInput,
   PullRequestDiffFileContentsResult,
+  PullRequestFilesViewedResult,
   PullRequestInvalidateInput,
   PullRequestListInput,
   PullRequestListResult,
@@ -172,6 +165,7 @@ import {
   PullRequestReviewerRequestInput,
   PullRequestLabelCandidateList,
   PullRequestLabelChangeInput,
+  PullRequestSetFilesViewedInput,
   PullRequestSubmitReviewInput,
   PullRequestThreadCommentsInput,
   PullRequestThreadCommentsResult,
@@ -309,18 +303,6 @@ import {
   ProjectCloneSubscribeInput,
 } from "./projectClone.ts";
 import {
-  ScheduledTaskDeleteInput,
-  ScheduledTaskDeleteResult,
-  ScheduledTaskError,
-  ScheduledTaskListInput,
-  ScheduledTaskListResult,
-  ScheduledTaskRunNowInput,
-  ScheduledTaskRunNowResult,
-  ScheduledTaskSetEnabledInput,
-  ScheduledTaskUpsertInput,
-  ScheduledTaskMutationResult,
-} from "./scheduledTask.ts";
-import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -334,13 +316,6 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
-  // Durable machine-owned automations
-  automationsList: "automations.list",
-  automationsCreate: "automations.create",
-  automationsUpdate: "automations.update",
-  automationsDelete: "automations.delete",
-  automationsRunNow: "automations.runNow",
-
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -468,14 +443,6 @@ export const WS_METHODS = {
   serverRefreshVibeProxyUsage: "server.refreshVibeProxyUsage",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
-  // Scheduled tasks
-  scheduledTasksList: "scheduledTasks.list",
-  scheduledTasksSubscribe: "scheduledTasks.subscribe",
-  scheduledTasksUpsert: "scheduledTasks.upsert",
-  scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
-  scheduledTasksDelete: "scheduledTasks.delete",
-  scheduledTasksRunNow: "scheduledTasks.runNow",
-
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -489,9 +456,12 @@ export const WS_METHODS = {
   pullRequestsStack: "pullRequests.stack",
   pullRequestsLinkedThreads: "pullRequests.linkedThreads",
   pullRequestsDetail: "pullRequests.detail",
+  pullRequestsPreview: "pullRequests.preview",
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsThreadComments: "pullRequests.threadComments",
   pullRequestsDiffFileContents: "pullRequests.diffFileContents",
+  pullRequestsFilesViewed: "pullRequests.filesViewed",
+  pullRequestsSetFilesViewed: "pullRequests.setFilesViewed",
   pullRequestsRunAction: "pullRequests.runAction",
   pullRequestsUpdate: "pullRequests.update",
   pullRequestsComment: "pullRequests.comment",
@@ -531,36 +501,6 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
-
-const WsAutomationsListRpc = Rpc.make(WS_METHODS.automationsList, {
-  payload: Schema.Struct({}),
-  success: AutomationListResult,
-  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
-});
-
-const WsAutomationsCreateRpc = Rpc.make(WS_METHODS.automationsCreate, {
-  payload: AutomationCreateInput,
-  success: Automation,
-  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
-});
-
-const WsAutomationsUpdateRpc = Rpc.make(WS_METHODS.automationsUpdate, {
-  payload: AutomationUpdateInput,
-  success: Automation,
-  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
-});
-
-const WsAutomationsDeleteRpc = Rpc.make(WS_METHODS.automationsDelete, {
-  payload: AutomationIdInput,
-  success: AutomationEmptyResult,
-  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
-});
-
-const WsAutomationsRunNowRpc = Rpc.make(WS_METHODS.automationsRunNow, {
-  payload: AutomationIdInput,
-  success: Automation,
-  error: Schema.Union([AutomationOperationError, EnvironmentAuthorizationError]),
-});
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -965,6 +905,12 @@ const WsPullRequestsDetailRpc = Rpc.make(WS_METHODS.pullRequestsDetail, {
   error: PullRequestRpcError,
 });
 
+const WsPullRequestsPreviewRpc = Rpc.make(WS_METHODS.pullRequestsPreview, {
+  payload: PullRequestRef,
+  success: PullRequestPreview,
+  error: PullRequestRpcError,
+});
+
 const WsPullRequestsActivityRpc = Rpc.make(WS_METHODS.pullRequestsActivity, {
   payload: PullRequestRef,
   success: PullRequestActivity,
@@ -980,6 +926,18 @@ const WsPullRequestsThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestsThreadCo
 const WsPullRequestsDiffFileContentsRpc = Rpc.make(WS_METHODS.pullRequestsDiffFileContents, {
   payload: PullRequestDiffFileContentsInput,
   success: PullRequestDiffFileContentsResult,
+  error: PullRequestRpcError,
+});
+
+const WsPullRequestsFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestsFilesViewed, {
+  payload: PullRequestRef,
+  success: PullRequestFilesViewedResult,
+  error: PullRequestRpcError,
+});
+
+const WsPullRequestsSetFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestsSetFilesViewed, {
+  payload: PullRequestSetFilesViewedInput,
+  success: Schema.Void,
   error: PullRequestRpcError,
 });
 
@@ -1611,44 +1569,6 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
-const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
-  payload: ScheduledTaskListInput,
-  success: ScheduledTaskListResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
-/** Streams the full scheduled-task list: one snapshot on subscribe, then a fresh list after every change. */
-const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
-  payload: ScheduledTaskListInput,
-  success: ScheduledTaskListResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
-const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
-  payload: ScheduledTaskUpsertInput,
-  success: ScheduledTaskMutationResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
-const WsScheduledTasksSetEnabledRpc = Rpc.make(WS_METHODS.scheduledTasksSetEnabled, {
-  payload: ScheduledTaskSetEnabledInput,
-  success: ScheduledTaskMutationResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
-const WsScheduledTasksDeleteRpc = Rpc.make(WS_METHODS.scheduledTasksDelete, {
-  payload: ScheduledTaskDeleteInput,
-  success: ScheduledTaskDeleteResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
-const WsScheduledTasksRunNowRpc = Rpc.make(WS_METHODS.scheduledTasksRunNow, {
-  payload: ScheduledTaskRunNowInput,
-  success: ScheduledTaskRunNowResult,
-  error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
-});
-
 const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
@@ -1671,11 +1591,6 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
 });
 
 export const WsRpcGroup = RpcGroup.make(
-  WsAutomationsListRpc,
-  WsAutomationsCreateRpc,
-  WsAutomationsUpdateRpc,
-  WsAutomationsDeleteRpc,
-  WsAutomationsRunNowRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -1722,12 +1637,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshVibeProxyUsageRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
-  WsScheduledTasksListRpc,
-  WsScheduledTasksSubscribeRpc,
-  WsScheduledTasksUpsertRpc,
-  WsScheduledTasksSetEnabledRpc,
-  WsScheduledTasksDeleteRpc,
-  WsScheduledTasksRunNowRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
@@ -1741,9 +1650,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsStackRpc,
   WsPullRequestsLinkedThreadsRpc,
   WsPullRequestsDetailRpc,
+  WsPullRequestsPreviewRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsThreadCommentsRpc,
   WsPullRequestsDiffFileContentsRpc,
+  WsPullRequestsFilesViewedRpc,
+  WsPullRequestsSetFilesViewedRpc,
   WsPullRequestsRunActionRpc,
   WsPullRequestsUpdateRpc,
   WsPullRequestsCommentRpc,

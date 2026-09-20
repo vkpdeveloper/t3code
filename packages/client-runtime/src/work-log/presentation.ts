@@ -45,7 +45,7 @@ export function toolItemForDisplay(item: OrchestrationV2TurnItem): Orchestration
 
 /**
  * Activities the worktree setup card already represents. The settled record
- * is rendered by the card on web (and mobile's status row), never as a
+ * is rendered by the card on web and mobile, never as a
  * worklog entry, so it is hidden from the activity feed even when it failed.
  */
 export function isWorktreeSetupActivity(kind: string): boolean {
@@ -129,10 +129,6 @@ const T3_MCP_TOOL_LABELS: Record<
   delegate_task: ["Delegate", "Delegating", "Delegated", "a child task"],
   task_status: ["Get", "Getting", "Got", "delegated task status"],
   task_cancel: ["Cancel", "Canceling", "Canceled", "delegated task"],
-  schedule_task: ["Schedule", "Scheduling", "Scheduled", "a recurring task"],
-  list_scheduled_tasks: ["List", "Listing", "Listed", "scheduled tasks"],
-  update_scheduled_task: ["Update", "Updating", "Updated", "a scheduled task"],
-  delete_scheduled_task: ["Delete", "Deleting", "Deleted", "a scheduled task"],
   create_threads: ["Create", "Creating", "Created", "T3 threads"],
   t3_thread_start: ["Start", "Starting", "Started", "a T3 thread"],
   t3_thread_list: ["List", "Listing", "Listed", "T3 threads"],
