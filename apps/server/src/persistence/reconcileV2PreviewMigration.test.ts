@@ -6,7 +6,16 @@ import * as Migrator from "effect/unstable/sql/Migrator";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
-import OrchestrationV2 from "./Migrations/054_OrchestrationV2.ts";
+import OrchestrationV2 from "./Migrations/057_OrchestrationV2.ts";
+
+const reconciledMigrations = [
+  [53, "ProjectionThreadBranchPullRequest"],
+  [54, "ProjectionThreadsActiveOrderKey"],
+  [55, "ProjectionThreadPullRequests"],
+  [56, "ProjectionThreadMessageContext"],
+  [58, "ProjectionThreadTitleState"],
+  [59, "PullRequestFilesViewed"],
+] as const;
 
 // The V2 schema is unchanged from the published September 15–16 previews.
 const seedPreview = Effect.gen(function* () {
@@ -26,12 +35,29 @@ const seedPreview = Effect.gen(function* () {
 });
 
 describe("V2 preview upgrade", () => {
+  it.effect("appends upstream migrations after the published fork sequence", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 58 });
+      assert.deepStrictEqual(yield* runMigrations(), [[59, "PullRequestFilesViewed"]]);
+      assert.deepStrictEqual(
+        (yield* sql<{
+          readonly migration_id: number;
+          readonly name: string;
+        }>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`).map(
+          (row) => [row.migration_id, row.name] as const,
+        ),
+        migrationManifest,
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("upgrades a published preview without replaying V2 or losing import progress", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* seedPreview;
       const imports = yield* sql`SELECT * FROM orchestration_v2_legacy_imports`;
-      assert.deepStrictEqual(yield* runMigrations(), [[53, "PullRequestFilesViewed"]]);
+      assert.deepStrictEqual(yield* runMigrations(), reconciledMigrations);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
       const history = yield* sql<{ readonly migration_id: number; readonly name: string }>`
@@ -42,7 +68,7 @@ describe("V2 preview upgrade", () => {
         migrationManifest,
       );
       assert.deepStrictEqual(
-        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 54`,
+        yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 57`,
         [{ created_at: "2026-09-15 00:00:00" }],
       );
       yield* sql`
@@ -74,7 +100,7 @@ describe("V2 preview upgrade", () => {
       );
       assert.strictEqual((yield* sql`SELECT * FROM orchestration_v2_legacy_imports`).length, 1);
       yield* sql`DROP TRIGGER fail_preview_upgrade`;
-      assert.deepStrictEqual(yield* runMigrations(), [[53, "PullRequestFilesViewed"]]);
+      assert.deepStrictEqual(yield* runMigrations(), reconciledMigrations);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
