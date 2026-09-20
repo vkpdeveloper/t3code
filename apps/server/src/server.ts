@@ -40,6 +40,7 @@ import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
+import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor.ts";
@@ -135,7 +136,7 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VibeProxyUsageService from "./usage/VibeProxyUsageService.ts";
 import * as WorktreeCleanup from "./worktreeCleanup.ts";
-import * as AutomationService from "./automation/AutomationService.ts";
+import * as StorageCleanup from "./storageCleanup.ts";
 import { OrchestrationInfrastructureLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   OrchestrationV2ProductionLayerLive,
@@ -307,6 +308,8 @@ const RepositoryIdentityResolverLayerLive = Layer.effect(
 
 const PullRequestServiceLive = PullRequestService.layer.pipe(
   Layer.provide(PullRequestProviderRegistry.layer),
+  // Where the viewed-file marks live for a host that keeps none of its own.
+  Layer.provide(PullRequestFilesViewed.layer),
   Layer.provide(PullRequestReadCache.layer),
   Layer.provide(SourceControlProviderRegistryLayerLive),
   Layer.provide(SourceControlRateLimit.layer),
@@ -478,6 +481,10 @@ const TransientFailureRetryWorkerLive = Layer.effectDiscard(
   TransientFailureRetryService.make.pipe(Effect.flatMap((service) => service.start())),
 ).pipe(Layer.provide(OrchestrationInfrastructureLayerLive));
 
+const StorageCleanupWorkerLive = Layer.effectDiscard(
+  StorageCleanup.make.pipe(Effect.flatMap((service) => service.start())),
+).pipe(Layer.provide(ProjectionStoreV2.layer));
+
 const AntigravityInstallationRefreshLive = Layer.effectDiscard(
   Effect.gen(function* () {
     const installation = yield* AntigravityInstallation;
@@ -511,6 +518,7 @@ const RuntimeCoreDependenciesBaseLive = Layer.mergeAll(
   ThreadPullRequestWorkerLive,
   UsageLimitResumeWorkerLive,
   TransientFailureRetryWorkerLive,
+  StorageCleanupWorkerLive,
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -597,14 +605,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreDependenciesBaseLive.pipe(
   ),
 );
 
-const AutomationServiceLive = AutomationService.layer.pipe(
-  Layer.provide(RuntimeCoreDependenciesLive),
-);
-
-const RuntimeDependenciesLive = Layer.merge(
-  RuntimeCoreDependenciesLive,
-  AutomationServiceLive,
-).pipe(
+const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
@@ -646,11 +647,9 @@ const makeRoutesLayer = Layer.mergeAll(
   ),
   // The MCP session registry is provided globally (shared with V2 provider
   // sessions) rather than inline here.
-  McpHttpServer.layer.pipe(
-    Layer.provide(ImageGenerationService.layer),
-    Layer.provideMerge(RuntimeDependenciesLive),
-  ),
+  McpHttpServer.layer.pipe(Layer.provide(ImageGenerationService.layer)),
 ).pipe(
+  Layer.provideMerge(RuntimeDependenciesLive),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(PullRequestServiceLive),
@@ -855,12 +854,11 @@ const makeServerLayer = Layer.unwrap(
       routerConfig: HTTP_ROUTER_CONFIG,
     }).pipe(Layer.tap(() => Deferred.succeed(routesReady, undefined).pipe(Effect.orDie)));
     const serverApplicationLayer = Layer.mergeAll(
-      routesLayer,
       httpListeningLayer,
       runtimeStateLayer.pipe(Layer.provide(launcherLayer)),
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
-    );
+    ).pipe(Layer.provideMerge(routesLayer));
 
     return serverApplicationLayer.pipe(
       Layer.provideMerge(runtimeServicesLive),

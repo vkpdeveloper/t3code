@@ -17,17 +17,10 @@ import {
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpDelegateTaskResult,
   type OrchestratorMcpInteractionMode,
-  type OrchestratorMcpDeleteScheduledTaskInput,
-  type OrchestratorMcpDeleteScheduledTaskResult,
-  type OrchestratorMcpListScheduledTasksResult,
   type OrchestratorMcpRuntimeMode,
-  type OrchestratorMcpScheduledTask,
-  type OrchestratorMcpScheduleTaskInput,
-  type OrchestratorMcpScheduleTaskResult,
   type OrchestratorMcpTarget,
   type OrchestratorMcpTaskCancelInput,
   type OrchestratorMcpTaskCancelResult,
-  type OrchestratorMcpUpdateScheduledTaskInput,
   type OrchestratorMcpThreadDetail,
   type OrchestratorMcpThreadInterruptInput,
   type OrchestratorMcpThreadInterruptResult,
@@ -46,8 +39,6 @@ import {
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type RuntimeMode,
-  type ScheduledTask,
-  type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
@@ -74,7 +65,6 @@ import {
   ThreadManagementService,
 } from "../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -114,21 +104,6 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpCreateThreadsInput,
   ) => Effect.Effect<OrchestratorMcpCreateThreadsResult, OrchestratorMcpFailure>;
-  readonly scheduleTask: (
-    scope: McpInvocationScope,
-    input: OrchestratorMcpScheduleTaskInput,
-  ) => Effect.Effect<OrchestratorMcpScheduleTaskResult, OrchestratorMcpFailure>;
-  readonly listScheduledTasks: (
-    scope: McpInvocationScope,
-  ) => Effect.Effect<OrchestratorMcpListScheduledTasksResult, OrchestratorMcpFailure>;
-  readonly updateScheduledTask: (
-    scope: McpInvocationScope,
-    input: OrchestratorMcpUpdateScheduledTaskInput,
-  ) => Effect.Effect<OrchestratorMcpScheduleTaskResult, OrchestratorMcpFailure>;
-  readonly deleteScheduledTask: (
-    scope: McpInvocationScope,
-    input: OrchestratorMcpDeleteScheduledTaskInput,
-  ) => Effect.Effect<OrchestratorMcpDeleteScheduledTaskResult, OrchestratorMcpFailure>;
   readonly listThreads: (
     scope: McpInvocationScope,
     input: OrchestratorMcpThreadListInput,
@@ -182,33 +157,6 @@ function threadManagementFailure(error: ThreadManagementError): OrchestratorMcpF
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Workspace strategy for a scheduled task created/updated over MCP: bound runs
- * post into the existing thread (the strategy is unused, keep root); unbound
- * runs launch a fresh worktree per run.
- */
-function scheduledTaskWorkspaceStrategy(
-  boundToThread: boolean,
-): ScheduledTask["workspaceStrategy"] {
-  return boundToThread
-    ? { type: "root" }
-    : { type: "worktree", baseRef: "main", startFromOrigin: true };
-}
-
-function scheduledTaskSummary(task: ScheduledTask): OrchestratorMcpScheduledTask {
-  return {
-    scheduledTaskId: task.id,
-    title: task.title,
-    prompt: task.prompt,
-    enabled: task.enabled,
-    projectId: task.projectId,
-    boundThreadId: task.threadId,
-    schedule: task.schedule,
-    nextRunAt: task.nextRunAt,
-    lastRunStatus: task.lastRunStatus,
-  };
 }
 
 function providerConstraints(
@@ -737,7 +685,6 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const threadManagement = yield* ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry;
-  const scheduledTasks = yield* ScheduledTaskService;
 
   const requireCapability = (scope: McpInvocationScope) =>
     scope.capabilities.has("orchestration")
@@ -1027,153 +974,7 @@ const make = Effect.gen(function* () {
       }
     }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
 
-  // Load a single scheduled task and enforce that it belongs to the calling
-  // thread's project, so agents can only read/mutate tasks in their own scope.
-  const loadScopedScheduledTask = (
-    projectId: ScheduledTask["projectId"],
-    scheduledTaskId: ScheduledTask["id"],
-  ): Effect.Effect<ScheduledTask, OrchestratorMcpFailure> =>
-    Effect.gen(function* () {
-      const { tasks } = yield* scheduledTasks
-        .list()
-        .pipe(
-          Effect.mapError((error) =>
-            failure("orchestration_error", `Could not load scheduled task: ${error.message}`),
-          ),
-        );
-      const task = tasks.find((candidate) => candidate.id === scheduledTaskId);
-      if (task === undefined || task.projectId !== projectId) {
-        return yield* failure(
-          "task_not_found",
-          `Scheduled task ${scheduledTaskId} was not found in the calling project.`,
-        );
-      }
-      return task;
-    });
-
   return OrchestratorMcpService.of({
-    scheduleTask: (scope, input) =>
-      Effect.gen(function* () {
-        yield* requireCapability(scope);
-        const parent = yield* loadProjection(scope.threadId);
-        const bindToCurrentThread = input.bindToCurrentThread ?? true;
-        const derivedTitle = input.prompt.split("\n")[0]?.trim() ?? "";
-        const title =
-          input.title ?? (derivedTitle.length > 0 ? derivedTitle.slice(0, 80) : "Scheduled task");
-        const upsertInput: ScheduledTaskUpsertInput = {
-          title,
-          prompt: input.prompt,
-          enabled: input.enabled ?? true,
-          schedule: input.schedule,
-          projectId: parent.thread.projectId,
-          threadId: bindToCurrentThread ? scope.threadId : null,
-          workspaceStrategy: scheduledTaskWorkspaceStrategy(bindToCurrentThread),
-          modelSelection: parent.thread.modelSelection,
-          runtimeMode: parent.thread.runtimeMode,
-          interactionMode: parent.thread.interactionMode,
-          createdBy: "agent",
-          creationSource: "mcp",
-          // Scope the idempotency key by provider session so two callers
-          // reusing the same clientRequestId cannot collide on one task row.
-          ...(input.clientRequestId === undefined
-            ? {}
-            : {
-                commandId: stableCommandId({
-                  scope,
-                  requestKey: input.clientRequestId,
-                  operation: "schedule-task",
-                }),
-              }),
-        };
-        const { task } = yield* scheduledTasks
-          .upsert(upsertInput)
-          .pipe(
-            Effect.mapError((error) =>
-              failure("orchestration_error", `Could not schedule task: ${error.message}`),
-            ),
-          );
-        return scheduledTaskSummary(task);
-      }),
-    listScheduledTasks: (scope) =>
-      Effect.gen(function* () {
-        yield* requireCapability(scope);
-        const parent = yield* loadProjection(scope.threadId);
-        const { tasks } = yield* scheduledTasks
-          .list()
-          .pipe(
-            Effect.mapError((error) =>
-              failure("orchestration_error", `Could not list scheduled tasks: ${error.message}`),
-            ),
-          );
-        // Only expose tasks belonging to the calling thread's project.
-        return {
-          tasks: tasks
-            .filter((task) => task.projectId === parent.thread.projectId)
-            .map(scheduledTaskSummary),
-        };
-      }),
-    updateScheduledTask: (scope, input) =>
-      Effect.gen(function* () {
-        yield* requireCapability(scope);
-        const parent = yield* loadProjection(scope.threadId);
-        const existing = yield* loadScopedScheduledTask(
-          parent.thread.projectId,
-          input.scheduledTaskId,
-        );
-        const threadId =
-          input.bindToCurrentThread === undefined
-            ? existing.threadId
-            : input.bindToCurrentThread
-              ? scope.threadId
-              : null;
-        // Rebinding changes where runs execute, so the workspace strategy must
-        // follow: unbinding a root-strategy task would otherwise run loose
-        // prompts in the shared project checkout.
-        const workspaceStrategy =
-          input.bindToCurrentThread === undefined
-            ? existing.workspaceStrategy
-            : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
-        const upsertInput: ScheduledTaskUpsertInput = {
-          id: existing.id,
-          title: input.title ?? existing.title,
-          prompt: input.prompt ?? existing.prompt,
-          enabled: input.enabled ?? existing.enabled,
-          schedule: input.schedule ?? existing.schedule,
-          projectId: existing.projectId,
-          threadId,
-          workspaceStrategy,
-          modelSelection: existing.modelSelection,
-          runtimeMode: existing.runtimeMode,
-          interactionMode: existing.interactionMode,
-          createdBy: existing.createdBy,
-          creationSource: existing.creationSource,
-        };
-        const { task } = yield* scheduledTasks
-          .upsert(upsertInput)
-          .pipe(
-            Effect.mapError((error) =>
-              failure("orchestration_error", `Could not update scheduled task: ${error.message}`),
-            ),
-          );
-        return scheduledTaskSummary(task);
-      }),
-    deleteScheduledTask: (scope, input) =>
-      Effect.gen(function* () {
-        yield* requireCapability(scope);
-        const parent = yield* loadProjection(scope.threadId);
-        const existing = yield* loadScopedScheduledTask(
-          parent.thread.projectId,
-          input.scheduledTaskId,
-        );
-        yield* scheduledTasks
-          .delete({ id: existing.id })
-          .pipe(
-            Effect.mapError((error) =>
-              failure("orchestration_error", `Could not delete scheduled task: ${error.message}`),
-            ),
-          );
-        return { scheduledTaskId: existing.id, deleted: true };
-      }),
     capabilities: (scope) =>
       Effect.gen(function* () {
         yield* requireCapability(scope);
@@ -1214,7 +1015,6 @@ const make = Effect.gen(function* () {
             batchThreadCreation: true,
             threadManagement: true,
             incrementalThreadRead: true,
-            scheduledTasks: true,
             maxBatchThreads: 20,
           },
         };
@@ -1777,5 +1577,5 @@ const make = Effect.gen(function* () {
 export const layer: Layer.Layer<
   OrchestratorMcpService,
   never,
-  Crypto.Crypto | ThreadManagementService | ProviderRegistry | ScheduledTaskService
+  Crypto.Crypto | ThreadManagementService | ProviderRegistry
 > = Layer.effect(OrchestratorMcpService, make);

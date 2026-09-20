@@ -1,5 +1,5 @@
 import { type RunId } from "@t3tools/contracts";
-import { memo, useCallback, useMemo, useState } from "react";
+import { type MouseEvent, memo, useCallback, useMemo, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import {
   buildTurnDiffTree,
@@ -22,6 +22,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
 
+export type ChangedFileContextMenuHandler = (filePath: string, event: MouseEvent) => void;
+
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   runId: RunId;
   files: ReadonlyArray<TurnDiffFileChange>;
@@ -29,6 +31,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   resolvedTheme: "light" | "dark";
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
 }) {
   const {
     runId,
@@ -37,6 +40,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     resolvedTheme,
     onToggleAllDirectories,
     onOpenTurnDiff,
+    onFileContextMenu,
   } = props;
   const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
@@ -117,6 +121,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         allDirectoriesExpanded={allDirectoriesExpanded}
         resolvedTheme={resolvedTheme}
         onOpenTurnDiff={onOpenTurnDiff}
+        onFileContextMenu={onFileContextMenu}
       />
     </div>
   );
@@ -128,6 +133,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
 }) {
   const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, runId } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);

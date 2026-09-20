@@ -3,7 +3,6 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
   EnvironmentId,
-  IsoDateTime,
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderCapabilities,
@@ -25,9 +24,6 @@ import {
   type ProviderOptionDescriptor,
   ProviderThreadId,
   ProviderTurnId,
-  type ScheduledTask,
-  ScheduledTaskId,
-  type ScheduledTaskUpsertInput,
   type ServerProvider,
   ThreadId,
   ThreadMetadataMcpUpdateResult,
@@ -71,7 +67,6 @@ import {
   materializeReplayTranscriptWorkspace,
 } from "../orchestration-v2/testkit/ReplayTranscriptNdjson.ts";
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
-import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { delegatedTaskRun, hasPendingChildRuns } from "./OrchestratorMcpService.ts";
@@ -428,45 +423,6 @@ const client = McpSchema.McpServerClient.of({
   getClient: Effect.die("unused"),
 });
 
-/** Build a persisted-looking ScheduledTask from an upsert input for the in-memory stub. */
-function scheduledTaskFromUpsert(input: ScheduledTaskUpsertInput): ScheduledTask {
-  const timestamp = IsoDateTime.make("2026-07-01T09:00:00.000Z");
-  return {
-    id: input.id ?? ScheduledTaskId.make(`scheduled-task:${input.commandId ?? "stub"}`),
-    title: input.title,
-    prompt: input.prompt,
-    enabled: input.enabled,
-    schedule: input.schedule,
-    projectId: input.projectId,
-    threadId: input.threadId ?? null,
-    workspaceStrategy: input.workspaceStrategy,
-    modelSelection: input.modelSelection,
-    runtimeMode: input.runtimeMode,
-    interactionMode: input.interactionMode,
-    createdBy: input.createdBy ?? "user",
-    creationSource: input.creationSource ?? "web",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    nextRunAt: null,
-    lastRunAt: null,
-    lastRunStatus: "never",
-    lastRunError: null,
-    runCount: 0,
-  };
-}
-
-const unusedScheduledTaskStubLayer = Layer.succeed(
-  ScheduledTaskService,
-  ScheduledTaskService.of({
-    list: () => Effect.succeed({ tasks: [] }),
-    subscribeList: () => Stream.succeed({ tasks: [] }),
-    upsert: () => Effect.die("ScheduledTaskService.upsert is unused in this test"),
-    setEnabled: () => Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
-    delete: () => Effect.die("ScheduledTaskService.delete is unused in this test"),
-    runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
-  }),
-);
-
 describe("orchestrator MCP toolkit", () => {
   it.live(
     "delegates cross-provider tasks, polls and cancels children, and creates ordinary threads",
@@ -594,32 +550,6 @@ describe("orchestrator MCP toolkit", () => {
               model: "opencode/test",
             }),
           ]);
-          // In-memory ScheduledTaskService stub so the schedule/list/update/
-          // delete tools can be exercised without SQL/launch wiring.
-          const scheduledStore = yield* Ref.make<ReadonlyArray<ScheduledTask>>([]);
-          const scheduledTaskStubLayer = Layer.succeed(
-            ScheduledTaskService,
-            ScheduledTaskService.of({
-              list: () => Ref.get(scheduledStore).pipe(Effect.map((tasks) => ({ tasks }))),
-              subscribeList: () => Stream.empty,
-              upsert: (input) =>
-                Effect.gen(function* () {
-                  const task = scheduledTaskFromUpsert(input);
-                  yield* Ref.update(scheduledStore, (all) => [
-                    ...all.filter((candidate) => candidate.id !== task.id),
-                    task,
-                  ]);
-                  return { task };
-                }),
-              setEnabled: () =>
-                Effect.die("ScheduledTaskService.setEnabled is unused in this test"),
-              delete: (input) =>
-                Ref.update(scheduledStore, (all) =>
-                  all.filter((candidate) => candidate.id !== input.id),
-                ).pipe(Effect.as({ id: input.id })),
-              runNow: () => Effect.die("ScheduledTaskService.runNow is unused in this test"),
-            }),
-          );
           const testLayer = Layer.merge(
             McpHttpServer.OrchestratorToolkitRegistrationLive,
             McpHttpServer.ThreadToolkitRegistrationLive,
@@ -627,7 +557,6 @@ describe("orchestrator MCP toolkit", () => {
             Layer.provideMerge(McpServer.McpServer.layer),
             Layer.provideMerge(orchestrationLayer),
             Layer.provide(providerRegistryLayer),
-            Layer.provide(scheduledTaskStubLayer),
             Layer.provide(NodeServices.layer),
           );
 
@@ -1293,84 +1222,6 @@ describe("orchestrator MCP toolkit", () => {
                 }),
               ]),
             });
-
-            const scheduleTool = server.tools.find(({ tool }) => tool.name === "schedule_task");
-            expect(scheduleTool?.tool.annotations?.destructiveHint).toBe(true);
-            const scheduleCall = yield* invoke("schedule_task", {
-              prompt: "wake up in this thread and say hello",
-              schedule: { type: "interval", everyMs: 60_000 },
-              clientRequestId: "schedule-hello-1",
-            });
-            expect(scheduleCall.isError).toBe(false);
-            expect(scheduleCall.structuredContent).toMatchObject({
-              // Defaults to binding the calling thread.
-              boundThreadId: parentThreadId,
-              projectId,
-              enabled: true,
-              schedule: { type: "interval", everyMs: 60_000 },
-              // Title is derived from the prompt when omitted.
-              title: "wake up in this thread and say hello",
-            });
-            const scheduledTaskId = (scheduleCall.structuredContent as { scheduledTaskId: string })
-              .scheduledTaskId;
-            const storedAfterCreate = yield* Ref.get(scheduledStore);
-            expect(storedAfterCreate).toHaveLength(1);
-            expect(storedAfterCreate[0]).toMatchObject({
-              threadId: parentThreadId,
-              projectId,
-              createdBy: "agent",
-              creationSource: "mcp",
-              // Inherits the parent thread's model selection.
-              modelSelection: codexSelection,
-            });
-
-            // list_scheduled_tasks returns the task scoped to this project.
-            const scheduledListCall = yield* invoke("list_scheduled_tasks", {});
-            expect(scheduledListCall.isError).toBe(false);
-            expect(scheduledListCall.structuredContent).toMatchObject({
-              tasks: [{ scheduledTaskId, boundThreadId: parentThreadId }],
-            });
-
-            // update_scheduled_task pauses without deleting.
-            const scheduledUpdateCall = yield* invoke("update_scheduled_task", {
-              scheduledTaskId,
-              enabled: false,
-            });
-            expect(scheduledUpdateCall.isError).toBe(false);
-            expect(scheduledUpdateCall.structuredContent).toMatchObject({
-              scheduledTaskId,
-              enabled: false,
-            });
-
-            // delete_scheduled_task removes it entirely.
-            const scheduledDeleteCall = yield* invoke("delete_scheduled_task", { scheduledTaskId });
-            expect(scheduledDeleteCall.isError).toBe(false);
-            expect(scheduledDeleteCall.structuredContent).toMatchObject({
-              scheduledTaskId,
-              deleted: true,
-            });
-            expect(yield* Ref.get(scheduledStore)).toHaveLength(0);
-
-            // OpenCode 1.15 has emitted this exact nested-object-as-JSON-string
-            // shape. Decode it at the MCP boundary rather than failing a task
-            // the model otherwise specified correctly.
-            const serializedScheduleCall = yield* invoke("schedule_task", {
-              prompt: "check for new pull requests",
-              schedule: '{"type":"interval","everyMs":3600000}',
-              clientRequestId: "schedule-opencode-compat-1",
-            });
-            expect(serializedScheduleCall.isError).toBe(false);
-            expect(serializedScheduleCall.structuredContent).toMatchObject({
-              schedule: { type: "interval", everyMs: 3_600_000 },
-              boundThreadId: parentThreadId,
-            });
-            const serializedScheduledTaskId = (
-              serializedScheduleCall.structuredContent as { scheduledTaskId: string }
-            ).scheduledTaskId;
-            yield* invoke("delete_scheduled_task", {
-              scheduledTaskId: serializedScheduledTaskId,
-            });
-            expect(yield* Ref.get(scheduledStore)).toHaveLength(0);
 
             const delegatedCall = yield* invoke("delegate_task", {
               task: delegatedPrompt,
@@ -2972,7 +2823,6 @@ describe("orchestrator MCP toolkit", () => {
           Layer.provideMerge(McpServer.McpServer.layer),
           Layer.provideMerge(orchestrationLayer),
           Layer.provide(providerRegistryLayer),
-          Layer.provide(unusedScheduledTaskStubLayer),
           Layer.provide(NodeServices.layer),
         );
 

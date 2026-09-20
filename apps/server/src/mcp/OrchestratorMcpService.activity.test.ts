@@ -15,7 +15,6 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "vite-plus/test";
 
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import type * as McpInvocationContext from "./McpInvocationContext.ts";
 import {
@@ -132,9 +131,6 @@ it("readThread prefers activity-run status over a newer cancelled queued run", a
         Layer.mock(ProviderRegistry)({
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry["Service"]>),
-        Layer.mock(ScheduledTaskService)({
-          list: () => Effect.succeed({ tasks: [] }),
-        } satisfies Partial<ScheduledTaskService["Service"]>),
         NodeCrypto.layer,
       ),
     ),
@@ -181,9 +177,6 @@ it("readThread prefers waiting activity status over a newer cancelled queued run
         Layer.mock(ProviderRegistry)({
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry["Service"]>),
-        Layer.mock(ScheduledTaskService)({
-          list: () => Effect.succeed({ tasks: [] }),
-        } satisfies Partial<ScheduledTaskService["Service"]>),
         NodeCrypto.layer,
       ),
     ),
@@ -288,9 +281,6 @@ it("taskStatus returns task.providerInstanceId rather than the driver kind", asy
         Layer.mock(ProviderRegistry)({
           getProviders: Effect.succeed([]),
         } satisfies Partial<ProviderRegistry["Service"]>),
-        Layer.mock(ScheduledTaskService)({
-          list: () => Effect.succeed({ tasks: [] }),
-        } satisfies Partial<ScheduledTaskService["Service"]>),
         NodeCrypto.layer,
       ),
     ),

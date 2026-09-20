@@ -14,7 +14,6 @@ import * as Ref from "effect/Ref";
 
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
@@ -92,7 +91,6 @@ describe("OrchestratorMcpService", () => {
             ),
         }),
         Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-        Layer.mock(ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-ack"),
@@ -166,7 +164,6 @@ describe("OrchestratorMcpService", () => {
             ),
         }),
         Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-        Layer.mock(ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel"),
@@ -231,7 +228,6 @@ describe("OrchestratorMcpService", () => {
             ),
         }),
         Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-        Layer.mock(ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel-failed"),
@@ -303,7 +299,6 @@ describe("OrchestratorMcpService", () => {
             ),
         }),
         Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-        Layer.mock(ScheduledTaskService)({}),
       );
       const scope: McpInvocationScope = {
         environmentId: EnvironmentId.make("environment:mcp-cancel-dispose-failed"),

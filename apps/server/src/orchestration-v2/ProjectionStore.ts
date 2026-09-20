@@ -14,6 +14,7 @@ import type {
   OrchestrationV2ThreadShell,
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
+  ProjectId,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -238,6 +239,16 @@ export interface ProjectionStoreV2Shape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
+  readonly getDeletedWorktreeThreads?: Effect.Effect<
+    ReadonlyArray<{
+      readonly id: ThreadId;
+      readonly projectId: ProjectId;
+      readonly branch: string;
+      readonly worktreePath: string;
+      readonly deletedAt: DateTime.Utc;
+    }>,
+    ProjectionStoreV2Error
+  >;
   readonly getSettlementCandidates: () => Effect.Effect<
     ReadonlyArray<ProjectionSettlementCandidate>,
     ProjectionStoreV2Error
@@ -3254,6 +3265,29 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
 
+    const getDeletedWorktreeThreads: ProjectionStoreV2Shape["getDeletedWorktreeThreads"] =
+      Effect.gen(function* () {
+        const rows = yield* sql<PayloadRow>`
+          SELECT payload_json
+          FROM orchestration_v2_projection_threads
+          WHERE deleted_at IS NOT NULL
+        `;
+        const threads = yield* Effect.forEach(rows, (row) => decodeThreadPayload(row.payload_json));
+        return threads.flatMap((thread) =>
+          thread.deletedAt === null || thread.branch === null || thread.worktreePath === null
+            ? []
+            : [
+                {
+                  id: thread.id,
+                  projectId: thread.projectId,
+                  branch: thread.branch,
+                  worktreePath: thread.worktreePath,
+                  deletedAt: thread.deletedAt,
+                },
+              ],
+        );
+      }).pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
+
     const getRuntimeRecoveryProjection: ProjectionStoreV2Shape["getRuntimeRecoveryProjection"] = (
       threadId,
     ) =>
@@ -4510,6 +4544,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getShellSnapshot,
       getThreadShell,
       getThread,
+      getDeletedWorktreeThreads,
       getSettlementCandidates,
       getThreadProjection,
       getRuntimeRecoveryProjection,
@@ -4599,6 +4634,23 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           return projection.thread;
         }),
+      getDeletedWorktreeThreads: Ref.get(replayState).pipe(
+        Effect.map((state) =>
+          [...state.projections.values()].flatMap(({ thread }) =>
+            thread.deletedAt === null || thread.branch === null || thread.worktreePath === null
+              ? []
+              : [
+                  {
+                    id: thread.id,
+                    projectId: thread.projectId,
+                    branch: thread.branch,
+                    worktreePath: thread.worktreePath,
+                    deletedAt: thread.deletedAt,
+                  },
+                ],
+          ),
+        ),
+      ),
       getSettlementCandidates: () =>
         Effect.gen(function* () {
           const projections = (yield* Ref.get(replayState)).projections;

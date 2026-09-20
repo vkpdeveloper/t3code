@@ -1,6 +1,4 @@
 import {
-  ScheduledTaskId,
-  ScheduledTask,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
   OrchestrationV2ThreadForkSourcePoint,
@@ -23,7 +21,6 @@ import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { McpInvocationContext } from "../../McpInvocationContext.ts";
 
@@ -233,25 +230,7 @@ const ThreadSearchTool = Tool.make("t3_thread_search", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
 
-const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
-  ...commandTool,
-  description:
-    "Run a scheduled task in the calling project now through the existing scheduler. Requires a full-access/default caller. Each call is a new manual run; completion means dispatch/bookkeeping completed, not that the provider turn finished.",
-  parameters: Schema.Struct({ taskId: ScheduledTaskId }),
-  success: Schema.Struct({
-    taskId: ScheduledTaskId,
-    threadId: ScheduledTask.fields.threadId,
-    lastRunStatus: ScheduledTask.fields.lastRunStatus,
-    runCount: NonNegativeInt,
-    nextRunAt: ScheduledTask.fields.nextRunAt,
-  }),
-  dependencies: [...commandTool.dependencies, ScheduledTaskService],
-})
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
-
 export const ThreadToolkit = Toolkit.make(
-  ScheduledTaskRunTool,
   ThreadSearchTool,
   ThreadForkTool,
   ThreadMergeBackTool,

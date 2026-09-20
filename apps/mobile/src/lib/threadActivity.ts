@@ -79,6 +79,7 @@ export interface ThreadFeedActivity {
     | "eye"
     | "globe"
     | "hammer"
+    | "lock"
     | "message"
     | "warning"
     | "wrench"

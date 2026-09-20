@@ -2160,6 +2160,59 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(result.branch, current);
       }),
     );
+
+    it.effect("rejects a missing branch without restoring a matching dirty file", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, "obsolete-branch", "original\n");
+        yield* git(cwd, ["add", "obsolete-branch"]);
+        yield* git(cwd, ["commit", "-m", "tracked file"]);
+        yield* git(cwd, ["branch", "obsolete-branch"]);
+        yield* git(cwd, ["branch", "-D", "obsolete-branch"]);
+        yield* writeTextFile(cwd, "obsolete-branch", "uncommitted work\n");
+
+        const result = yield* driver
+          .switchRef({ cwd, refName: "obsolete-branch" })
+          .pipe(Effect.result);
+
+        assert.equal(result._tag, "Failure");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        assert.equal(
+          yield* fileSystem.readFileString(path.join(cwd, "obsolete-branch")),
+          "uncommitted work\n",
+        );
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), initialBranch);
+      }),
+    );
+
+    it.effect("still creates and reuses remote tracking branches and allows detached refs", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-remote-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "origin", "HEAD:refs/heads/remote-only"]);
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const result = yield* driver.switchRef({ cwd, refName: "origin/remote-only" });
+          assert.equal(result.refName, "remote-only");
+          assert.equal(
+            yield* git(cwd, ["rev-parse", "--abbrev-ref", "@{upstream}"]),
+            "origin/remote-only",
+          );
+          yield* driver.switchRef({ cwd, refName: initialBranch });
+        }
+        const commit = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const detached = yield* driver.switchRef({ cwd, refName: commit });
+        assert.equal(detached.refName, null);
+        assert.equal(yield* git(cwd, ["rev-parse", "HEAD"]), commit);
+      }),
+    );
   });
 
   describe("worktree operations", () => {
@@ -2691,7 +2744,11 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           if (Result.isFailure(result)) {
             assert.equal(
               result.failure.detail,
-              failure === "timeout" ? "Git command timed out." : "git fetch origin failed",
+              failure === "timeout"
+                ? "Git command timed out."
+                : failure === "offline"
+                  ? "Git could not reach the remote. Check the server's network connection and remote host, then retry."
+                  : "Git could not authenticate with the remote. Check Git credentials or SSH access on the server, then retry.",
             );
           }
         }),

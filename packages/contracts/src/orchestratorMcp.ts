@@ -11,16 +11,10 @@ import {
   PositiveInt,
   ProjectId,
   RunId,
-  ScheduledTaskId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnItemId,
 } from "./baseSchemas.ts";
-import {
-  ScheduledTaskRunStatus,
-  ScheduledTaskSchedule,
-  ScheduledTaskUpsertSchedule,
-} from "./scheduledTask.ts";
 import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 import { ThreadLinkedPullRequest, ThreadTitleRegeneration } from "./orchestration.ts";
 import {
@@ -47,26 +41,6 @@ const OrchestratorMcpClientRequestId = TrimmedNonEmptyString.check(
 ).annotate({ description: "Stable idempotency key to reuse when retrying this mutation." });
 
 /**
- * OpenCode 1.15 has been observed serializing nested MCP union objects as JSON
- * strings. Keep the structured object as the documented form while accepting
- * that compatibility shape at the tool boundary and decoding it immediately.
- */
-const OrchestratorMcpScheduleFromJsonString = Schema.fromJsonString(
-  ScheduledTaskUpsertSchedule,
-).annotate({
-  description:
-    "Compatibility-only JSON encoding of the schedule object. Prefer a structured object.",
-});
-
-const OrchestratorMcpSchedule = Schema.Union([
-  ScheduledTaskUpsertSchedule,
-  OrchestratorMcpScheduleFromJsonString,
-]).annotate({
-  description:
-    "Recurring schedule object: {type:'interval', everyMs} or {type:'fixed_time', timeOfDay, weekdays?}. Never stringify it unless the provider requires the compatibility form.",
-});
-
-/**
  * Shorthand `{ id: value }` record form for target model options. Unlike the
  * legacy-tolerant `ProviderOptionSelections` persistence schema, this decodes
  * strictly: a value that is not a string or boolean fails the request rather
@@ -78,7 +52,7 @@ const OrchestratorMcpTargetOptionsFromRecord = Schema.Record(
 ).pipe(
   Schema.decodeTo(
     Schema.Array(ProviderOptionSelection),
-    SchemaTransformation.transformOrFail({
+    SchemaTransformation.transformEffect({
       decode: (record) =>
         Effect.succeed(Object.entries(record).map(([id, value]) => ({ id, value }))),
       encode: (selections: ReadonlyArray<ProviderOptionSelection>) =>
@@ -489,82 +463,10 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
     batchThreadCreation: Schema.Boolean,
     threadManagement: Schema.Boolean,
     incrementalThreadRead: Schema.Boolean,
-    scheduledTasks: Schema.Boolean,
     maxBatchThreads: Schema.Number,
   }),
 });
 export type OrchestratorMcpCapabilitiesResult = typeof OrchestratorMcpCapabilitiesResult.Type;
-
-export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
-  prompt: OrchestratorMcpPrompt.annotate({
-    description: "Prompt executed on every scheduled run.",
-  }),
-  schedule: OrchestratorMcpSchedule,
-  title: Schema.optional(OrchestratorMcpTitle),
-  enabled: Schema.optional(
-    Schema.Boolean.annotate({ description: "Whether the schedule starts enabled; defaults true." }),
-  ),
-  /**
-   * When true (the default), the scheduled task fires into the calling thread
-   * on each run instead of launching a fresh thread. This is the recurring
-   * "wake up in this thread" behaviour reserved for agent-created tasks.
-   */
-  bindToCurrentThread: Schema.optional(
-    Schema.Boolean.annotate({
-      description:
-        "True (default) posts each run into this thread; false creates a fresh top-level thread per run.",
-    }),
-  ),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
-});
-export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
-
-/** Summary of a scheduled task returned by the schedule/list/update tools. */
-export const OrchestratorMcpScheduledTask = Schema.Struct({
-  scheduledTaskId: ScheduledTaskId,
-  title: Schema.String,
-  prompt: Schema.String,
-  enabled: Schema.Boolean,
-  projectId: ProjectId,
-  boundThreadId: Schema.NullOr(ThreadId),
-  schedule: ScheduledTaskSchedule,
-  nextRunAt: Schema.NullOr(IsoDateTime),
-  lastRunStatus: ScheduledTaskRunStatus,
-});
-export type OrchestratorMcpScheduledTask = typeof OrchestratorMcpScheduledTask.Type;
-
-export const OrchestratorMcpScheduleTaskResult = OrchestratorMcpScheduledTask;
-export type OrchestratorMcpScheduleTaskResult = typeof OrchestratorMcpScheduleTaskResult.Type;
-
-export const OrchestratorMcpListScheduledTasksResult = Schema.Struct({
-  tasks: Schema.Array(OrchestratorMcpScheduledTask),
-});
-export type OrchestratorMcpListScheduledTasksResult =
-  typeof OrchestratorMcpListScheduledTasksResult.Type;
-
-export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
-  scheduledTaskId: ScheduledTaskId,
-  prompt: Schema.optional(OrchestratorMcpPrompt),
-  title: Schema.optional(OrchestratorMcpTitle),
-  schedule: Schema.optional(OrchestratorMcpSchedule),
-  enabled: Schema.optional(Schema.Boolean),
-  bindToCurrentThread: Schema.optional(Schema.Boolean),
-});
-export type OrchestratorMcpUpdateScheduledTaskInput =
-  typeof OrchestratorMcpUpdateScheduledTaskInput.Type;
-
-export const OrchestratorMcpDeleteScheduledTaskInput = Schema.Struct({
-  scheduledTaskId: ScheduledTaskId,
-});
-export type OrchestratorMcpDeleteScheduledTaskInput =
-  typeof OrchestratorMcpDeleteScheduledTaskInput.Type;
-
-export const OrchestratorMcpDeleteScheduledTaskResult = Schema.Struct({
-  scheduledTaskId: ScheduledTaskId,
-  deleted: Schema.Boolean,
-});
-export type OrchestratorMcpDeleteScheduledTaskResult =
-  typeof OrchestratorMcpDeleteScheduledTaskResult.Type;
 
 export class OrchestratorMcpFailure extends Schema.TaggedError<OrchestratorMcpFailure>()(
   "OrchestratorMcpFailure",

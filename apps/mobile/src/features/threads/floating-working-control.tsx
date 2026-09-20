@@ -24,6 +24,7 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { ControlPill } from "../../components/ControlPill";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { DevicePreviewButton } from "../devices/device-preview-button";
 import type { FloatingWorkingStatus } from "./floating-working-status";
 import { ShimmeringWorkContent } from "./thread-work-log";
 
@@ -63,6 +64,7 @@ export const FLOATING_WORKING_CONTROL_COVERAGE = CONTROL_OVERLAY_OFFSET + CONTRO
 export function FloatingWorkingControl(props: {
   readonly colorScheme: "light" | "dark";
   readonly status: FloatingWorkingStatus | null;
+  readonly devicePreview: { readonly count: number; readonly onPress: () => void } | null;
   readonly showScrollToEnd: boolean;
   readonly onScrollToEnd: () => void;
   readonly queuedCount: number;
@@ -72,9 +74,14 @@ export function FloatingWorkingControl(props: {
   const [overlayWidth, setOverlayWidth] = useState(windowWidth);
   const [queueWidth, setQueueWidth] = useState(0);
   const hasQueue = props.queuedCount > 0;
+  const hasDevice = props.devicePreview !== null;
   const labelWidth = Math.max(
     0,
-    Math.min(overlayWidth, windowWidth) - CONTROL_HEIGHT - 32 - (hasQueue ? queueWidth : 0),
+    Math.min(overlayWidth, windowWidth) -
+      CONTROL_HEIGHT -
+      32 -
+      (hasQueue ? queueWidth : 0) -
+      (hasDevice ? CONTROL_HEIGHT : 0),
   );
   const separationProgress = useSharedValue(props.showScrollToEnd ? 1 : 0);
 
@@ -107,7 +114,7 @@ export function FloatingWorkingControl(props: {
   // Forget the width while no label is shown so the next one appears at its
   // own size instead of animating from the previous label's.
   const hasStatus = props.status !== null;
-  const hasCapsule = hasStatus || hasQueue;
+  const hasCapsule = hasStatus || hasQueue || hasDevice;
   useEffect(() => {
     if (!hasStatus) {
       measuredWidthRef.current = null;
@@ -126,7 +133,7 @@ export function FloatingWorkingControl(props: {
   }
 
   // The queue and reconnect labels have separate tap targets.
-  const statusInteractive = props.status?.kind === "connection" || hasQueue;
+  const statusInteractive = props.status?.kind === "connection" || hasQueue || hasDevice;
   // The host stays centered on the capsule, but its measurement constraint
   // comes from the overlay, independent of the capsule's current width.
   const statusContent =
@@ -168,11 +175,21 @@ export function FloatingWorkingControl(props: {
           className="h-11 flex-row items-center gap-2 px-3 active:opacity-70"
         >
           {hasStatus ? <View className="mr-1 h-4 w-px bg-border" /> : null}
-          <SymbolView name="list.number" size={13} tintColorClassName="accent-foreground-muted" />
+          <SymbolView
+            name="line.3.horizontal"
+            size={13}
+            tintColorClassName="accent-foreground-muted"
+          />
           <Text className="shrink font-t3-medium text-xs tabular-nums" numberOfLines={1}>
             {props.queuedCount} queued
           </Text>
         </Pressable>
+      ) : null}
+      {props.devicePreview ? (
+        <>
+          {hasStatus || hasQueue ? <View className="h-4 w-px bg-border" /> : null}
+          <DevicePreviewButton {...props.devicePreview} compact={!hasStatus && !hasQueue} />
+        </>
       ) : null}
     </View>
   );
@@ -237,7 +254,7 @@ export function FloatingWorkingControl(props: {
             <ControlPill
               accessibilityLabel="Scroll to end"
               activateOnPressIn
-              className="h-11 w-11 border border-border bg-card shadow-md shadow-black/10"
+              className="h-11 w-11 border border-border bg-glass-fallback shadow-md shadow-black/10"
               disabled={!props.showScrollToEnd}
               icon={{ ios: "chevron.down", android: "keyboard_arrow_down" }}
               onPress={props.onScrollToEnd}
@@ -257,7 +274,7 @@ export function FloatingWorkingControl(props: {
         <ControlPill
           accessibilityLabel="Scroll to end"
           activateOnPressIn
-          className="h-11 w-11 border border-border bg-card shadow-md shadow-black/10"
+          className="h-11 w-11 border border-border bg-glass-fallback shadow-md shadow-black/10"
           icon={{ ios: "chevron.down", android: "keyboard_arrow_down" }}
           onPress={props.onScrollToEnd}
         />

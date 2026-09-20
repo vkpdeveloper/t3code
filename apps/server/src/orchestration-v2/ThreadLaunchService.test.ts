@@ -4,7 +4,6 @@ import * as ServerConfig from "../config.ts";
 import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import { assert, it, vi } from "@effect/vitest";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   ChatAttachmentId,
   ComposerContextId,
@@ -16,7 +15,6 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  OrchestrationV2ThreadProjectionJson,
   ScheduledTaskId,
   type ServerProvider,
   ThreadId,
@@ -30,7 +28,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -41,7 +38,6 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
@@ -56,7 +52,6 @@ import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 
 const projectId = ProjectId.make("project:launch-test");
-const encodeThreadProjection = Schema.encodeEffect(OrchestrationV2ThreadProjectionJson);
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "gpt-5.1-codex",
@@ -234,65 +229,6 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
     }
     assert.fail("Condition was not reached before timeout.");
   });
-}
-
-for (const target of ["new", "existing"] as const) {
-  for (const createdBy of ["user", "agent"] as const) {
-    it.effect(
-      `attributes ${createdBy}-configured automations in ${target} threads without changing their prompt`,
-      () => {
-        const harness = makeHarness();
-        const scheduledTasks = ScheduledTasks.layer.pipe(
-          Layer.provide(Layer.mergeAll(harness.layer, NodeCrypto.layer)),
-        );
-        return Effect.gen(function* () {
-          const tasks = yield* ScheduledTasks.ScheduledTaskService;
-          const launches = yield* ThreadLaunch.ThreadLaunchService;
-          const threads = yield* ThreadManagement.ThreadManagementService;
-          const existing =
-            target === "existing"
-              ? yield* launches.launch(
-                  launchInput({ command: "command:existing", thread: "thread:existing" }),
-                )
-              : null;
-          const { task } = yield* tasks.upsert({
-            id: ScheduledTaskId.make("scheduled-task:attribution"),
-            title: "Daily audit",
-            prompt: "Audit performance and crashes.",
-            enabled: false,
-            schedule: { type: "interval", everyMs: 60_000 },
-            projectId,
-            threadId: existing?.threadId ?? null,
-            workspaceStrategy: { type: "root" },
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            createdBy,
-            creationSource: createdBy === "agent" ? "mcp" : "web",
-          });
-          const result = yield* tasks.runNow({ id: task.id });
-          assert.equal(result.task.lastRunStatus, "succeeded");
-          const projectThreads = yield* threads.listProjectThreads({
-            projectId,
-            includeSubagents: false,
-          });
-          const thread =
-            projectThreads.find((candidate) => candidate.id === existing?.threadId) ??
-            projectThreads[0];
-          assert.isDefined(thread);
-          const projection = yield* threads.getThreadProjection(thread!.id);
-          // Encoding the persisted projection exercises both message and turn-item wire schemas.
-          const wire = yield* encodeThreadProjection(projection);
-          assert.equal(wire.messages[0]?.text, task.prompt);
-          assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
-          assert.equal(wire.messages[0]?.createdBy, createdBy);
-          const turnItem = wire.turnItems.find((item) => item.type === "user_message");
-          assert.equal(turnItem?.text, task.prompt);
-          assert.equal(turnItem?.scheduledTaskId, task.id);
-        }).pipe(Effect.provide(Layer.mergeAll(harness.layer, scheduledTasks)));
-      },
-    );
-  }
 }
 
 it.effect("retains automation attribution while a message waits in the queue", () => {
