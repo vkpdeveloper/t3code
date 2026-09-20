@@ -235,6 +235,11 @@
     },
     {
       "license": "MIT",
+      "name": "khroma",
+      "version": "2.1.0"
+    },
+    {
+      "license": "MIT",
       "name": "type-fest",
       "generatedNotice": {
         "licenseId": "MIT",
