@@ -18,6 +18,7 @@ import {
   collapseExpandedComposerCursor,
   composerStateAtPromptEnd,
   composerSubmissionIntentForKey,
+  composerStateAtPromptEnd,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,

@@ -15,6 +15,7 @@ const reconciledMigrations = [
   [56, "ProjectionThreadMessageContext"],
   [58, "ProjectionThreadTitleState"],
   [59, "PullRequestFilesViewed"],
+  [60, "RemoveRedundantProjectionIndexes"],
 ] as const;
 
 // The V2 schema is unchanged from the published September 15–16 previews.
@@ -39,7 +40,7 @@ describe("V2 preview upgrade", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* runMigrations({ toMigrationInclusive: 58 });
-      assert.deepStrictEqual(yield* runMigrations(), [[59, "PullRequestFilesViewed"]]);
+      assert.deepStrictEqual(yield* runMigrations(), [[59, "PullRequestFilesViewed"], [60, "RemoveRedundantProjectionIndexes"]]);
       assert.deepStrictEqual(
         (yield* sql<{
           readonly migration_id: number;
