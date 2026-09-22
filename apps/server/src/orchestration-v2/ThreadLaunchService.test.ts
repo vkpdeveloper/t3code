@@ -2001,3 +2001,29 @@ for (const exitCode of [0, 1]) {
     }),
   );
 }
+
+for (const override of [undefined, "none", "direct"] as const) {
+  it.effect(`applies worktree submodule settings to V2 launches (${override ?? "environment"})`, () =>
+    Effect.gen(function* () {
+      const received = yield* Deferred.make<unknown>();
+      const harness = makeHarness({
+        serverSettings: {
+          worktreeSubmodules: "recursive",
+          projectSettingsOverrides: override === undefined ? {} : { [projectId]: { worktreeSubmodules: override } },
+        },
+        createWorktree: (input, options) => Deferred.succeed(received, options?.submodules).pipe(
+          Effect.as({ worktree: { path: "/repo-worktrees/feature", refName: input.newRefName, headSha: "abc" } } as never),
+        ),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        yield* launches.launch(launchInput({
+          command: "command:submodules",
+          thread: "thread:submodules",
+          workspace: { type: "worktree", baseRef: "main" },
+        }));
+        assert.strictEqual(yield* Deferred.await(received), override ?? "recursive");
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+}

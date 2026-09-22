@@ -257,7 +257,6 @@ import { BranchToolbar, type BranchToolbarHandle } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
-import { undoLatestThreadAction } from "../hooks/showUndoToast";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
@@ -7313,17 +7312,6 @@ export default function ChatView(props: ChatViewProps) {
             }),
           );
         });
-        return;
-      }
-
-      if (command === "thread.undo") {
-        // Only claim the chord when there is an Undo to run; otherwise the
-        // page keeps its native behavior for the key.
-        if (event.repeat) return;
-        if (undoLatestThreadAction()) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
         return;
       }
 

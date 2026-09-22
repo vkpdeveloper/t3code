@@ -113,6 +113,11 @@ export const make = Effect.gen(function* () {
       ) {
         return;
       }
+      // An explicit upstream recovery choice owns this failure once it is set.
+      if (thread.limitRecovery != null || settings.autoResumeLimitedThreads || settings.snoozeLimitedThreads) {
+        yield* dispatchClear(threadId, "superseded");
+        return;
+      }
       // Clearing the field unblocks the queue; queued sends from the wait then
       // flush through the normal promotion path.
       yield* dispatchClear(threadId, "resumed");
@@ -174,13 +179,14 @@ export const make = Effect.gen(function* () {
     },
   ) {
     const settings = yield* serverSettings.getSettings;
-    if (!settings.autoContinueAfterUsageLimitReset) return;
+    if (!settings.autoContinueAfterUsageLimitReset || settings.autoResumeLimitedThreads || settings.snoozeLimitedThreads) return;
     const projection = yield* orchestrator.getThreadProjection(threadId);
     const latestRun = projection.runs[projection.runs.length - 1];
     if (
       projection.thread.archivedAt !== null ||
       projection.thread.deletedAt !== null ||
       projection.thread.usageLimitResume != null ||
+      projection.thread.limitRecovery != null ||
       // Only the newest run's limit should park the thread; a stale or
       // superseded run's failure must not hold back active work. Runs newer
       // than the failed one that are still queued are exactly the sends this
@@ -225,7 +231,7 @@ export const make = Effect.gen(function* () {
         event.payload.runId !== null
       ) {
         yield* scheduleFromFailure(event.payload.threadId, event.payload.runId, {
-          resetsAt: event.payload.failure.resetsAt ?? null,
+          resetsAt: event.payload.failure.resetAt ?? event.payload.failure.resetsAt ?? null,
           message: event.payload.failure.message,
           code: event.payload.failure.code,
         });
