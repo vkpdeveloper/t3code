@@ -72,6 +72,7 @@ import Migration0055 from "./Migrations/055_ProjectionThreadPullRequests.ts";
 import Migration0056 from "./Migrations/056_ProjectionThreadMessageContext.ts";
 import Migration0057 from "./Migrations/057_OrchestrationV2.ts";
 import Migration0058 from "./Migrations/058_ProjectionThreadTitleState.ts";
+import Migration0060 from "./Migrations/055_RemoveRedundantProjectionIndexes.ts";
 import Migration0059 from "./Migrations/053_PullRequestFilesViewed.ts";
 
 /**
@@ -145,6 +146,7 @@ export const migrationEntries = [
   [57, "OrchestrationV2", Migration0057],
   [58, "ProjectionThreadTitleState", Migration0058],
   [59, "PullRequestFilesViewed", Migration0059],
+  [60, "RemoveRedundantProjectionIndexes", Migration0060],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

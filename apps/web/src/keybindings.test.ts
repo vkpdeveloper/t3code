@@ -227,6 +227,33 @@ describe("settle thread shortcut", () => {
   });
 });
 
+describe("thread undo shortcut", () => {
+  it("resolves mod+z with nothing editable focused", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "z", metaKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, editableFocus: false },
+      }),
+      "thread.undo",
+    );
+  });
+
+  it("leaves native undo alone inside text fields and terminals", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "z", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { editableFocus: true },
+      }),
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "z", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+});
+
 describe("copy thread reference shortcut", () => {
   it("resolves Cmd+Shift+C on macOS and Ctrl+Shift+C elsewhere", () => {
     assert.equal(
@@ -1357,6 +1384,25 @@ describe("composer and pull request shortcuts", () => {
         );
       },
     );
+  }
+
+  for (const platform of ["MacIntel", "Win32", "Linux"]) {
+    it(`edits the last queued message with Alt+ArrowUp from the composer on ${platform}`, () => {
+      const input = event({ key: "ArrowUp", altKey: true });
+      assert.strictEqual(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { composerFocus: true },
+        }),
+        "thread.editQueuedMessage",
+      );
+      assert.isNull(
+        resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { composerFocus: false },
+        }),
+      );
+    });
   }
 
   for (const platform of ["MacIntel", "Win32", "Linux"]) {

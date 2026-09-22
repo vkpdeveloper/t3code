@@ -43,6 +43,7 @@ function makeThread(
         ? { id: "request:input", kind: "user_input", createdAt: startedAt }
         : null;
   const source = {
+    lineage: { relationshipToParent: null },
     id: threadId as ThreadId,
     projectId: PROJECT_ID,
     title: `Task ${threadId}`,

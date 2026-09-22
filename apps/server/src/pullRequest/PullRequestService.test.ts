@@ -1844,14 +1844,16 @@ for (const [provider, host] of [
           number: 1,
           allowStale: false,
         };
-        yield* Effect.all([service[read](reference), service[read](reference)], { concurrency: 2 });
+        const request: Effect.Effect<unknown, PullRequestService.PullRequestError> =
+          service[read](reference);
+        yield* Effect.all([request, request], { concurrency: 2 });
         assert.strictEqual(calls, 1);
         yield* TestClock.adjust("45 seconds");
         limited = true;
-        yield* Effect.flip(service[read](reference));
+        assert.strictEqual((yield* Effect.exit(request))._tag, "Failure");
         assert.strictEqual(calls, 2);
         yield* TestClock.adjust("45 seconds");
-        yield* Effect.flip(service[read](reference));
+        assert.strictEqual((yield* Effect.exit(request))._tag, "Failure");
         assert.strictEqual(calls, 2);
         yield* TestClock.adjust("75 seconds");
         limited = false;
@@ -3485,6 +3487,67 @@ it.effect("a listing narrowed to some projects is its own cache entry", () =>
     yield* service.list({ state: "open", projectIds: ["p2" as ProjectId] });
     assert.strictEqual(asked.length, 2);
   }),
+);
+
+it.effect(
+  "keeps listing freshness tied to read start when filtered reads finish out of order",
+  () =>
+    Effect.gen(function* () {
+      const olderStarted = yield* Deferred.make<void>();
+      const releaseOlder = yield* Deferred.make<void>();
+      let reads = 0;
+      const updatedAt = "2026-07-02T00:00:00Z";
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            listChangeRequests: ({ filters }) =>
+              Effect.gen(function* () {
+                reads += 1;
+                const older = filters?.checks === "failing";
+                if (older) {
+                  yield* Deferred.succeed(olderStarted, undefined);
+                  yield* Deferred.await(releaseOlder);
+                }
+                return {
+                  items: [
+                    {
+                      ...changeRequest(1, updatedAt),
+                      checksState: older ? ("failing" as const) : ("passing" as const),
+                      mergeability: older ? ("mergeable" as const) : ("conflicting" as const),
+                    },
+                  ],
+                  truncated: false,
+                  continues: false,
+                };
+              }),
+          }),
+        ],
+      });
+      const olderInput = { state: "open" as const, filters: { checks: "failing" as const } };
+      const newerInput = { state: "open" as const, filters: { checks: "passing" as const } };
+
+      const olderRead = yield* service.list(olderInput).pipe(Effect.forkChild());
+      yield* Deferred.await(olderStarted);
+      yield* TestClock.adjust("1 second");
+      const newer = yield* service.list(newerInput);
+      yield* Deferred.succeed(releaseOlder, undefined);
+      const older = yield* Fiber.join(olderRead);
+
+      assert.strictEqual(older.entries[0]?.checksState, "failing");
+      assert.strictEqual(older.entries[0]?.mergeability, "mergeable");
+      assert.strictEqual(newer.entries[0]?.checksState, "passing");
+      assert.strictEqual(newer.entries[0]?.mergeability, "conflicting");
+      assert.strictEqual(typeof older.entries[0]?.observedAt, "number");
+      assert.strictEqual(typeof newer.entries[0]?.observedAt, "number");
+      assert.isBelow(older.entries[0]!.observedAt!, newer.entries[0]!.observedAt!);
+
+      const cachedOlder = yield* service.list(olderInput);
+      assert.strictEqual(cachedOlder.entries[0]?.observedAt, older.entries[0]?.observedAt);
+      assert.strictEqual(reads, 2);
+    }),
 );
 
 it.effect("keeps unrelated PRs warm after a mutation, explicit refresh, and project turn", () =>

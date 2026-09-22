@@ -13,18 +13,23 @@ layer("054_OrchestrationV2", (it) => {
     Effect.sync(() => {
       assert.deepStrictEqual(
         migrationEntries.map(([id]) => id),
-        Array.from({ length: 54 }, (_, index) => index + 1),
+        Array.from({ length: 60 }, (_, index) => index + 1),
       );
     }),
   );
 
-  it.effect("upgrades released schema 53 with one complete V2 migration", () =>
+  it.effect("upgrades released fork schema 56 through the latest migrations", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 53 });
+      yield* runMigrations({ toMigrationInclusive: 56 });
 
       const executed = yield* runMigrations();
-      assert.deepStrictEqual(executed, [[54, "OrchestrationV2"]]);
+      assert.deepStrictEqual(executed, [
+        [57, "OrchestrationV2"],
+        [58, "ProjectionThreadTitleState"],
+        [59, "PullRequestFilesViewed"],
+        [60, "RemoveRedundantProjectionIndexes"],
+      ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
 
       const migrations = yield* sql<{
@@ -33,17 +38,18 @@ layer("054_OrchestrationV2", (it) => {
       }>`
         SELECT migration_id, name
         FROM effect_sql_migrations
-        WHERE migration_id >= 48
+        WHERE migration_id >= 53
         ORDER BY migration_id
       `;
       assert.deepStrictEqual(migrations, [
-        { migration_id: 48, name: "ProjectionThreadBranchPullRequest" },
-        { migration_id: 49, name: "ProjectionThreadsActiveOrderKey" },
-        { migration_id: 50, name: "ProjectionThreadPullRequests" },
-        { migration_id: 51, name: "ProjectionThreadMessageContext" },
-        { migration_id: 52, name: "ProjectionThreadTitleState" },
-        { migration_id: 53, name: "PullRequestFilesViewed" },
-        { migration_id: 54, name: "OrchestrationV2" },
+        { migration_id: 53, name: "ProjectionThreadBranchPullRequest" },
+        { migration_id: 54, name: "ProjectionThreadsActiveOrderKey" },
+        { migration_id: 55, name: "ProjectionThreadPullRequests" },
+        { migration_id: 56, name: "ProjectionThreadMessageContext" },
+        { migration_id: 57, name: "OrchestrationV2" },
+        { migration_id: 58, name: "ProjectionThreadTitleState" },
+        { migration_id: 59, name: "PullRequestFilesViewed" },
+        { migration_id: 60, name: "RemoveRedundantProjectionIndexes" },
       ]);
 
       const tables = yield* sql<{ readonly name: string }>`

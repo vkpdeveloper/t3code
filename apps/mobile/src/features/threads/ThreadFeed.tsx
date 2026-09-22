@@ -157,6 +157,7 @@ import {
   resolveMarkdownLinkPresentation,
 } from "@t3tools/mobile-markdown-text/links";
 import {
+  failedFeedRunIds,
   deriveThreadFeedPresentation,
   threadFeedRunIsUnsettled,
   isContextCompactionActivityGroup,
@@ -1444,6 +1445,36 @@ function useMarkdownStyles(
   ]);
 }
 
+function AgentMessageAttribution(props: {
+  readonly environmentId: EnvironmentId;
+  readonly senderThreadId?: ThreadId;
+}) {
+  const navigation = useNavigation();
+  const senderThreadId = props.senderThreadId;
+  const label = (
+    <Text className="mb-1 pr-1 font-t3-medium text-2xs text-foreground-muted opacity-60">
+      Sent by another agent
+    </Text>
+  );
+  return senderThreadId ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Open sending thread"
+      hitSlop={4}
+      onPress={() =>
+        navigation.navigate("Thread", {
+          environmentId: String(props.environmentId),
+          threadId: String(senderThreadId),
+        })
+      }
+    >
+      {label}
+    </Pressable>
+  ) : (
+    label
+  );
+}
+
 function renderFeedEntry(
   info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<
@@ -1462,6 +1493,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
+    readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey?: string) => void;
@@ -1615,10 +1647,15 @@ function renderFeedEntry(
           className="mb-5 items-end"
           {...(enterAnimated ? { entering: FadeInUp.duration(220) } : {})}
         >
-          {presentation.isAutomation || message.createdBy === "agent" ? (
+          {presentation.isAutomation ? (
             <Text className="mb-1 pr-1 font-t3-medium text-2xs text-foreground-muted opacity-60">
-              {presentation.isAutomation ? "Sent by automation" : "Sent by another agent"}
+              Sent by automation
             </Text>
+          ) : message.createdBy === "agent" ? (
+            <AgentMessageAttribution
+              environmentId={props.environmentId}
+              senderThreadId={message.senderThreadId}
+            />
           ) : null}
           <View
             className="min-w-0 gap-2 rounded-[20px] px-3.5 py-2.5"
@@ -1784,7 +1821,12 @@ function renderFeedEntry(
     const enterAnimated = isFreshTimestamp(message.createdAt);
     return (
       <Animated.View
-        className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-1 px-1", hasWideBlock && "w-full")}
+        className={cn(
+          showAssistantMeta && !(message.runId && props.failedRunIds.has(message.runId))
+            ? "mb-5 px-1"
+            : "mb-1 px-1",
+          hasWideBlock && "w-full",
+        )}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {renderedText.trim().length > 0 ? (
@@ -2624,6 +2666,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       ),
     [presentedFeed, props.anchorMessageId, anchorTopInset],
   );
+  const failedRunIds = useMemo(
+    () => failedFeedRunIds(props.feed, props.latestRun),
+    [props.feed, props.latestRun],
+  );
   const terminalAssistantMessageIds = useMemo(() => {
     const terminalIdsByTurn = new Map<RunId, string>();
     for (const entry of props.feed) {
@@ -2833,6 +2879,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         case "thinking":
           return WORK_GROUP_TOGGLE_HEIGHT;
         case "activity-group":
+          if (entry.activities[0]?.projectedItem.item.type === "subagent") {
+            return undefined;
+          }
           if (isContextCompactionActivityGroup(entry) || isContextHandoffActivityGroup(entry)) {
             return undefined;
           }
@@ -2877,6 +2926,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
+            failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,
             onToggleWorkRow,
@@ -2922,6 +2972,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workGroupScrollPositions,
       terminalAssistantMessageIds,
       unsettledTurnId,
+      failedRunIds,
       iconSubtleColor,
       screenColor,
       userBubbleColor,

@@ -1,3 +1,4 @@
+import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
 import { useNavigation } from "@react-navigation/native";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
@@ -31,6 +32,7 @@ import type { ThreadUserInputQuestion } from "@t3tools/client-runtime/state/thre
 import { resolveSubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
 import type { QueuedRunEdit } from "../../state/queued-run-edit";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
+import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/composer-dispatch";
 import * as Haptics from "expo-haptics";
 import { BlurTargetView } from "expo-blur";
 import { GlassBlurTargetContext } from "../../lib/glassBlurTarget";
@@ -189,7 +191,7 @@ export interface ThreadDetailScreenProps {
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
   readonly onCancelUsageLimitResume: () => Promise<unknown>;
-  readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onSendMessage: (followUp?: ActiveTurnComposerAction) => Promise<MessageId | null>;
   readonly onReconnectEnvironment: () => void;
   /** Whether the model picker may offer providers other than this thread's. */
   readonly canSwitchThreadProvider: boolean;
@@ -870,40 +872,43 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     selectedThreadKey,
   ]);
 
-  const handleSendMessage = useCallback(async () => {
-    const targetThreadKey = selectedThreadKey;
-    const hasUserMessage = selectedThreadFeed.some(
-      (entry) => entry.type === "message" && entry.message.role === "user",
-    );
-    const messageId = await props.onSendMessage();
-    if (messageId === null || selectedThreadKeyRef.current !== targetThreadKey) {
+  const handleSendMessage = useCallback(
+    async (followUp?: ActiveTurnComposerAction) => {
+      const targetThreadKey = selectedThreadKey;
+      const hasUserMessage = selectedThreadFeed.some(
+        (entry) => entry.type === "message" && entry.message.role === "user",
+      );
+      const messageId = await props.onSendMessage(followUp);
+      if (messageId === null || selectedThreadKeyRef.current !== targetThreadKey) {
+        return messageId;
+      }
+
+      // A sent message makes the snapshot stale; a refused send leaves it in place.
+      clearUsageLimitsFor(targetThreadKey);
+
+      setSubmittedMessageId(messageId);
+      setAnchorMessageId(
+        resolveThreadFeedSubmissionAnchor({
+          currentAnchorMessageId: anchorMessageId,
+          submittedMessageId: messageId,
+          hasStartedTurn: props.selectedThread.latestRun !== null,
+          hasUserMessage,
+          queuedMessageCount: props.selectedThreadQueueCount,
+        }),
+      );
+      composerEditorRef.current?.blur();
       return messageId;
-    }
-
-    // A sent message makes the snapshot stale; a refused send leaves it in place.
-    clearUsageLimitsFor(targetThreadKey);
-
-    setSubmittedMessageId(messageId);
-    setAnchorMessageId(
-      resolveThreadFeedSubmissionAnchor({
-        currentAnchorMessageId: anchorMessageId,
-        submittedMessageId: messageId,
-        hasStartedTurn: props.selectedThread.latestRun !== null,
-        hasUserMessage,
-        queuedMessageCount: props.selectedThreadQueueCount,
-      }),
-    );
-    composerEditorRef.current?.blur();
-    return messageId;
-  }, [
-    anchorMessageId,
-    clearUsageLimitsFor,
-    props.onSendMessage,
-    props.selectedThread.latestRun,
-    props.selectedThreadQueueCount,
-    selectedThreadFeed,
-    selectedThreadKey,
-  ]);
+    },
+    [
+      anchorMessageId,
+      clearUsageLimitsFor,
+      props.onSendMessage,
+      props.selectedThread.latestRun,
+      props.selectedThreadQueueCount,
+      selectedThreadFeed,
+      selectedThreadKey,
+    ],
+  );
 
   const handleEditPendingMessage = useCallback(async (message: QueuedThreadMessage) => {
     try {
@@ -1154,6 +1159,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     />
                   </Animated.View>
                 ) : null}
+                <UsageLimitRecoveryCard
+                  key={props.selectedThread.latestRun?.runId}
+                  thread={props.selectedThread}
+                  environmentId={props.environmentId}
+                />
                 {props.feedbackSubmissions.map((submission) => (
                   <ComposerFeedback
                     key={submission.id}

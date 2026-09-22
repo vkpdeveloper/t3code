@@ -334,6 +334,30 @@ export const OrchestrationV2UsageLimitResume = Schema.Struct({
   limitType: Schema.optional(TrimmedNonEmptyString),
 });
 export type OrchestrationV2UsageLimitResume = typeof OrchestrationV2UsageLimitResume.Type;
+export const OrchestrationV2LimitRecovery = Schema.Struct({
+  requestId: Schema.optional(CommandId),
+  runId: RunId,
+  resetAt: IsoDateTime,
+  autoResume: Schema.Boolean,
+  snooze: Schema.optional(Schema.Boolean),
+});
+export type OrchestrationV2LimitRecovery = typeof OrchestrationV2LimitRecovery.Type;
+
+/** A choice update preserves omitted options for this same run and reset. */
+export const OrchestrationV2LimitRecoveryUpdate = Schema.Struct({
+  runId: RunId,
+  resetAt: IsoDateTime,
+  autoResume: Schema.optional(Schema.Boolean),
+  snooze: Schema.optional(Schema.Boolean),
+}).check(
+  Schema.makeFilter(
+    (update) =>
+      update.autoResume !== undefined ||
+      update.snooze !== undefined ||
+      "A recovery update must include autoResume or snooze.",
+  ),
+);
+export type OrchestrationV2LimitRecoveryUpdate = typeof OrchestrationV2LimitRecoveryUpdate.Type;
 
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
@@ -379,6 +403,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   unsettledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   // Fractional-index slot in the user-arranged pinned order. Optional so
   // payloads from pre-reorder servers still decode.
@@ -587,6 +612,13 @@ export const OrchestrationV2Subagent = Schema.Struct({
   updatedAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2Subagent = typeof OrchestrationV2Subagent.Type;
+
+/** Idle work is resumable, but does not keep a turn or its subscription alive. */
+export function isOrchestrationV2WorkActive(
+  status: OrchestrationV2ExecutionNode["status"],
+): boolean {
+  return status === "pending" || status === "running" || status === "waiting";
+}
 
 export const OrchestrationV2CheckpointScope = Schema.Struct({
   id: CheckpointScopeId,
@@ -824,6 +856,8 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
   scheduledTaskId: Schema.optional(ScheduledTaskId),
+  // The sending agent's thread in this environment, separate from the receiving thread.
+  senderThreadId: Schema.optional(ThreadId),
   id: MessageId,
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
@@ -965,6 +999,7 @@ export const OrchestrationV2FileChangeDetail = Schema.Struct({
 export type OrchestrationV2FileChangeDetail = typeof OrchestrationV2FileChangeDetail.Type;
 
 export const OrchestrationV2ProviderFailureClass = Schema.Literals([
+  "usage_limit",
   "provider_error",
   "transport_error",
   "permission_error",
@@ -990,6 +1025,8 @@ export const OrchestrationV2ProviderFailure = Schema.Struct({
   code: Schema.NullOr(OrchestrationV2ProviderFailureCode),
   retryable: Schema.NullOr(Schema.Boolean),
   resetsAt: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Reported reset time; absent when the provider cannot name one. */
+  resetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type OrchestrationV2ProviderFailure = typeof OrchestrationV2ProviderFailure.Type;
 
@@ -1065,6 +1102,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     type: Schema.Literal("user_message"),
     messageId: MessageId,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
+    senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
@@ -1501,6 +1539,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   ),
   status: OrchestrationV2ShellThreadStatus,
   lastError: Schema.optional(Schema.NullOr(Schema.String)),
+  lastErrorClass: Schema.optional(Schema.NullOr(OrchestrationV2ProviderFailureClass)),
+  usageLimitResetAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pendingRuntimeRequest: Schema.NullOr(OrchestrationV2PendingRuntimeRequestSummary),
   latestVisibleMessage: Schema.NullOr(OrchestrationV2LatestVisibleMessageSummary),
   latestUserMessageAt: Schema.NullOr(Schema.DateTimeUtc),
@@ -1526,6 +1566,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   unsettledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecovery)),
   /** Omitted by servers that predate thread pinning. */
   pinnedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   /** Slot in the user-arranged pinned order; omitted by pre-reorder servers. */
@@ -1787,6 +1828,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     type: Schema.Literal("user_message"),
     messageId: MessageId,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
+    senderThreadId: Schema.optional(ThreadId),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
@@ -2357,6 +2399,7 @@ export const OrchestrationV2Command = Schema.Union([
     expectedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     /** Reject unless no message or run has landed on this thread. */
     expectedEmpty: Schema.optional(Schema.Boolean),
+    limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request (#8160); absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   }),
@@ -2435,6 +2478,7 @@ export const OrchestrationV2Command = Schema.Union([
     notification: Schema.optional(OrchestrationV2Notification),
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
+    senderThreadId: Schema.optional(ThreadId),
     commandId: CommandId,
     threadId: ThreadId,
     messageId: MessageId,
@@ -2446,6 +2490,8 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: Schema.optional(ModelSelection),
     sourcePlanRef: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
     restartContinuationOfRunId: Schema.optional(RunId),
+    usageLimitContinuationOfRunId: Schema.optional(RunId),
+    usageLimitRecoveryRequestId: Schema.optional(CommandId),
     /** Resolve untargeted delivery against the server's serialized thread state. */
     deliveryIntent: Schema.optional(Schema.Literals(["auto", "steer", "restart"])),
     delegatedCompletion: Schema.optional(

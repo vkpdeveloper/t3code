@@ -29,6 +29,7 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import { TestClock } from "effect/testing";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -2327,6 +2328,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       assert.equal(terminal.status, "failed");
       if (terminal.status !== "failed") return;
       assert.include(terminal.failure.message, expected);
+      assert.equal(terminal.failure.class, recovered ? "provider_error" : "usage_limit");
     }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
   );
 
@@ -2380,6 +2382,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const terminal = yield* Queue.take(harness.terminalReceipts);
       assert.equal(terminal.status, "failed");
       if (terminal.status !== "failed") return;
+      assert.equal(terminal.failure.class, expectedLimit ? "usage_limit" : "provider_error");
       assert.equal(
         terminal.failure.message,
         expectedLimit
@@ -2387,6 +2390,50 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           : "Claude gave up after repeated API errors.",
       );
     }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+  );
+
+  it.effect.each([429, 401, 529])(
+    "classifies the current Claude API status %s after rate-limit evidence",
+    (apiErrorStatus) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-status-${apiErrorStatus}`),
+            text: "Continue.",
+            attachments: [],
+          }),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeAssistantErrorFrame({
+            uuid: "00000000-0000-4000-8000-000000000650",
+            error: "rate_limit",
+          }),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000651",
+            result: "API Error",
+            terminalReason: "api_error",
+            isError: true,
+            apiErrorStatus,
+          }),
+        );
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.equal(terminal.status, "failed");
+        if (terminal.status !== "failed") return;
+        assert.equal(
+          terminal.failure.class,
+          apiErrorStatus === 429 ? "usage_limit" : "provider_error",
+        );
+        if (apiErrorStatus !== 429)
+          assert.notInclude(terminal.failure.message.toLowerCase(), "usage limit");
+      }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
   );
 
   it.effect("surfaces a Claude safety model fallback without failing the turn", () =>
@@ -2970,6 +3017,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.equal(terminal.status, "failed");
           if (terminal.status !== "failed") return;
           assert.isNotEmpty(terminal.failure.message);
+          assert.equal(
+            terminal.failure.class,
+            terminalReason === "blocking_limit" ? "usage_limit" : "provider_error",
+          );
           assert.isFalse(
             harness.events.some(
               (event) =>
@@ -4811,6 +4862,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.equal(subagentEvents().at(-1)?.subagent.result, FIRST_SUMMARY);
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
 
+        const firstStartedAt = subagentEvents().at(-1)?.subagent.startedAt;
+        yield* TestClock.adjust("30 seconds");
+
         // A user turn nudges the completed subagent via SendMessage; the
         // resume task_started re-opens the row across turn contexts (the new
         // turn's maps are empty, so this exercises the session registry).
@@ -4880,6 +4934,11 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         const reopened = subagentEvents().at(-1)?.subagent;
         assert.isNull(reopened?.result);
+        assert.isNull(reopened?.completedAt);
+        assert.equal(
+          DateTime.toEpochMillis(reopened!.startedAt!) - DateTime.toEpochMillis(firstStartedAt!),
+          30_000,
+        );
         // The reopen re-attributes the subagent to the resuming run:
         // RunExecutionService routes parent-thread events by runId, and the
         // launch run's ingestion fiber stops once its child subagents

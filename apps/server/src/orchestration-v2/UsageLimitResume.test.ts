@@ -141,6 +141,15 @@ it.effect(
       assert.isNotNull(scheduled.thread.usageLimitResume);
       assert.strictEqual(scheduled.thread.usageLimitResume?.blockedRunId, "run:blocked");
       assert.isFalse(scheduled.thread.usageLimitResume?.isEstimated);
+      assert.deepStrictEqual(
+        (yield* projections.getThreadShell(threadId))?.usageLimitResume,
+        scheduled.thread.usageLimitResume,
+      );
+      assert.deepStrictEqual(
+        (yield* projections.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+          ?.usageLimitResume,
+        scheduled.thread.usageLimitResume,
+      );
 
       // Sends during the wait queue instead of starting a doomed run.
       yield* orchestrator.dispatch({

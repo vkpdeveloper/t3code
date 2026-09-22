@@ -1,3 +1,4 @@
+import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
@@ -43,7 +44,7 @@ import {
 } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { AgentElapsed } from "../AgentsPanel";
+import { AgentElapsed } from "./AgentElapsed";
 import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -345,11 +346,14 @@ export function ThreadRelationshipsPanel(props: {
               const relationshipHint = node?.missing
                 ? "This related thread is unavailable"
                 : `Open ${relationship.toLowerCase()} in this chat`;
+              const RelationshipPopup = agent ? ThreadHoverCardPopup : TooltipPopup;
               const relationshipTooltip = agent ? (
                 <SubagentTooltipContent
                   title={threadTitle}
                   model={agent.model}
                   provider={provider}
+                  driver={providerDriver}
+                  elapsed={<AgentElapsed agent={agent} />}
                   status={agent.status}
                   result={agent.result}
                   progress={agent.progress}
@@ -405,7 +409,7 @@ export function ThreadRelationshipsPanel(props: {
                         >
                           {relationshipContent}
                         </TooltipTrigger>
-                        <TooltipPopup side="left">{relationshipTooltip}</TooltipPopup>
+                        <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
                       </Tooltip>
                       <span
                         aria-hidden="true"
@@ -459,7 +463,7 @@ export function ThreadRelationshipsPanel(props: {
                       >
                         {relationshipContent}
                       </TooltipTrigger>
-                      <TooltipPopup side="left">{relationshipTooltip}</TooltipPopup>
+                      <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
                     </Tooltip>
                   )}
                 </li>

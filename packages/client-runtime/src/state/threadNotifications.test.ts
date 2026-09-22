@@ -47,6 +47,7 @@ function makeThread(
         ? { kind: "user_input" as const }
         : null;
   const source = {
+    lineage: { relationshipToParent: null },
     id: overrides.threadId ?? THREAD_ID,
     title: "Fix flaky auth test",
     modelSelection: { instanceId: "codex" as never, model: "gpt-5" },

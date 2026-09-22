@@ -59,6 +59,7 @@ export type ThreadLaunchWorkspaceStrategy =
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
   readonly scheduledTaskId?: ScheduledTaskId;
+  readonly senderThreadId?: ThreadId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly context?: import("@t3tools/contracts").OrchestrationMessageContext | undefined;
@@ -178,13 +179,15 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
   ) {
     const projection = yield* threads
-      .getThreadProjection(threadId)
+      .getThreadRecords(threadId, ["runs"])
       .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
     if (
       projection.thread.projectId !== input.projectId ||
       projection.thread.archivedAt !== null ||
       projection.thread.deletedAt !== null ||
-      projection.messages.length > 0 ||
+      (yield* threads
+        .getMessageCount(threadId)
+        .pipe(Effect.mapError(mapError(input, "update-thread", threadId)))) > 0 ||
       projection.runs.length > 0
     ) {
       return yield* mapError(
@@ -325,6 +328,13 @@ const make = Effect.gen(function* () {
               path: null,
             },
             {
+              submodules: yield* serverSettings.getSettings.pipe(
+                Effect.map(
+                  (settings) =>
+                    resolveProjectSettings(settings, input.projectId).settings.worktreeSubmodules,
+                ),
+                Effect.orElseSucceed(() => null),
+              ),
               progress: {
                 onWorktreeClaimed: (path) =>
                   Effect.sync(() => {
@@ -720,6 +730,9 @@ const make = Effect.gen(function* () {
               ...(input.initialMessage.scheduledTaskId === undefined
                 ? {}
                 : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
+              ...(input.initialMessage.senderThreadId === undefined
+                ? {}
+                : { senderThreadId: input.initialMessage.senderThreadId }),
               attachments: input.initialMessage.attachments,
               ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
@@ -756,7 +769,7 @@ const make = Effect.gen(function* () {
               const preparationStillRequired =
                 runId === null
                   ? true
-                  : yield* threads.getThreadProjection(threadId).pipe(
+                  : yield* threads.getThreadRecords(threadId, ["runs"], { runIds: [runId] }).pipe(
                       Effect.map((current) =>
                         current.runs.some((run) => run.id === runId && run.status === "preparing"),
                       ),
