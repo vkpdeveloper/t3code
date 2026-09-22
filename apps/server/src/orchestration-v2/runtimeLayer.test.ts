@@ -3163,7 +3163,20 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
       const autoResume = scenario !== "snooze-only" && scenario !== "wake";
       const arm = limitRecoveryCommand(shell, autoResume, DateTime.toEpochMillis(now), snooze);
       assert.isNotNull(arm);
+      if (scenario === "resume") {
+        yield* orchestrator.dispatch({
+          type: "thread.usage-limit-resume.schedule",
+          commandId: CommandId.make("legacy-limit-wait"),
+          threadId,
+          blockedRunId: run.id,
+          resumeAt: DateTime.makeUnsafe(resetAt),
+          isEstimated: false,
+        });
+      }
       yield* orchestrator.dispatch(arm!);
+      assert.isNull(
+        (yield* orchestrator.getThreadProjection(threadId)).thread.usageLimitResume ?? null,
+      );
       let armedShell = (yield* orchestrator.getShellSnapshot()).threads.find(
         (thread) => thread.id === threadId,
       )!;

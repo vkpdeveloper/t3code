@@ -114,7 +114,11 @@ export const make = Effect.gen(function* () {
         return;
       }
       // An explicit upstream recovery choice owns this failure once it is set.
-      if (thread.limitRecovery != null || settings.autoResumeLimitedThreads || settings.snoozeLimitedThreads) {
+      if (
+        thread.limitRecovery != null ||
+        settings.autoResumeLimitedThreads ||
+        settings.snoozeLimitedThreads
+      ) {
         yield* dispatchClear(threadId, "superseded");
         return;
       }
@@ -179,7 +183,12 @@ export const make = Effect.gen(function* () {
     },
   ) {
     const settings = yield* serverSettings.getSettings;
-    if (!settings.autoContinueAfterUsageLimitReset || settings.autoResumeLimitedThreads || settings.snoozeLimitedThreads) return;
+    if (
+      !settings.autoContinueAfterUsageLimitReset ||
+      settings.autoResumeLimitedThreads ||
+      settings.snoozeLimitedThreads
+    )
+      return;
     const projection = yield* orchestrator.getThreadProjection(threadId);
     const latestRun = projection.runs[projection.runs.length - 1];
     if (

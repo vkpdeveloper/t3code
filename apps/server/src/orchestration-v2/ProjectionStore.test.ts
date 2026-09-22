@@ -2044,7 +2044,14 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
       for (const [field, value] of [
         ["archivedAt", DateTime.formatIso(now)],
         ["settledOverride", "settled"],
-        ["usageLimitResume", JSON.stringify({ blockedRunId: original.id, resumeAt: limitItem.failure.resetAt, isEstimated: false })],
+        [
+          "usageLimitResume",
+          encodeUnknownJsonString({
+            blockedRunId: original.id,
+            resumeAt: limitItem.failure.resetAt,
+            isEstimated: false,
+          }),
+        ],
       ]) {
         yield* sql`UPDATE orchestration_v2_projection_threads
           SET payload_json = json_set(payload_json, ${`$.${field}`}, ${value})

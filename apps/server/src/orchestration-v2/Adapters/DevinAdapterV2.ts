@@ -27,6 +27,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import type * as Path from "effect/Path";
+import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import type * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
@@ -107,6 +109,7 @@ export interface DevinAdapterV2Options {
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocatorV2["Service"];
   readonly serverConfig: ServerConfig["Service"];
+  readonly selfInvocation: SelfInvocation;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly makeRuntime?: (
@@ -212,6 +215,7 @@ export function makeDevinAdapterV2(options: DevinAdapterV2Options) {
     fileSystem: options.fileSystem,
     idAllocator: options.idAllocator,
     serverConfig: options.serverConfig,
+    selfInvocation: options.selfInvocation,
     // Devin's shell tool runs commands through T3 client terminals so users can
     // watch and take over agent-spawned shells.
     clientTerminals: {
@@ -227,6 +231,7 @@ export function makeDevinAdapterV2(options: DevinAdapterV2Options) {
 }
 
 export type DevinAdapterV2DriverEnv =
+  | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -242,6 +247,7 @@ export const DevinAdapterV2Driver: ProviderAdapterDriver<DevinSettings, DevinAda
     function* (input: ProviderAdapterDriverCreateInput<DevinSettings>) {
       const hostEnvironment = yield* HostProcessEnvironment;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const selfInvocation = yield* resolveSelfInvocation();
       const crypto = yield* Crypto.Crypto;
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocatorV2;
@@ -258,6 +264,7 @@ export const DevinAdapterV2Driver: ProviderAdapterDriver<DevinSettings, DevinAda
         fileSystem,
         idAllocator,
         serverConfig,
+        selfInvocation,
         continuationRequests,
         nativeLogging: (threadId) =>
           makeNativeLogger({
@@ -285,6 +292,7 @@ export const DevinAdapterV2Driver: ProviderAdapterDriver<DevinSettings, DevinAda
 const layer: Layer.Layer<
   ProviderAdapterV2,
   never,
+  | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
@@ -295,6 +303,7 @@ const layer: Layer.Layer<
   ProviderAdapterV2,
   Effect.gen(function* () {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const selfInvocation = yield* resolveSelfInvocation();
     const crypto = yield* Crypto.Crypto;
     const fileSystem = yield* FileSystem.FileSystem;
     const idAllocator = yield* IdAllocatorV2;
@@ -310,6 +319,7 @@ const layer: Layer.Layer<
       fileSystem,
       idAllocator,
       serverConfig,
+      selfInvocation,
       continuationRequests,
       nativeLogging: (threadId) =>
         makeNativeLogger({

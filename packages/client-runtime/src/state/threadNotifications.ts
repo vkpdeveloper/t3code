@@ -201,7 +201,10 @@ export function reconcileThreadNotifications(
     // A failure's error text is more useful than its last assistant message.
     const responseText =
       kind === "task-failed"
-        ? (awareness.detail ?? input.readResponseText?.(threadRef) ?? null)
+        ? (thread.source.lastError ??
+          awareness.detail ??
+          input.readResponseText?.(threadRef) ??
+          null)
         : (input.readResponseText?.(threadRef) ?? null);
 
     notifications.push({

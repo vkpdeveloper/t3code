@@ -329,7 +329,10 @@ const make = Effect.gen(function* () {
             },
             {
               submodules: yield* serverSettings.getSettings.pipe(
-                Effect.map((settings) => resolveProjectSettings(settings, input.projectId).settings.worktreeSubmodules),
+                Effect.map(
+                  (settings) =>
+                    resolveProjectSettings(settings, input.projectId).settings.worktreeSubmodules,
+                ),
                 Effect.orElseSucceed(() => null),
               ),
               progress: {
