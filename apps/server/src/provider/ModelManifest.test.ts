@@ -14,7 +14,9 @@ import {
   applyManifestDefault,
   BUNDLED_MODEL_MANIFEST,
   classifyModels,
+  layer,
   make,
+  ModelManifest,
   resolveProviderCatalog,
   type ModelManifestData,
   encodeManifestCache,
@@ -337,18 +339,39 @@ const serviceLayers = (input: {
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
-    // The fork defaults provider update checks off; the manifest tests stub
-    // the fetch itself, so they opt the check back in.
-    Layer.provideMerge(
-      ServerSettings.layerTest({
-        enableProviderUpdateChecks: true,
-        ...(input.settings ?? {}),
-      }),
-    ),
+    Layer.provideMerge(ServerSettings.layerTest(input.settings ?? {})),
     Layer.provideMerge(httpClientLayer(input.response)),
   );
 
 describe("ModelManifest service", () => {
+  it.live("starts a manifest fetch on boot without a provider check", () => {
+    let notifyFetch!: () => void;
+    const fetched = new Promise<void>((resolve) => {
+      notifyFetch = resolve;
+    });
+    return Effect.gen(function* () {
+      const service = yield* ModelManifest;
+      yield* Effect.promise(() => fetched);
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        layer.pipe(
+          Layer.provide(
+            serviceLayers({
+              prefix: "model-manifest-boot-test",
+              response: () => {
+                notifyFetch();
+                return Response.json(REMOTE_MANIFEST);
+              },
+              settings: { enableProviderUpdateChecks: false },
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
   it.live("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {
       const service = yield* make;
@@ -452,28 +475,32 @@ describe("ModelManifest service", () => {
     ),
   );
 
-  it.live("does not fetch when provider update checks are disabled", () =>
-    Effect.gen(function* () {
-      let fetchCount = 0;
-      const service = yield* make.pipe(
-        Effect.provide(
-          httpClientLayer(() => {
-            fetchCount += 1;
-            return Response.json(REMOTE_MANIFEST);
-          }),
-        ),
-      );
-      assert.deepStrictEqual(yield* service.refresh, BUNDLED_MODEL_MANIFEST);
-      assert.strictEqual(fetchCount, 0);
+  it.live("fetches once per server start even when provider update checks are disabled", () => {
+    let fetchCount = 0;
+    let remote: ModelManifestData = REMOTE_MANIFEST;
+    return Effect.gen(function* () {
+      const service = yield* make;
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 1);
+
+      remote = REMOTE_CLAUDE_MANIFEST;
+      const rebooted = yield* make;
+      assert.deepStrictEqual(yield* rebooted.current, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* rebooted.refresh, REMOTE_CLAUDE_MANIFEST);
+      assert.deepStrictEqual(yield* rebooted.refresh, REMOTE_CLAUDE_MANIFEST);
+      assert.strictEqual(fetchCount, 2);
     }).pipe(
       Effect.scoped,
       Effect.provide(
         serviceLayers({
-          prefix: "model-manifest-optout-test",
-          response: () => Response.json(REMOTE_MANIFEST),
+          prefix: "model-manifest-restart-test",
+          response: () => {
+            fetchCount += 1;
+            return Response.json(remote);
+          },
           settings: { enableProviderUpdateChecks: false },
         }),
       ),
-    ),
-  );
+    );
+  });
 });
