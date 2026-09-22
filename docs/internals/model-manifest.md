@@ -3,6 +3,8 @@
 The [bundled manifest](../../apps/server/src/provider/model-manifest.json) allows
 offline startup; fetching it from `main` lets model metadata change between
 releases. Failed fetches or invalid data preserve the last usable manifest.
+Server startup fetches the manifest in the background even when provider update
+notifications are disabled. Later checks use an in-process TTL.
 Remote data must pass both catalog-reference validation and the owning provider's
 adapter validation before replacing the cache.
 

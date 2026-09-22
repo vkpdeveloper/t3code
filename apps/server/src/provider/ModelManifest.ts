@@ -31,7 +31,6 @@ import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
-import * as ServerSettings from "../serverSettings.ts";
 import { hasValidClaudeManifestAdapters } from "./ClaudeModelManifest.ts";
 import bundledManifestJson from "./model-manifest.json" with { type: "json" };
 import type { ServerProviderDraft } from "./providerSnapshot.ts";
@@ -335,7 +334,6 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
-  const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
   const serviceScope = yield* Effect.scope;
 
@@ -365,29 +363,20 @@ export const make = Effect.gen(function* () {
         return;
       }
       manifest = fromDisk.manifest;
-      fetchedAtMs = fromDisk.fetchedAtMs;
+      // The disk copy is ready immediately, but its fetch time must not skip
+      // the first remote check after a server restart.
     }),
   );
 
   const refresh = Effect.fn("ModelManifest.refresh")(function* () {
     yield* ensureDiskCacheLoaded;
     const now = yield* Clock.currentTimeMillis;
-    // A timestamp in the future means the wall clock moved backwards (the
-    // disk cache crosses restarts, so monotonic time cannot cover it). Treat
-    // it as expired: the refetch rewrites both timestamps and self-heals.
+    // A timestamp in the future means the wall clock moved backwards. Treat
+    // it as expired: the refetch rewrites the timestamp and self-heals.
     const isWithin = (sinceMs: number | null, windowMs: number) =>
       sinceMs !== null && now >= sinceMs && now - sinceMs < windowMs;
     if (isWithin(fetchedAtMs, MANIFEST_TTL_MS)) return manifest;
     if (isWithin(lastAttemptMs, MANIFEST_RETRY_MS)) return manifest;
-
-    // The same switch that gates provider CLI update checks. It stops network
-    // fetches only: a manifest already cached on disk from an earlier fetch
-    // stays in effect, since the setting is about phoning home, not about
-    // discarding data the server already holds.
-    const settings = yield* settingsService.getSettings.pipe(
-      Effect.catchCause(() => Effect.succeed(null)),
-    );
-    if (settings !== null && !settings.enableProviderUpdateChecks) return manifest;
 
     lastAttemptMs = now;
     const fetched = yield* httpClient.get(MODEL_MANIFEST_URL).pipe(
@@ -417,4 +406,11 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ModelManifest, make);
+export const layer = Layer.effect(
+  ModelManifest,
+  Effect.gen(function* () {
+    const service = yield* make;
+    yield* service.refreshInBackground;
+    return service;
+  }),
+);
