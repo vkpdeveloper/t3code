@@ -241,6 +241,115 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }),
   );
 
+  it.effect("stores the Vibe-Proxy management key only in the secret store", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const secretPath = path.join(serverConfig.secretsDir, "vibe-proxy-management-key.bin");
+
+      const configured = yield* serverSettings.updateSettings({
+        vibeProxy: {
+          enabled: true,
+          baseUrl: "http://vibe-proxy.local:8954",
+          apiKey: "management-key",
+        },
+      });
+
+      assert.equal(configured.vibeProxy.apiKey, "management-key");
+      assert.deepEqual(ServerSettingsModule.redactServerSettingsForClient(configured).vibeProxy, {
+        enabled: true,
+        baseUrl: "http://vibe-proxy.local:8954",
+        apiKey: "",
+        apiKeyRedacted: true,
+      });
+      const rawSettings = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.notInclude(rawSettings, "management-key");
+      assert.include(rawSettings, '"apiKeyRedacted": true');
+      assert.equal(
+        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
+        "management-key",
+      );
+
+      const moved = yield* serverSettings.updateSettings({
+        vibeProxy: { baseUrl: "http://vibe-proxy.local:9000" },
+      });
+      assert.equal(moved.vibeProxy.apiKey, "management-key");
+
+      const cleared = yield* serverSettings.updateSettings({ vibeProxy: { apiKey: "" } });
+      assert.equal(cleared.vibeProxy.apiKeyRedacted, false);
+      assert.isFalse(yield* fileSystem.exists(secretPath));
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("treats a stale Vibe-Proxy secret marker as unconfigured", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify({
+          vibeProxy: {
+            enabled: true,
+            baseUrl: "http://vibe-proxy.local:8954",
+            apiKey: "",
+            apiKeyRedacted: true,
+          },
+        }),
+      );
+
+      const settings = yield* serverSettings.getSettings;
+      assert.equal(settings.vibeProxy.apiKey, "");
+      assert.equal(settings.vibeProxy.apiKeyRedacted, false);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("restores the Vibe-Proxy management key when settings persistence fails", () => {
+    const failure = { enabled: false };
+    return Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const secretPath = path.join(serverConfig.secretsDir, "vibe-proxy-management-key.bin");
+
+      yield* serverSettings.updateSettings({
+        vibeProxy: {
+          enabled: true,
+          baseUrl: "http://vibe-proxy.local:8954",
+          apiKey: "original-key",
+        },
+      });
+
+      failure.enabled = true;
+      const replacementError = yield* Effect.flip(
+        serverSettings.updateSettings({ vibeProxy: { apiKey: "replacement-key" } }),
+      );
+      assert.equal(replacementError.operation, "write-file");
+      assert.equal(
+        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
+        "original-key",
+      );
+
+      const removalError = yield* Effect.flip(
+        serverSettings.updateSettings({ vibeProxy: { apiKey: "" } }),
+      );
+      assert.equal(removalError.operation, "write-file");
+      assert.equal(
+        new TextDecoder().decode(yield* fileSystem.readFile(secretPath)),
+        "original-key",
+      );
+
+      failure.enabled = false;
+      const settings = yield* serverSettings.getSettings;
+      assert.equal(settings.vibeProxy.apiKey, "original-key");
+    }).pipe(Effect.provide(makeServerSettingsLayerWithSettingsRenameFailure(failure)));
+  });
+
   it.effect(
     "decodes legacy object-shaped textGenerationModelSelection.options from settings.json",
     () =>

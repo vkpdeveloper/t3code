@@ -63,6 +63,10 @@ const usageByWindowAtom = Atom.family((windowKey: string) =>
   }).pipe(Atom.withLabel(`mobile-usage:window:${windowKey}`)),
 );
 
+const idleUsageAtom = Atom.make<readonly EnvironmentUsageStatus[]>([]).pipe(
+  Atom.withLabel("mobile-usage:idle"),
+);
+
 export interface UsageView {
   readonly merged: MergedUsage;
   readonly environments: readonly EnvironmentUsageStatus[];
@@ -81,6 +85,7 @@ export interface UsageView {
 export function useUsage(
   input: UsageSummaryInput,
   selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null = null,
+  enabled = true,
 ): UsageView {
   const windowKey = useMemo(
     () =>
@@ -101,7 +106,10 @@ export function useUsage(
       input.untilTime,
     ],
   );
-  const atom = usageByWindowAtom(windowKey);
+  const atom = useMemo(
+    () => (enabled ? usageByWindowAtom(windowKey) : idleUsageAtom),
+    [enabled, windowKey],
+  );
   const environments = useAtomValue(atom);
   const selectedEnvironments = useMemo(
     () =>
@@ -112,15 +120,17 @@ export function useUsage(
   );
 
   const refresh = useCallback(
-    (nextInput?: UsageSummaryInput) =>
-      refreshUsage({
+    (nextInput?: UsageSummaryInput) => {
+      if (!enabled) return Promise.resolve();
+      return refreshUsage({
         registry: appAtomRegistry,
         server: serverEnvironment,
         presentations: environmentPresentations,
         environmentIds: selectedEnvironments.map(({ environmentId }) => environmentId),
         input: nextInput ?? (JSON.parse(windowKey) as UsageSummaryInput),
-      }),
-    [selectedEnvironments, windowKey],
+      });
+    },
+    [enabled, selectedEnvironments, windowKey],
   );
 
   const merged = useMemo(() => {

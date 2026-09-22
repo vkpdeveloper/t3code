@@ -144,6 +144,37 @@ describe("pools", () => {
   };
   const laptop = { entry: { target: { label: "Laptop" } } };
 
+  it("can exclude hub-reported accounts from client views", () => {
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [],
+            usageLimitSources: [
+              {
+                ...source,
+                accounts: [
+                  {
+                    id: "cursor-person.json",
+                    driver: ProviderDriverKind.make("cursor"),
+                    email: "person@example.com",
+                    plan: "Cursor",
+                    usageLimits: { checkedAt, windows: [{ ...window, usedPercent: 20 }] },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+
+    expect(collectLimitAccounts(input)).toHaveLength(1);
+    expect(collectLimitAccounts(input, { includeUsageLimitSources: false })).toEqual([]);
+  });
+
   it("merges one account reported natively on two environments and by a hub into one entry", () => {
     const native = provider({
       driver: claude,

@@ -1,6 +1,6 @@
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
-import { type RouteProp, useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
+import { type RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import {
   isCompatibleUsageContractVersion,
   isModelCostUnknown,
@@ -33,8 +33,6 @@ import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useVibeProxyUsage } from "../../state/vibeProxyUsage";
 import { VibeProxyUsageSection } from "./VibeProxyUsageSection";
-import { useRefreshLimits } from "./UsageLimitsSection";
-import { UsageLimitsSection } from "./UsageLimitsPooled";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
 import type { UsageChartMetric } from "./usageChartData";
@@ -93,12 +91,12 @@ export function UsageRouteScreen() {
   const isPast24Hours = windowDays === 1;
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
     useState<ReadonlySet<EnvironmentId> | null>(null);
+  const showingLimits = tab === "limits";
   const { merged, environments, selectedEnvironments, isPending, refresh } = useUsage(
     window,
     selectedEnvironmentIds,
+    !showingLimits,
   );
-  const isFocused = useIsFocused();
-  const limits = useRefreshLimits(selectedEnvironmentIds, isFocused && tab === "limits");
   const vibeProxyUsage = useVibeProxyUsage();
 
   const days = useMemo(
@@ -127,7 +125,6 @@ export function UsageRouteScreen() {
 
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
-  const showingLimits = tab === "limits";
   const selectWindow = (days: number) => {
     setWindowSelection({
       days,
@@ -147,7 +144,6 @@ export function UsageRouteScreen() {
     }
     refreshingRef.current = true;
     setRefreshingUsage(true);
-    void vibeProxyUsage.refresh();
     void refresh(nextWindow).finally(() => {
       refreshingRef.current = false;
       setRefreshingUsage(false);
@@ -235,12 +231,12 @@ export function UsageRouteScreen() {
 
   useLayoutEffect(() => {
     if (Platform.OS === "ios") {
-      navigation.setOptions({ headerRight: () => environmentFilter });
+      navigation.setOptions({ headerRight: () => (showingLimits ? null : environmentFilter) });
     }
-  }, [navigation, environmentFilter]);
+  }, [navigation, environmentFilter, showingLimits]);
 
   return (
-    <SettingsScreen title="Usage" trailing={environmentFilter}>
+    <SettingsScreen title="Usage" trailing={showingLimits ? null : environmentFilter}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -249,8 +245,8 @@ export function UsageRouteScreen() {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         refreshControl={
           <RefreshControl
-            refreshing={showingLimits ? limits.refreshing : refreshingUsage}
-            onRefresh={showingLimits ? () => void limits.refresh() : refreshWindow}
+            refreshing={showingLimits ? vibeProxyUsage.isRefreshing : refreshingUsage}
+            onRefresh={showingLimits ? () => void vibeProxyUsage.refresh() : refreshWindow}
           />
         }
       >
@@ -262,11 +258,7 @@ export function UsageRouteScreen() {
           className="gap-6"
         >
           {showingLimits ? (
-            <UsageLimitsSection
-              now={limits.now}
-              failedLabels={limits.failedLabels}
-              selectedEnvironmentIds={selectedEnvironmentIds}
-            />
+            <VibeProxyUsageSection usage={vibeProxyUsage} />
           ) : (
             <>
               {/* Period and metric together: neither applies to Limits, and
@@ -320,7 +312,6 @@ export function UsageRouteScreen() {
                   <ModelsSection merged={merged} />
                 </>
               )}
-              <VibeProxyUsageSection usage={vibeProxyUsage} />
             </>
           )}
         </Animated.View>

@@ -87,6 +87,9 @@ describe("vibeProxyProviderKind", () => {
     expect(vibeProxyProviderKind("google")).toBe("gemini");
     expect(vibeProxyProviderKind("grok")).toBe("grok");
     expect(vibeProxyProviderKind("xai-oauth")).toBe("grok");
+    expect(vibeProxyProviderKind("cursor")).toBe("cursor");
+    expect(vibeProxyProviderKind("devin-cli")).toBe("devin");
+    expect(vibeProxyProviderKind("opencode-go")).toBe("opencode");
   });
 
   it("prefers Antigravity over Gemini when both would match", () => {
@@ -102,6 +105,8 @@ describe("vibeProxyProviderKind", () => {
 describe("vibeProxyProviderLabel", () => {
   it("uses brand names for known providers and title cases the rest", () => {
     expect(vibeProxyProviderLabel("openai")).toBe("Codex");
+    expect(vibeProxyProviderLabel("devin-cli")).toBe("Devin");
+    expect(vibeProxyProviderLabel("opencode-go")).toBe("OpenCode");
     expect(vibeProxyProviderLabel("some_new-vendor")).toBe("Some New Vendor");
     expect(vibeProxyProviderLabel("   ")).toBe("Unknown provider");
   });
@@ -354,6 +359,36 @@ describe("collectVibeProxyPools", () => {
 
     expect(pools[0]!.windows[0]!.remainingPercent).toBe(50);
     expect(pools[0]!.windows[0]!.members[1]!.window.state).toBe("unknown");
+  });
+
+  it("preserves every distinct usage window reported for a provider", () => {
+    const labels = [
+      "Session",
+      "Hourly usage",
+      "5-hour usage",
+      "Daily quota",
+      "Weekly usage",
+      "Monthly usage",
+      "Other Models",
+    ];
+    const pools = collectVibeProxyPools([
+      account({
+        provider: "cursor",
+        quotaCapacity: quotaCapacity(
+          labels.map((label, index) =>
+            quotaWindow({
+              id: `window-${index}`,
+              label,
+              usedPercent: index * 10,
+              remainingPercent: 100 - index * 10,
+            }),
+          ),
+        ),
+      }),
+    ]);
+
+    expect(pools).toHaveLength(1);
+    expect(pools[0]!.windows.map((window) => window.label)).toEqual(labels);
   });
 });
 

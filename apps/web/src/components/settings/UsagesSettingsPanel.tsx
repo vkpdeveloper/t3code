@@ -55,6 +55,9 @@ const PROVIDER_BAR_COLOR: Readonly<Record<VibeProxyProviderKind, string>> = {
   grok: "color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))",
   antigravity: "var(--foreground)",
   gemini: "var(--foreground)",
+  cursor: "var(--foreground)",
+  devin: "var(--foreground)",
+  opencode: "var(--foreground)",
   unknown: "var(--foreground)",
 };
 
@@ -542,17 +545,17 @@ export function UsagesSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Vibe-Proxy" icon={<GaugeIcon className="size-4" />}>
+      <SettingsSection title="Usages" icon={<GaugeIcon className="size-4" />}>
         <SettingsRow
           {...searchableSetting("vibe-proxy-enabled")}
-          description="Read account quotas and request health from a Vibe-Proxy instance."
+          description="Read account quotas and request health from your usage endpoint."
           control={
             <Switch
               checked={vibeProxy.enabled}
               onCheckedChange={(checked) =>
                 updateSettings({ vibeProxy: { enabled: Boolean(checked) } })
               }
-              aria-label="Enable Vibe-Proxy usage"
+              aria-label="Enable usages"
             />
           }
         />
@@ -563,11 +566,11 @@ export function UsagesSettingsPanel() {
               className="w-full sm:w-80"
               value={vibeProxy.baseUrl}
               onCommit={(baseUrl) => updateSettings({ vibeProxy: { baseUrl: baseUrl.trim() } })}
-              placeholder="https://vibe-proxy.example.com"
+              placeholder="https://usage.example.com"
               autoComplete="off"
               spellCheck={false}
               inputMode="url"
-              aria-label="Vibe-Proxy API base URL"
+              aria-label="Usage API base URL"
             />
           }
         />
@@ -587,7 +590,7 @@ export function UsagesSettingsPanel() {
                     ? "Stored key - enter a new value to replace"
                     : "Management API key"
                 }
-                aria-label="Vibe-Proxy API key"
+                aria-label="Usage API key"
               />
               {vibeProxy.apiKeyRedacted ? (
                 <Button
@@ -623,7 +626,7 @@ export function UsagesSettingsPanel() {
         }
       >
         {stage.kind === "disabled" ? (
-          <StateNotice>Turn on Vibe-Proxy to see account quotas here.</StateNotice>
+          <StateNotice>Turn on usages to see account quotas here.</StateNotice>
         ) : null}
 
         {stage.kind === "unconfigured" ? (
@@ -634,7 +637,7 @@ export function UsagesSettingsPanel() {
 
         {stage.kind === "empty" ? (
           <StateNotice tone={stage.problem ? "warning" : "muted"}>
-            {stage.problem ?? "Vibe-Proxy reported no accounts."}
+            {stage.problem ?? "The usage endpoint reported no accounts."}
           </StateNotice>
         ) : null}
 
@@ -642,11 +645,11 @@ export function UsagesSettingsPanel() {
           <>
             {stage.problem ? (
               <StateNotice tone="warning">
-                {stage.problem} Showing the last values Vibe-Proxy reported.
+                {stage.problem} Showing the last values reported by the usage endpoint.
               </StateNotice>
             ) : null}
             {pools.length === 0 ? (
-              <StateNotice>Vibe-Proxy reported no accounts.</StateNotice>
+              <StateNotice>The usage endpoint reported no accounts.</StateNotice>
             ) : (
               <div
                 className={cn("flex flex-col gap-8 px-3 py-3 sm:px-4", stage.stale && "opacity-70")}

@@ -91,7 +91,10 @@ export interface LimitAccount {
  * entry per distinct account. The freshest reads supply windows and credits;
  * native instances supply names and environment labels.
  */
-export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
+export function collectLimitAccounts(
+  presentations: LimitPresentations,
+  options: { readonly includeUsageLimitSources?: boolean } = {},
+): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
@@ -176,38 +179,40 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       );
     }
   }
-  // Every hub account, including those a native instance also knows: the hub
-  // may hold a fresher read of the same subscription, and the merge above
-  // keeps the redeem target consistent with whichever snapshot wins.
-  const labelEnvironment = presentations.size > 1;
-  for (const [environmentId, presentation] of presentations) {
-    for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
-      const sourceLabel = labelEnvironment
-        ? `${presentation.entry.target.label} · ${source.label}`
-        : source.label;
-      for (const account of source.accounts) {
-        if (limitsNotice(account.usageLimits) !== null) continue;
-        merge(accountKey(account.driver, account.email) ?? `${source.id}:${account.id}`, {
-          key: `${source.id}:${account.id}`,
-          driver: account.driver,
-          displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
-          email: account.email,
-          plan: account.plan,
-          accentColor: undefined,
-          environments: [],
-          sourceLabel,
-          redeem: account.usageLimits.resetCredits?.nextCreditId
-            ? {
-                environmentId,
-                input: {
-                  sourceId: source.id,
-                  accountId: account.id,
-                  creditId: account.usageLimits.resetCredits.nextCreditId,
-                },
-              }
-            : null,
-          limits: account.usageLimits,
-        });
+  if (options.includeUsageLimitSources !== false) {
+    // Every hub account, including those a native instance also knows: the hub
+    // may hold a fresher read of the same subscription, and the merge above
+    // keeps the redeem target consistent with whichever snapshot wins.
+    const labelEnvironment = presentations.size > 1;
+    for (const [environmentId, presentation] of presentations) {
+      for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
+        const sourceLabel = labelEnvironment
+          ? `${presentation.entry.target.label} · ${source.label}`
+          : source.label;
+        for (const account of source.accounts) {
+          if (limitsNotice(account.usageLimits) !== null) continue;
+          merge(accountKey(account.driver, account.email) ?? `${source.id}:${account.id}`, {
+            key: `${source.id}:${account.id}`,
+            driver: account.driver,
+            displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
+            email: account.email,
+            plan: account.plan,
+            accentColor: undefined,
+            environments: [],
+            sourceLabel,
+            redeem: account.usageLimits.resetCredits?.nextCreditId
+              ? {
+                  environmentId,
+                  input: {
+                    sourceId: source.id,
+                    accountId: account.id,
+                    creditId: account.usageLimits.resetCredits.nextCreditId,
+                  },
+                }
+              : null,
+            limits: account.usageLimits,
+          });
+        }
       }
     }
   }
@@ -220,7 +225,10 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
  * are left out; there is nothing for the user to act on. The environment
  * is named only when more than one is connected.
  */
-export function collectLimitNotices(presentations: LimitPresentations): readonly string[] {
+export function collectLimitNotices(
+  presentations: LimitPresentations,
+  options: { readonly includeUsageLimitSources?: boolean } = {},
+): readonly string[] {
   const label = (environmentLabel: string, subject: string) =>
     presentations.size > 1 ? `${environmentLabel} · ${subject}` : subject;
   const notices: string[] = [];
@@ -234,11 +242,13 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       const name = provider.displayName?.trim() || String(provider.driver);
       if (notice) notices.push(`${label(environmentLabel, name)}: ${notice}`);
     }
-    for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
-      if (source.error) {
-        notices.push(`${label(environmentLabel, source.label)}: ${source.error}`);
-      } else if (source.accounts.length === 0) {
-        notices.push(`${label(environmentLabel, source.label)}: No accounts reported.`);
+    if (options.includeUsageLimitSources !== false) {
+      for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
+        if (source.error) {
+          notices.push(`${label(environmentLabel, source.label)}: ${source.error}`);
+        } else if (source.accounts.length === 0) {
+          notices.push(`${label(environmentLabel, source.label)}: No accounts reported.`);
+        }
       }
     }
   }

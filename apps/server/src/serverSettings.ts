@@ -70,6 +70,7 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const VIBE_PROXY_API_KEY_SECRET_NAME = "vibe-proxy-management-key";
 
 /**
  * Fold the legacy in-config `enabled` flag into the envelope-level
@@ -190,7 +191,16 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       },
     ]),
   );
-  return { ...settings, providerInstances, usageLimitSources };
+  return {
+    ...settings,
+    vibeProxy: {
+      ...settings.vibeProxy,
+      apiKey: "",
+      apiKeyRedacted: settings.vibeProxy.apiKey.length > 0 || settings.vibeProxy.apiKeyRedacted,
+    },
+    providerInstances,
+    usageLimitSources,
+  };
 }
 
 export function applyProviderInstanceMutation(
@@ -821,8 +831,29 @@ const make = Effect.gen(function* () {
           managementKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
         };
       }
+      let vibeProxy = settings.vibeProxy;
+      if (vibeProxy.apiKeyRedacted) {
+        const secret = yield* secretStore.get(VIBE_PROXY_API_KEY_SECRET_NAME).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServerSettingsError({
+                settingsPath,
+                operation: "read-secret",
+                providerInstanceId: "vibe-proxy",
+                environmentVariable: "MANAGEMENT_KEY",
+                cause,
+              }),
+          ),
+        );
+        vibeProxy = {
+          ...vibeProxy,
+          apiKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+          apiKeyRedacted: Option.isSome(secret),
+        };
+      }
       return {
         ...settings,
+        vibeProxy,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
       };
@@ -966,9 +997,35 @@ const make = Effect.gen(function* () {
         });
       }
 
+      let vibeProxy = next.vibeProxy;
+      if (!vibeProxy.apiKeyRedacted) {
+        if (vibeProxy.apiKey.length > 0) {
+          changes.push({
+            kind: "write",
+            secretName: VIBE_PROXY_API_KEY_SECRET_NAME,
+            value: textEncoder.encode(vibeProxy.apiKey),
+            providerInstanceId: "vibe-proxy",
+            environmentVariable: "MANAGEMENT_KEY",
+          });
+          vibeProxy = { ...vibeProxy, apiKey: "", apiKeyRedacted: true };
+        } else {
+          changes.push({
+            kind: "remove",
+            secretName: VIBE_PROXY_API_KEY_SECRET_NAME,
+            operation: "remove-secret",
+            providerInstanceId: "vibe-proxy",
+            environmentVariable: "MANAGEMENT_KEY",
+          });
+          vibeProxy = { ...vibeProxy, apiKey: "", apiKeyRedacted: false };
+        }
+      } else {
+        vibeProxy = { ...vibeProxy, apiKey: "" };
+      }
+
       return {
         settings: {
           ...next,
+          vibeProxy,
           providerInstances: providerInstances as ServerSettings["providerInstances"],
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         },
