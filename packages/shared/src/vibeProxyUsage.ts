@@ -7,11 +7,13 @@
  * into something renderable lives here so it can be tested without React.
  */
 import type {
+  VibeProxyQuotaCapacity,
   VibeProxyQuotaWindow,
   VibeProxyRecentRequestBucket,
   VibeProxyUsageAccount,
   VibeProxyUsageRefreshProblem,
   VibeProxyUsageResult,
+  VibeProxyUsageSnapshot,
   VibeProxySettings,
 } from "@t3tools/contracts";
 
@@ -21,7 +23,14 @@ export type VibeProxyProviderKind =
   | "antigravity"
   | "gemini"
   | "grok"
+  | "cursor"
+  | "devin"
+  | "opencode"
   | "unknown";
+
+const AUTH_FILES_PATH = "/api/v0/management/auth-files";
+const MAX_ACCOUNTS = 1_000;
+const MAX_RECENT_REQUEST_BUCKETS = 100;
 
 /** Cache identity for a complete, enabled Vibe-Proxy configuration. */
 export function vibeProxyConfigurationKey(settings: VibeProxySettings): string | null {
@@ -43,6 +52,9 @@ const PROVIDER_KIND_ORDER: readonly VibeProxyProviderKind[] = [
   "antigravity",
   "gemini",
   "grok",
+  "cursor",
+  "devin",
+  "opencode",
   "unknown",
 ];
 
@@ -52,6 +64,9 @@ const PROVIDER_KIND_LABEL: Readonly<Record<Exclude<VibeProxyProviderKind, "unkno
   antigravity: "Antigravity",
   gemini: "Gemini",
   grok: "Grok",
+  cursor: "Cursor",
+  devin: "Devin",
+  opencode: "OpenCode",
 };
 
 /**
@@ -67,6 +82,9 @@ export function vibeProxyProviderKind(provider: string): VibeProxyProviderKind {
   if (normalized.includes("grok") || normalized === "xai" || normalized.startsWith("xai-")) {
     return "grok";
   }
+  if (normalized.includes("cursor")) return "cursor";
+  if (normalized.includes("devin")) return "devin";
+  if (normalized.includes("opencode") || normalized.includes("open-code")) return "opencode";
   if (normalized.includes("claude") || normalized.includes("anthropic")) return "claude";
   if (
     normalized.includes("codex") ||
@@ -76,6 +94,158 @@ export function vibeProxyProviderKind(provider: string): VibeProxyProviderKind {
     return "codex";
   }
   return "unknown";
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as UnknownRecord)
+    : null;
+
+const boundedString = (value: unknown, maximumLength = 500): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed.slice(0, maximumLength);
+};
+
+const booleanValue = (value: unknown): boolean => value === true;
+
+const nonNegativeInt = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+
+const percentage = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+
+const normalizeRecentRequest = (value: unknown): VibeProxyRecentRequestBucket | null => {
+  const record = asRecord(value);
+  const time = boundedString(record?.time, 100);
+  if (!record || !time) return null;
+  return {
+    time,
+    success: nonNegativeInt(record.success),
+    failed: nonNegativeInt(record.failed),
+  };
+};
+
+const normalizeQuotaWindow = (value: unknown, index: number): VibeProxyQuotaWindow | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  const used = percentage(record.used_percent);
+  const remaining = percentage(record.remaining_percent);
+  if (used === null && remaining === null) return null;
+
+  return {
+    id: boundedString(record.id, 500) ?? `window-${index}`,
+    label: boundedString(record.label, 500) ?? "Usage limit",
+    usedPercent: used ?? 100 - (remaining ?? 0),
+    remainingPercent: remaining ?? 100 - (used ?? 0),
+    resetAt: boundedString(record.reset_at, 100),
+    known: booleanValue(record.known),
+    hardExhausted: booleanValue(record.hard_exhausted),
+    routing: booleanValue(record.routing),
+  };
+};
+
+const normalizeQuotaCapacity = (
+  value: unknown,
+  fallbackProvider: string,
+): VibeProxyQuotaCapacity | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  const windows = Array.isArray(record.windows)
+    ? record.windows.flatMap((window, index) => {
+        const normalized = normalizeQuotaWindow(window, index);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+
+  return {
+    provider: boundedString(record.provider, 100) ?? fallbackProvider,
+    supported: booleanValue(record.supported),
+    fetchedAt: boundedString(record.fetched_at, 100),
+    staleAt: boundedString(record.stale_at, 100),
+    lastAttemptAt: boundedString(record.last_attempt_at, 100),
+    lastError: boundedString(record.last_error, 1_000),
+    windows,
+  };
+};
+
+const normalizeAccount = (value: unknown, index: number): VibeProxyUsageAccount | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const provider =
+    boundedString(record.provider, 100) ?? boundedString(record.type, 100) ?? "unknown";
+  const account = boundedString(record.account, 500);
+  const email = boundedString(record.email, 500);
+  const label = boundedString(record.label, 500);
+  const name = boundedString(record.name, 500);
+  const id =
+    boundedString(record.id, 500) ??
+    name ??
+    `${provider}:${account ?? email ?? label ?? String(index)}`;
+  const idToken = asRecord(record.id_token);
+  const routingSelection = asRecord(record.routing_selection);
+  const disabled = booleanValue(record.disabled);
+  const unavailable = booleanValue(record.unavailable);
+
+  return {
+    id,
+    provider,
+    account,
+    label,
+    email,
+    accountType: boundedString(record.account_type, 100),
+    planType: boundedString(idToken?.plan_type, 100),
+    status:
+      boundedString(record.status, 100) ??
+      (disabled ? "disabled" : unavailable ? "unavailable" : "unknown"),
+    statusMessage: boundedString(record.status_message, 1_000),
+    disabled,
+    unavailable,
+    selected: booleanValue(routingSelection?.selected),
+    success: nonNegativeInt(record.success),
+    failed: nonNegativeInt(record.failed),
+    recentRequests: Array.isArray(record.recent_requests)
+      ? record.recent_requests.slice(-MAX_RECENT_REQUEST_BUCKETS).flatMap((bucket) => {
+          const normalized = normalizeRecentRequest(bucket);
+          return normalized ? [normalized] : [];
+        })
+      : [],
+    quotaCapacity: normalizeQuotaCapacity(record.quota_capacity, provider),
+  };
+};
+
+/** Reduce the management API response to fields that are safe to display and cache. */
+export function normalizeVibeProxyAuthFiles(
+  value: unknown,
+  fetchedAt: string,
+): VibeProxyUsageSnapshot | null {
+  const response = asRecord(value);
+  if (!response || !Array.isArray(response.files)) return null;
+  return {
+    fetchedAt,
+    accounts: response.files.slice(0, MAX_ACCOUNTS).flatMap((account, index) => {
+      const normalized = normalizeAccount(account, index);
+      return normalized ? [normalized] : [];
+    }),
+  };
+}
+
+/** Resolve the Vibe-Proxy management endpoint without retaining credentials or query state. */
+export function resolveVibeProxyAuthFilesUrl(baseUrl: string): string | null {
+  try {
+    const url = new URL(baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    url.pathname = `${url.pathname.replace(/\/+$/u, "")}${AUTH_FILES_PATH}`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function titleCase(value: string): string {
@@ -333,7 +503,10 @@ export type VibeProxyQuotaSummary =
 export function vibeProxyQuotaSummary(account: VibeProxyUsageAccount): VibeProxyQuotaSummary {
   const capacity = account.quotaCapacity;
   if (capacity === null) {
-    return { kind: "unavailable", message: "Vibe-Proxy has not reported quota for this account." };
+    return {
+      kind: "unavailable",
+      message: "The usage endpoint has not reported quota for this account.",
+    };
   }
   if (!capacity.supported) {
     return { kind: "unsupported", message: "This provider does not report quota windows." };
@@ -536,15 +709,15 @@ export function describeRefreshProblem(problem: VibeProxyUsageRefreshProblem): s
   if (message.length > 0) return message;
   switch (problem.reason) {
     case "invalidConfiguration":
-      return "The Vibe-Proxy base URL is not valid.";
+      return "The usage API base URL is not valid.";
     case "unauthorized":
-      return "Vibe-Proxy rejected the API key.";
+      return "The usage endpoint rejected the API key.";
     case "unreachable":
-      return "Vibe-Proxy could not be reached.";
+      return "The usage endpoint could not be reached.";
     case "invalidResponse":
-      return "Vibe-Proxy returned an unexpected response.";
+      return "The usage endpoint returned an unexpected response.";
     case "requestFailed":
-      return "The Vibe-Proxy request failed.";
+      return "The usage request failed.";
   }
 }
 

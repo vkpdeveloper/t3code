@@ -1,9 +1,4 @@
-import type {
-  EnvironmentId,
-  ServerSettingsPatch,
-  VibeProxySettings,
-  VibeProxyUsageAccount,
-} from "@t3tools/contracts";
+import type { VibeProxySettings, VibeProxyUsageAccount } from "@t3tools/contracts";
 import {
   collectVibeProxyPools,
   describeMissingConfiguration,
@@ -32,9 +27,8 @@ import { Pressable, View } from "react-native";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
-import { serverEnvironment } from "../../state/server";
-import { useAtomCommand } from "../../state/use-atom-command";
 import type { VibeProxyUsageView } from "../../state/vibeProxyUsage";
+import type { VibeProxySettingsPatch } from "../../state/vibeProxyUsageClient";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { useProviderColors } from "./usageProviders";
 
@@ -66,38 +60,19 @@ function refillRemaining(resetAt: string | null, nowMs: number): string {
 type SettingsUpdateOutcome = { readonly _tag: "Success" } | { readonly _tag: "Failure" };
 
 export function VibeProxyUsageSection(props: { readonly usage: VibeProxyUsageView }) {
-  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "Vibe-Proxy settings update",
-    reportFailure: false,
-  });
   const { usage } = props;
-  const environmentId = usage.environmentId;
   const settings = usage.settings;
 
-  if (environmentId === null || settings === null) {
-    return (
-      <SettingsSection title="Vibe-Proxy" card>
-        <StateNotice>Connect an environment to configure Vibe-Proxy.</StateNotice>
-      </SettingsSection>
-    );
-  }
-
-  const saveSettings = async (
-    environmentId: EnvironmentId,
-    patch: ServerSettingsPatch,
-  ): Promise<SettingsUpdateOutcome> => {
-    const outcome = await updateSettings({ environmentId, input: { patch } });
-    if (outcome._tag === "Success") usage.refresh();
+  const saveSettings = async (patch: VibeProxySettingsPatch): Promise<SettingsUpdateOutcome> => {
+    const outcome = await usage.updateSettings(patch);
+    if (outcome._tag === "Success") await usage.refresh();
     return outcome;
   };
 
   return (
     <>
-      <SettingsSection title="Vibe-Proxy" card>
-        <VibeProxyConfigurationForm
-          settings={settings}
-          onSave={(patch) => saveSettings(environmentId, patch)}
-        />
+      <SettingsSection title="Usages" card>
+        <VibeProxyConfigurationForm settings={settings} onSave={saveSettings} />
       </SettingsSection>
       <AccountsSection settings={settings} usage={usage} />
     </>
@@ -106,7 +81,7 @@ export function VibeProxyUsageSection(props: { readonly usage: VibeProxyUsageVie
 
 function VibeProxyConfigurationForm(props: {
   readonly settings: VibeProxySettings;
-  readonly onSave: (patch: ServerSettingsPatch) => Promise<SettingsUpdateOutcome>;
+  readonly onSave: (patch: VibeProxySettingsPatch) => Promise<SettingsUpdateOutcome>;
 }) {
   const [enabled, setEnabled] = useState(props.settings.enabled);
   const [baseUrl, setBaseUrl] = useState(props.settings.baseUrl);
@@ -125,15 +100,13 @@ function VibeProxyConfigurationForm(props: {
     setMessage(null);
     const trimmedKey = apiKey.trim();
     const outcome = await props.onSave({
-      vibeProxy: {
-        enabled,
-        baseUrl: baseUrl.trim(),
-        ...(trimmedKey.length > 0 ? { apiKey: trimmedKey } : {}),
-      },
+      enabled,
+      baseUrl: baseUrl.trim(),
+      ...(trimmedKey.length > 0 ? { apiKey: trimmedKey } : {}),
     });
     setIsSaving(false);
     if (outcome._tag === "Failure") {
-      setMessage("Could not save Vibe-Proxy settings.");
+      setMessage("Could not save usage settings.");
       return;
     }
     setApiKey("");
@@ -143,7 +116,7 @@ function VibeProxyConfigurationForm(props: {
   const removeKey = async () => {
     setIsSaving(true);
     setMessage(null);
-    const outcome = await props.onSave({ vibeProxy: { apiKey: "" } });
+    const outcome = await props.onSave({ apiKey: "" });
     setIsSaving(false);
     if (outcome._tag === "Failure") {
       setMessage("Could not remove the API key.");
@@ -159,11 +132,11 @@ function VibeProxyConfigurationForm(props: {
         <View className="min-w-0 flex-1 gap-0.5">
           <Text className="text-base text-foreground">Enabled</Text>
           <Text className="text-xs text-foreground-muted">
-            Read subscription limits from Vibe-Proxy.
+            Read subscription limits directly from your usage endpoint.
           </Text>
         </View>
         <ThemedSwitch
-          accessibilityLabel="Enable Vibe-Proxy usage"
+          accessibilityLabel="Enable usages"
           disabled={isSaving}
           onValueChange={setEnabled}
           value={enabled}
@@ -172,20 +145,20 @@ function VibeProxyConfigurationForm(props: {
       <View className="gap-1.5">
         <Text className="text-xs font-t3-medium text-foreground-muted">Base URL</Text>
         <TextInput
-          accessibilityLabel="Vibe-Proxy API base URL"
+          accessibilityLabel="Usage API base URL"
           autoCapitalize="none"
           autoCorrect={false}
           editable={!isSaving}
           keyboardType="url"
           onChangeText={setBaseUrl}
-          placeholder="https://vibe-proxy.example.com"
+          placeholder="https://usage.example.com"
           value={baseUrl}
         />
       </View>
       <View className="gap-1.5">
         <Text className="text-xs font-t3-medium text-foreground-muted">Management API key</Text>
         <TextInput
-          accessibilityLabel="Vibe-Proxy API key"
+          accessibilityLabel="Usage API key"
           autoCapitalize="none"
           autoCorrect={false}
           editable={!isSaving}
@@ -252,7 +225,7 @@ function AccountsSection(props: {
           {snapshotAge ?? "Subscription quotas and request health"}
         </Text>
         <Pressable
-          accessibilityLabel="Refresh Vibe-Proxy limits"
+          accessibilityLabel="Refresh usage limits"
           accessibilityRole="button"
           disabled={props.usage.isRefreshing}
           onPress={props.usage.refresh}
@@ -269,7 +242,7 @@ function AccountsSection(props: {
       </View>
 
       {stage.kind === "disabled" ? (
-        <StateNotice>Turn on Vibe-Proxy to see account quotas.</StateNotice>
+        <StateNotice>Turn on usages to see account quotas.</StateNotice>
       ) : null}
       {stage.kind === "unconfigured" ? (
         <StateNotice>{describeMissingConfiguration(stage.missing)}</StateNotice>
@@ -277,18 +250,18 @@ function AccountsSection(props: {
       {stage.kind === "loading" ? <StateNotice>Loading account limits...</StateNotice> : null}
       {stage.kind === "empty" ? (
         <StateNotice warning={stage.problem !== null}>
-          {stage.problem ?? "Vibe-Proxy reported no accounts."}
+          {stage.problem ?? "The usage endpoint reported no accounts."}
         </StateNotice>
       ) : null}
       {stage.kind === "accounts" ? (
         <View className={stage.stale ? "opacity-60" : undefined}>
           {stage.problem ? (
             <StateNotice warning>
-              {stage.problem} Showing the last values Vibe-Proxy reported.
+              {stage.problem} Showing the last values reported by the usage endpoint.
             </StateNotice>
           ) : null}
           {pools.length === 0 ? (
-            <StateNotice>Vibe-Proxy reported no accounts.</StateNotice>
+            <StateNotice>The usage endpoint reported no accounts.</StateNotice>
           ) : (
             pools.map((pool) => (
               <ProviderPool
@@ -470,7 +443,16 @@ function UnpooledAccount(props: { readonly account: VibeProxyUsageAccount }) {
 function ProviderMark(props: { readonly provider: string }) {
   const kind = vibeProxyProviderKind(props.provider);
   const provider = kind === "claude" ? "claudeAgent" : kind;
-  if (provider === "codex" || provider === "claudeAgent" || provider === "grok") {
+  if (
+    provider === "codex" ||
+    provider === "claudeAgent" ||
+    provider === "grok" ||
+    provider === "cursor" ||
+    provider === "devin" ||
+    provider === "opencode" ||
+    provider === "gemini" ||
+    provider === "antigravity"
+  ) {
     return <ProviderIcon provider={provider} size={17} />;
   }
   return (

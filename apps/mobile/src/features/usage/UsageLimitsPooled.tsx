@@ -206,8 +206,11 @@ export function UsageLimitsSection({
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  const pools = collectLimitPools(collectLimitAccounts(selected), now);
-  const notices = collectLimitNotices(selected);
+  const pools = collectLimitPools(
+    collectLimitAccounts(selected, { includeUsageLimitSources: false }),
+    now,
+  );
+  const notices = collectLimitNotices(selected, { includeUsageLimitSources: false });
   const colors = useProviderColors();
   return (
     <View className="gap-6">
@@ -286,7 +289,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
     selectedIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedIds.has(id)));
-  const accounts = collectLimitAccounts(selected);
+  const accounts = collectLimitAccounts(selected, { includeUsageLimitSources: false });
   const account = accounts.find((candidate) => candidate.key === accountKey);
   const pool = collectLimitPools(accounts, now)
     .find((candidate) => candidate.driver === account?.driver)

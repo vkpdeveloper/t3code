@@ -1,4 +1,14 @@
-import { AntigravityIcon, ClaudeAI, Gemini, GrokIcon, OpenAI, type Icon } from "../Icons";
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  CursorIcon,
+  DevinIcon,
+  Gemini,
+  GrokIcon,
+  OpenAI,
+  OpenCodeIcon,
+  type Icon,
+} from "../Icons";
 import { cn } from "~/lib/utils";
 import {
   vibeProxyProviderInitials,
@@ -13,6 +23,9 @@ const PROVIDER_MARK: Readonly<Partial<Record<VibeProxyProviderKind, Icon>>> = {
   antigravity: AntigravityIcon,
   gemini: Gemini,
   grok: GrokIcon,
+  cursor: CursorIcon,
+  devin: DevinIcon,
+  opencode: OpenCodeIcon,
 };
 
 /**

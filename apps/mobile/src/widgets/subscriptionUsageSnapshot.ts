@@ -113,7 +113,13 @@ export function buildSubscriptionUsageSnapshot(
   url: string,
 ): SubscriptionUsageSnapshot {
   // Freshness is evaluated at publication/render time, not on unrelated config emissions.
-  return { ...subscriptionUsageProps(collectLimitAccounts(presentations), 0), url };
+  return {
+    ...subscriptionUsageProps(
+      collectLimitAccounts(presentations, { includeUsageLimitSources: false }),
+      0,
+    ),
+    url,
+  };
 }
 
 export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, now: number) {
