@@ -20,14 +20,14 @@ import {
   type AnyProviderAdapterDriver,
 } from "./ProviderAdapterDriver.ts";
 import {
-  ProviderAdapterOpenSessionError,
   ProviderAdapterV2,
-  type ProviderAdapterV2Error,
-  type ProviderAdapterV2SessionRuntime,
+  ProviderAdapterOpenSessionError,
   type ProviderAdapterV2Shape,
+  type ProviderAdapterV2SessionRuntime,
+  type ProviderAdapterV2Error,
 } from "./ProviderAdapter.ts";
 
-const isSetupError = Schema.is(ProviderSetupError);
+const isProviderSetupError = Schema.is(ProviderSetupError);
 
 export class ProviderAdapterRegistryLookupError extends Schema.TaggedError<ProviderAdapterRegistryLookupError>()(
   "ProviderAdapterRegistryLookupError",
@@ -111,7 +111,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
               return yield* new ProviderSetupError({
                 instanceId: instance.instanceId,
                 operation: "session",
-                detail: "Provider sign-in is changing. Try again after it finishes.",
+                detail: "This provider's sign-in is changing. Try again after it finishes.",
               });
             }
           }
@@ -129,7 +129,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
           return yield* admitted;
         }).pipe(
           Effect.mapError((cause) =>
-            isSetupError(cause)
+            isProviderSetupError(cause)
               ? new ProviderAdapterOpenSessionError({
                   driver: adapter.driver,
                   providerSessionId: input.providerSessionId,

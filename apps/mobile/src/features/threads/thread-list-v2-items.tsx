@@ -1,5 +1,4 @@
-import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
-import { resolveThreadProviderInstance } from "./thread-provider-instance";
+import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
   THREAD_LIST_V2_MONO_FONT as MONO_FONT,
   THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME,
@@ -10,7 +9,6 @@ import {
 } from "./thread-list-v2-row-appearance";
 import { RowPressable } from "../../components/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
-import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import type { ThreadMoveDestination } from "./threadOrder";
@@ -34,6 +32,7 @@ import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSym
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
+import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr } from "../../state/use-thread-pr";
@@ -467,6 +466,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly projectTitle?: string;
   /** Keep the environment's provider array stable across unrelated list updates. */
   readonly providers: ReadonlyArray<ThreadListProvider> | undefined;
+  readonly providerInstance: ThreadRowProviderInstance | null;
   /** Which machine hosts the thread. Null when only one environment is
       connected — repeating the same label on every row is noise. Mirrors
       the web sidebar's remote-environment cloud icon, but as text since
@@ -548,7 +548,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const snoozedRow = props.snoozed === true;
   const pinnedRow = props.pinned === true;
 
-  const { providerDrivers, providerInstance, providerIconUrl } = useMemo(() => {
+  const { providerDrivers, providerIconUrl } = useMemo(() => {
     const provider = props.providers?.find(
       (candidate) =>
         candidate.instanceId ===
@@ -556,11 +556,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     );
     return {
       providerDrivers: resolveThreadListV2ProviderDrivers(thread, props.providers),
-      providerInstance: resolveThreadProviderInstance(props.providers, thread),
       providerIconUrl: provider?.iconUrl,
     };
   }, [thread, props.providers]);
 
+  const providerInstance = props.providerInstance;
   const pr = useThreadPr(thread);
 
   const theme = useUniwindTheme();

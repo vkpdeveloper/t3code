@@ -47,7 +47,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   const variant = errorClass === "usage_limit" ? "warning" : "error";
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
-      <Alert variant={variant} surface="glass" controlAlignment="first-line">
+      <Alert variant={variant} surface="glass" controlAlignment="first-line" data-variant={variant}>
         <CircleAlertIcon />
         <AlertDescription>
           <Tooltip>

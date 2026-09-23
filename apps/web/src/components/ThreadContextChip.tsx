@@ -23,15 +23,10 @@ export function ThreadContextChip(props: {
         render={
           <ContextChip
             kind="thread"
-            render={
-              <Link
-                to="/$environmentId/$threadId"
-                params={{ environmentId, threadId }}
-                aria-label={`Thread, ${title}`}
-                data-markdown-copy={props.copyMarkdown}
-                className="no-underline"
-              />
-            }
+            render={<Link to="/$environmentId/$threadId" params={{ environmentId, threadId }} />}
+            aria-label={`Thread, ${title}`}
+            data-markdown-copy={props.copyMarkdown}
+            className="no-underline"
           >
             <MessagesSquareIcon />
             <ContextChipLabel>{title}</ContextChipLabel>

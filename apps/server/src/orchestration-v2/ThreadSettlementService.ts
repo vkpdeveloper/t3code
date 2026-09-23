@@ -385,14 +385,14 @@ export const make = Effect.gen(function* () {
       pullRequest: SettlementPullRequest,
     ) {
       const currentSettings = yield* settingsService.getSettings;
-      const decisionNowMs = DateTime.toEpochMillis(yield* DateTime.now);
+      const decisionNow = yield* DateTime.now;
       return group.some((thread) => {
         const { settings } = resolveProjectSettings(currentSettings, thread.projectId);
         return (
           resolveAutoSettlementAt({
             thread,
             pullRequest,
-            nowMs: decisionNowMs,
+            nowMs: DateTime.toEpochMillis(decisionNow),
             autoSettleAfterDays: settings.sidebarAutoSettleAfterDays,
             autoSettleOnMerge: settings.sidebarAutoSettleOnMerge,
           }) !== null
@@ -441,13 +441,8 @@ export const make = Effect.gen(function* () {
         } satisfies SettlementPullRequest;
         const cwd = lookupCwdByThreadId.get(thread.id);
         if (summary.state !== "open" && thread.branch !== null && cwd !== undefined) {
-          // A reused branch can already have a new open PR while discovery
-          // is replacing its old link. Do not let settlement win that race.
-          // Only pay for the uncached lookup when this sweep would otherwise
-          // settle: a terminal link that settles nothing (resumed thread,
-          // settle-on-merge off) would re-query the host every minute. A
-          // group that becomes eligible after this check waits for the next
-          // sweep rather than settling on the unverified link.
+          // Recheck reused branches only when this sweep would settle a thread.
+          // Eligibility that changes after this check waits for the next sweep.
           if (!(yield* wouldSettle(group, terminal))) return undefined;
           const current = yield* git.branchPullRequest(
             { cwd, branch: thread.branch },

@@ -196,7 +196,7 @@ export function BranchPicker({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ComboboxEmpty>No refs found.</ComboboxEmpty>
           <div className="relative min-h-0 w-full max-h-56 flex-1 overflow-hidden">
-            <ComboboxListVirtualized>
+            <ComboboxListVirtualized className="size-full min-w-0">
               <LegendList<string>
                 ref={branchListRef}
                 data={filteredItems}
@@ -246,7 +246,7 @@ export function BranchPicker({
                   </label>
                 }
               />
-              <TooltipPopup side="top">
+              <TooltipPopup side="top" className="max-w-72 whitespace-normal">
                 Creates the worktree from the latest matching branch on origin instead of your local
                 branch.
               </TooltipPopup>
@@ -263,12 +263,14 @@ export function BranchPickerRefItem({
   branch: refName,
   projectCwd: activeProjectCwd,
   index,
+  value,
   onClick,
   onContextMenu,
 }: {
   branch: VcsRef;
   projectCwd: string | null;
   index: number;
+  value?: string;
   onClick: ComponentProps<typeof ComboboxItem>["onClick"];
   onContextMenu?: ComponentProps<typeof ComboboxItem>["onContextMenu"];
 }) {
@@ -289,7 +291,7 @@ export function BranchPickerRefItem({
       hideIndicator
       key={itemValue}
       index={index}
-      value={itemValue}
+      value={value ?? itemValue}
       onClick={onClick}
       onContextMenu={onContextMenu}
     >

@@ -27,7 +27,7 @@ import {
   type ThreadPullRequestBadge,
 } from "@t3tools/shared/threadPullRequests";
 import { useRender } from "@base-ui/react/use-render";
-import { type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { type ReactNode, type MouseEvent, type ReactElement } from "react";
 import { cn } from "../lib/utils";
 
 import { parseChangeRequestUrl } from "../lib/openPullRequestLink";
@@ -241,10 +241,10 @@ export function ThreadPullRequestBadgeControl({
       render={render}
       presentation={presentation}
       isStack={badge?.kind === "stack"}
-      pullRequests={pullRequests}
-      number={number}
       url={url}
+      number={number}
       status={status}
+      pullRequests={pullRequests}
       onOpenStack={onOpenStack}
       onOpenPullRequest={onOpenPullRequest}
     />
@@ -255,20 +255,20 @@ function PullRequestBadge({
   render,
   presentation,
   isStack,
-  pullRequests,
-  number,
   url,
+  number,
   status,
+  pullRequests,
   onOpenStack,
   onOpenPullRequest,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   presentation: NonNullable<ReturnType<typeof resolveThreadPullRequestBadgePresentation>>;
   isStack: boolean;
-  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
-  number: number | undefined;
   url: string | undefined;
+  number: number | undefined;
   status: PrStatusIndicator | null;
+  pullRequests: ReadonlyArray<ThreadPullRequestLink>;
   onOpenStack: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>, url?: string) => void;
 }) {
@@ -278,7 +278,7 @@ function PullRequestBadge({
         event.stopPropagation();
         onOpenStack();
       }
-    : (event: MouseEvent<HTMLElement>) => onOpenPullRequest(event);
+    : onOpenPullRequest;
   const element = isStack ? (
     <button type="button" />
   ) : (

@@ -1,3 +1,4 @@
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 /**
  * The thread details panel's pull request row: what the thread's pull request is, and the one
@@ -66,12 +67,7 @@ import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LINK_SPLIT_ACTION_CLASS,
-  THREAD_DETAILS_PANEL_LINK_SPLIT_DESTRUCTIVE_ACTION_CLASS,
   THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS,
-  THREAD_DETAILS_PANEL_LINK_SPLIT_PRIMARY_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_COUNT_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./threadDetailsPanelStyles";
 
@@ -239,7 +235,6 @@ export function ThreadDetailsPrRow({
         variant="glass"
         className="max-w-80 text-left whitespace-normal"
       >
-        {/* The viewport's own inset (py-1 px-2) plus this one make the floating inset. */}
         <div className="flex min-w-0 max-w-80 flex-col gap-2 px-1 py-2">
           <div className="flex min-w-0 items-baseline gap-1.5 text-xs leading-none">
             <span className="min-w-0 truncate font-medium text-foreground">{detail.title}</span>
@@ -353,11 +348,11 @@ export function ThreadDetailsPrRow({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
+                <ThreadDetailsControl
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className={THREAD_DETAILS_PANEL_LINK_SPLIT_PRIMARY_CLASS}
+                  part="link-primary"
                   aria-label={openAriaLabel}
                   onClick={onOpen}
                 />
@@ -374,7 +369,7 @@ export function ThreadDetailsPrRow({
                 checksState={checksRollup}
                 checks={detail.checks}
                 variant="count"
-                className={THREAD_DETAILS_PANEL_SPLIT_COUNT_CLASS}
+                render={<ThreadDetailsControl part="checks" />}
               />
             </>
           ) : null}
@@ -384,15 +379,12 @@ export function ThreadDetailsPrRow({
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <Button
+                    <ThreadDetailsControl
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className={
-                        trailingAction.destructive
-                          ? THREAD_DETAILS_PANEL_LINK_SPLIT_DESTRUCTIVE_ACTION_CLASS
-                          : THREAD_DETAILS_PANEL_LINK_SPLIT_ACTION_CLASS
-                      }
+                      part="action"
+                      tone={trailingAction.destructive ? "destructive" : "default"}
                       disabled={actionPending || handoff !== null}
                       onClick={trailingAction.onClick}
                     />
@@ -410,11 +402,11 @@ export function ThreadDetailsPrRow({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
+              <ThreadDetailsControl
                 type="button"
                 variant="ghost"
                 size="sm"
-                className={THREAD_DETAILS_PANEL_ROW_CLASS}
+                part="row"
                 aria-label={openAriaLabel}
                 onClick={onOpen}
               />

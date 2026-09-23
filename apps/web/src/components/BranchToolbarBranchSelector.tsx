@@ -1,3 +1,4 @@
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
@@ -37,7 +38,6 @@ import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
-  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import { ThreadDetailsPrRows } from "./chat/ThreadDetailsPrRows";
 import { parsePullRequestReference } from "../pullRequestReference";
@@ -60,9 +60,9 @@ import {
   resolveThreadPullRequestBadge,
   useLinkedThreadPullRequest,
 } from "./ThreadStatusIndicators";
-import { Button } from "./ui/button";
-import { ComposerControl } from "./chat/ComposerControl";
+
 import { ComboboxItem, ComboboxTrigger } from "./ui/combobox";
+import { ComposerControl } from "./chat/ComposerControl";
 import { MiddleTruncate } from "./ui/middle-truncate";
 import { BranchPicker, BranchPickerRefItem } from "./BranchPicker";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -647,7 +647,8 @@ export function BranchToolbarBranchSelector({
         branch={refName}
         projectCwd={activeProjectCwd}
         index={index}
-        onClick={() => selectBranch(refName)}
+        value={itemValue}
+        onClick={() => selectPickerItem(itemValue)}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       />
     );
@@ -722,17 +723,12 @@ export function BranchToolbarBranchSelector({
           <ComboboxTrigger
             render={
               displayMode === "panel" ? (
-                <Button variant="ghost" size="sm" />
+                <ThreadDetailsControl part="select" />
               ) : (
                 <ComposerControl size="xs" />
               )
             }
-            // No press-scale: the popup aligns live to this trigger, so a
-            // momentary 0.97 shrink would drag the open popup ~3px sideways.
-            className={cn(
-              "min-w-0 max-w-full active:scale-100",
-              displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
-            )}
+            className="min-w-0 max-w-full active:scale-100"
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
             <GitBranchIcon

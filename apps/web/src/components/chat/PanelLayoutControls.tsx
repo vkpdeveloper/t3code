@@ -106,9 +106,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
               side="bottom"
               sideOffset={0}
-              positionerClassName="w-[min(var(--thread-details-panel-width),var(--anchor-width))]"
-              className="w-full"
-              variant="bare"
+              variant="panel"
+              padding="none"
             >
               {threadPanelPopoverContent}
             </PopoverPopup>

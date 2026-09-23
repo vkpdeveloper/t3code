@@ -426,7 +426,11 @@ function resolveThreadListV2ItemTimeLabel(
 ): string {
   const { thread, variant, snoozed } = item;
   if (showSnoozeWakeLabel) return "";
-  if (variant === "card" && resolveThreadListV2Status(thread) !== "ready") return "";
+  if (
+    variant === "card" &&
+    (resolveThreadListV2Status(thread) !== "ready" || threadHasUnseenCompletion(thread))
+  )
+    return "";
   const settledTimestamp =
     variant === "slim" && !snoozed ? resolveSettledThreadTimestamp(thread) : null;
   return relativeTime(

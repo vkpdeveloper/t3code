@@ -1572,14 +1572,14 @@ const BASE_MS = Date.parse(NOW);
 const isoAt = (ms: number) => new Date(ms).toISOString();
 const MINUTE_MS = 60_000;
 
-function runningRuntime(): NonNullable<EnvironmentThreadShell["runtime"]> {
+function runningRuntime() {
   return {
-    status: "running",
-    activeRunId: null,
-    providerInstanceId: ProviderInstanceId.make("codex"),
+    status: "running" as const,
     providerName: "Codex",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    runtimeMode: "full-access" as const,
+    activeRunId: null,
     lastError: null,
-    lastErrorClass: null,
     updatedAt: NOW,
   };
 }
@@ -1923,6 +1923,27 @@ describe("thread list v2 minute tick invalidation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps unread completion labels stable across a minute tick", () => {
+    const unread = makeThread({
+      id: ThreadId.make("tick-unread"),
+      title: "Unread completion",
+      lastVisitedAt: isoAt(BASE_MS - 10 * MINUTE_MS),
+      latestRun: {
+        runId: RunId.make("tick-unread-run"),
+        status: "completed",
+        requestedAt: isoAt(BASE_MS - 6 * MINUTE_MS),
+        startedAt: isoAt(BASE_MS - 6 * MINUTE_MS),
+        completedAt: isoAt(BASE_MS - 5 * MINUTE_MS),
+        assistantMessageId: null,
+      },
+    });
+    const options = { snoozeEnvironmentIds: new Set<EnvironmentId>() };
+    const first = buildTickList([unread], BASE_MS, [], options)[0]!;
+    const next = buildTickList([unread], BASE_MS + MINUTE_MS, [], options)[0]!;
+    expect(first.type === "v2-thread" && first.timeLabel).toBe("");
+    expect(threadListV2ListItemsAreEqual(first, next)).toBe(true);
   });
 
   it("keeps hour-granularity rows stable across a minute tick when they carry no snooze menu", () => {

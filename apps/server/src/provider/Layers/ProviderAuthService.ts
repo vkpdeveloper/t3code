@@ -45,18 +45,16 @@ export const makeProviderAuthService = Effect.gen(function* () {
   ) {
     const failure = (detail: string) =>
       new ProviderSetupError({ instanceId, operation: "stopSessions", detail });
-    const sharesBinding = (auth: ProviderAuthService.ProviderAuthController | undefined) =>
-      binding !== undefined &&
-      auth?.credentialBinding?.key === binding.key &&
-      auth.credentialBinding.owner === binding.owner;
-    // Instances that share this credential lose access together, so their
-    // sessions stop alongside the instance whose sign-in changed.
-    const affectedIds = new Set<ProviderInstanceId>([
+    const affectedIds = new Set([
       instanceId,
       ...(binding === undefined
         ? []
         : (yield* registry.listInstances)
-            .filter((instance) => sharesBinding(instance.auth))
+            .filter(
+              (instance) =>
+                instance.auth?.credentialBinding?.key === binding.key &&
+                instance.auth.credentialBinding.owner === binding.owner,
+            )
             .map((instance) => instance.instanceId)),
     ]);
     const threadIds = yield* projections
@@ -73,7 +71,6 @@ export const makeProviderAuthService = Effect.gen(function* () {
             Effect.forEach(
               projection.providerSessions.filter(
                 (session) =>
-                  session.providerInstanceId !== undefined &&
                   affectedIds.has(session.providerInstanceId) &&
                   session.status !== "stopped" &&
                   session.status !== "error" &&
@@ -82,16 +79,21 @@ export const makeProviderAuthService = Effect.gen(function* () {
               (session) =>
                 Effect.gen(function* () {
                   if (session.providerInstanceId !== instanceId) {
-                    // The sibling may have been rebound while we were stopping.
                     const current = yield* registry.getInstance(session.providerInstanceId);
-                    if (!sharesBinding(current?.auth)) return;
+                    if (
+                      !binding ||
+                      current?.auth?.credentialBinding?.key !== binding.key ||
+                      current.auth.credentialBinding.owner !== binding.owner
+                    )
+                      return;
                   }
-                  yield* providerSessions.release({
-                    providerSessionId: session.id,
-                    reason: "manual_shutdown",
-                    detail: "Provider sign-in changed.",
-                  });
-                  released.add(session.id);
+                  yield* providerSessions
+                    .release({
+                      providerSessionId: session.id,
+                      reason: "manual_shutdown",
+                      detail: "Provider sign-in changed.",
+                    })
+                    .pipe(Effect.tap(() => Effect.sync(() => released.add(session.id))));
                 }),
               { discard: true },
             ),

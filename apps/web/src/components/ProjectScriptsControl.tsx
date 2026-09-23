@@ -1,3 +1,4 @@
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import type {
   ProjectScript,
   ResolvedKeybindingsConfig,
@@ -43,10 +44,7 @@ import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 
@@ -292,14 +290,12 @@ export default function ProjectScriptsControl({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
+                <ThreadDetailsControl
                   size="xs"
                   variant={isPanel ? "ghost" : "outline"}
-                  className={
-                    isPanel
-                      ? THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS
-                      : "w-7 sm:w-6 @3xl/header-actions:w-auto!"
-                  }
+                  part="primary"
+                  panel={isPanel}
+                  className={isPanel ? undefined : "w-7 sm:w-6 @3xl/header-actions:w-auto!"}
                   aria-label={`Run ${primaryScript.name}`}
                   // The tooltip wrapper replaces data-slot="button", so themed
                   // toolbar styling needs its own hook.
@@ -336,10 +332,11 @@ export default function ProjectScriptsControl({
           >
             <MenuTrigger
               render={
-                <Button
+                <ThreadDetailsControl
                   size={isPanel ? "sm" : "icon-xs"}
                   variant={isPanel ? "ghost" : "outline"}
-                  className={isPanel ? THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS : undefined}
+                  part="secondary"
+                  panel={isPanel}
                   aria-label="Script actions"
                 />
               }
@@ -365,16 +362,16 @@ export default function ProjectScriptsControl({
             className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}
             ref={panelAnchorRef}
           >
-            <Button
+            <ThreadDetailsControl
               size="sm"
               variant="ghost"
-              className={THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS}
+              part="primary"
               aria-label="Project actions"
               onClick={() => setActionsMenuOpen({ presentation, scripts: false, imports: true })}
             >
               <WrenchIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
               <span className="ml-0.5 min-w-0 truncate">Actions</span>
-            </Button>
+            </ThreadDetailsControl>
             <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
             <Menu
               open={actionsMenuOpen.imports}
@@ -384,10 +381,10 @@ export default function ProjectScriptsControl({
             >
               <MenuTrigger
                 render={
-                  <Button
+                  <ThreadDetailsControl
                     size="sm"
                     variant="ghost"
-                    className={THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS}
+                    part="secondary"
                     aria-label="Choose project action"
                   />
                 }
@@ -436,14 +433,12 @@ export default function ProjectScriptsControl({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
+              <ThreadDetailsControl
                 size="xs"
                 variant={isPanel ? "ghost" : "outline"}
-                className={
-                  isPanel
-                    ? THREAD_DETAILS_PANEL_ROW_CLASS
-                    : "w-7 sm:w-6 @3xl/header-actions:w-auto!"
-                }
+                part="row"
+                panel={isPanel}
+                className={isPanel ? undefined : "w-7 sm:w-6 @3xl/header-actions:w-auto!"}
                 aria-label={isPanel ? "Add project script" : "Add action"}
                 // The tooltip wrapper replaces data-slot="button", so themed
                 // toolbar styling needs its own hook.

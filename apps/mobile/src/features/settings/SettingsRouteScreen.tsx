@@ -136,6 +136,12 @@ function LocalSettingsRouteScreen() {
             value={`${environmentCount}`}
             target="SettingsEnvironments"
           />
+          <SettingsRow
+            icon="person.crop.circle"
+            label="Provider accounts"
+            target="SettingsProviderAccounts"
+            disabled={environmentCount === 0}
+          />
         </SettingsSection>
 
         <AgentStatusSettingsSection />
@@ -519,6 +525,12 @@ function ConfiguredSettingsRouteScreen() {
             label="Environments"
             value={`${environmentCount}`}
             target="SettingsEnvironments"
+          />
+          <SettingsRow
+            icon="person.crop.circle"
+            label="Provider accounts"
+            target="SettingsProviderAccounts"
+            disabled={environmentCount === 0}
           />
           <SettingsSwitchRow
             icon="bell.badge"
