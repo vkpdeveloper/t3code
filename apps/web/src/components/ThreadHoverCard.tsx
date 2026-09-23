@@ -1,18 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
 import { TooltipPopup } from "./ui/tooltip";
-import { cn } from "~/lib/utils";
 
-export function ThreadHoverCardPopup({ className, ...props }: ComponentProps<typeof TooltipPopup>) {
-  return (
-    <TooltipPopup
-      {...props}
-      variant="glass"
-      className={cn(
-        "max-w-80 text-left whitespace-normal [&_[data-slot=tooltip-viewport]]:p-0",
-        className,
-      )}
-    />
-  );
+export function ThreadHoverCardPopup(props: ComponentProps<typeof TooltipPopup>) {
+  return <TooltipPopup {...props} variant="glass" />;
 }
 
 /** Shared title, metadata spacing, and optional footer for thread previews. */
@@ -26,7 +16,8 @@ export function ThreadHoverCard({
   footer?: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 max-w-80 flex-col gap-2 p-[var(--floating-content-inset)]">
+    // The viewport's own inset (py-1 px-2) plus this one make the floating inset.
+    <div className="flex min-w-0 max-w-80 flex-col gap-2 px-1 py-2">
       <div className="min-w-0 truncate text-xs leading-tight font-medium text-foreground">
         {title}
       </div>

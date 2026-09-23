@@ -28,7 +28,7 @@ import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
 } from "../Layers/CursorProvider.ts";
-import { CursorSdkCatalogLive } from "../Layers/CursorSdkCatalog.ts";
+import { CursorSdkCatalog, makeCursorSdkCatalog } from "../Layers/CursorSdkCatalog.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -184,6 +184,9 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         auth.withAccess,
       );
 
+      // Built once per instance so the catalog's model cache survives between
+      // status checks; explicit refreshes clear it through `invalidateCaches`.
+      const sdkCatalog = yield* makeCursorSdkCatalog();
       const checkProvider = auth.readApiKey.pipe(
         Effect.orElseSucceed(() => undefined),
         Effect.flatMap((apiKey) =>
@@ -211,7 +214,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.map(stampSnapshot),
-        Effect.provide(CursorSdkCatalogLive),
+        Effect.provideService(CursorSdkCatalog, sdkCatalog),
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
@@ -244,6 +247,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         enabled,
         auth: auth.controller,
         snapshot,
+        invalidateCaches: sdkCatalog.invalidate,
         snapshotForCwd: (cwd) =>
           !effectiveConfig.enabled
             ? snapshot.getSnapshot

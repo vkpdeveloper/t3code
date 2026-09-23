@@ -1,5 +1,6 @@
 import {
   ProviderInstanceId,
+  ProviderSetupError,
   type OrchestrationV2ProviderCapabilities,
   type ProviderDriverKind,
   type ProviderInstanceConfig,
@@ -12,12 +13,21 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import {
   ProviderAdapterDriverCreateError,
   type AnyProviderAdapterDriver,
 } from "./ProviderAdapterDriver.ts";
-import { ProviderAdapterV2, type ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
+import {
+  ProviderAdapterOpenSessionError,
+  ProviderAdapterV2,
+  type ProviderAdapterV2Error,
+  type ProviderAdapterV2SessionRuntime,
+  type ProviderAdapterV2Shape,
+} from "./ProviderAdapter.ts";
+
+const isSetupError = Schema.is(ProviderSetupError);
 
 export class ProviderAdapterRegistryLookupError extends Schema.TaggedError<ProviderAdapterRegistryLookupError>()(
   "ProviderAdapterRegistryLookupError",
@@ -76,6 +86,62 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
   ProviderAdapterRegistryV2,
   Effect.gen(function* () {
     const instances = yield* ProviderInstanceRegistry;
+    // Stable identity per instance so callers can compare adapters across lookups.
+    const guarded = new WeakMap<ProviderInstance, ProviderAdapterV2Shape>();
+    const guard = (instance: ProviderInstance): ProviderAdapterV2Shape => {
+      const auth = instance.auth;
+      if (!auth || (!auth.withAccess && !auth.isChangingCredentials && !auth.credentialBinding)) {
+        return instance.orchestrationAdapter;
+      }
+      const cached = guarded.get(instance);
+      if (cached) return cached;
+      const adapter = instance.orchestrationAdapter;
+      const openSession: ProviderAdapterV2Shape["openSession"] = (input) =>
+        Effect.gen(function* () {
+          const binding = auth.credentialBinding;
+          const related = binding
+            ? (yield* instances.listInstances).filter(
+                (peer) =>
+                  peer.auth?.credentialBinding?.key === binding.key &&
+                  peer.auth.credentialBinding.owner === binding.owner,
+              )
+            : [instance];
+          for (const peer of related) {
+            if (peer.auth?.isChangingCredentials && (yield* peer.auth.isChangingCredentials)) {
+              return yield* new ProviderSetupError({
+                instanceId: instance.instanceId,
+                operation: "session",
+                detail: "Provider sign-in is changing. Try again after it finishes.",
+              });
+            }
+          }
+          let admitted: Effect.Effect<
+            ProviderAdapterV2SessionRuntime,
+            ProviderAdapterV2Error | ProviderSetupError,
+            Scope.Scope
+          > = adapter.openSession(input);
+          // Unlike V1, the caller's scope is the session lifetime, so every
+          // shared owner holds access for as long as the session stays open and
+          // a credential change drains it through that owner's access scope.
+          for (const peer of related) {
+            if (peer.auth?.withAccess) admitted = peer.auth.withAccess(admitted);
+          }
+          return yield* admitted;
+        }).pipe(
+          Effect.mapError((cause) =>
+            isSetupError(cause)
+              ? new ProviderAdapterOpenSessionError({
+                  driver: adapter.driver,
+                  providerSessionId: input.providerSessionId,
+                  cause,
+                })
+              : cause,
+          ),
+        );
+      const wrapped: ProviderAdapterV2Shape = { ...adapter, openSession };
+      guarded.set(instance, wrapped);
+      return wrapped;
+    };
     return ProviderAdapterRegistryV2.of({
       get: (instanceId) =>
         instances
@@ -84,7 +150,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
             Effect.flatMap((instance) =>
               instance === undefined
                 ? new ProviderAdapterRegistryLookupError({ instanceId })
-                : Effect.succeed(instance.orchestrationAdapter),
+                : Effect.succeed(guard(instance)),
             ),
           ),
       list: () =>

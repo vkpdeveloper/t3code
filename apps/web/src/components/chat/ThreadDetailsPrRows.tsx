@@ -8,14 +8,13 @@ import { MinusIcon, PlusIcon } from "lucide-react";
 import { useState, type ComponentProps, type MouseEvent as ReactMouseEvent } from "react";
 
 import { findProjectOnChangeRequestHost, parseChangeRequestUrl } from "~/lib/openPullRequestLink";
-import { cn } from "~/lib/utils";
 import { useProjects } from "~/state/entities";
 
 import { pullRequestListLines } from "../pullRequest/pullRequestListLines";
 import { linkedPullRequestSnapshotStatus, prStatusIndicator } from "../ThreadStatusIndicators";
 import { Button } from "../ui/button";
 import { ThreadDetailsPrRow } from "./ThreadDetailsPrRow";
-import { THREAD_DETAILS_PANEL_ROW_CLASS } from "./threadDetailsPanelStyles";
+import { THREAD_DETAILS_PANEL_EXPAND_ROW_CLASS } from "./threadDetailsPanelStyles";
 
 function ThreadDetailsPrLinkRow({
   environmentId,
@@ -92,10 +91,7 @@ export function ThreadDetailsPrRows({
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(!expanded)}
-        className={cn(
-          THREAD_DETAILS_PANEL_ROW_CLASS,
-          "w-full text-muted-foreground/70 hover:text-foreground/80 active:scale-100",
-        )}
+        className={THREAD_DETAILS_PANEL_EXPAND_ROW_CLASS}
       >
         {expanded ? (
           <MinusIcon aria-hidden className="-mx-0.5 size-4 shrink-0" />

@@ -62,9 +62,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         return option.warning ? (
           <Tooltip key={option.decision}>
             <TooltipTrigger render={button} />
-            <TooltipPopup side="top" className="max-w-72 text-xs leading-snug">
-              {option.warning}
-            </TooltipPopup>
+            <TooltipPopup side="top">{option.warning}</TooltipPopup>
           </Tooltip>
         ) : (
           button
@@ -78,12 +76,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
           >
             <EllipsisIcon />
           </MenuTrigger>
-          <MenuPopup
-            {...composerFloatingLayerProps}
-            side="top"
-            align="end"
-            className="w-56 max-w-[calc(100vw-2rem)]"
-          >
+          <MenuPopup {...composerFloatingLayerProps} side="top" align="end">
             {moreOptions.map((option) => {
               const item = (
                 <MenuItem
@@ -101,9 +94,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
               return option.warning ? (
                 <Tooltip key={option.decision}>
                   <TooltipTrigger render={item} />
-                  <TooltipPopup side="top" className="max-w-64 text-xs leading-snug">
-                    {option.warning}
-                  </TooltipPopup>
+                  <TooltipPopup side="top">{option.warning}</TooltipPopup>
                 </Tooltip>
               ) : (
                 item

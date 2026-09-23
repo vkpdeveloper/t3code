@@ -126,14 +126,18 @@ export function SubagentTooltipContent(props: {
           <div key={label} className="flex min-w-0 items-center gap-2">
             <Icon aria-hidden className="size-3 shrink-0" />
             <span className="sr-only">{label}</span>
-            <MiddleTruncate value={value} className="flex text-foreground/75" showTitle={false} />
+            <span className="flex min-w-0 text-foreground/75">
+              <MiddleTruncate value={value} showTitle={false} />
+            </span>
           </div>
         );
       })}
       {preview ? (
         <div className="flex min-w-0 items-center gap-2">
           <TerminalIcon aria-hidden className="size-3 shrink-0" />
-          <MiddleTruncate value={preview} className="flex text-foreground/75" showTitle={false} />
+          <span className="flex min-w-0 text-foreground/75">
+            <MiddleTruncate value={preview} showTitle={false} />
+          </span>
         </div>
       ) : null}
     </ThreadHoverCard>

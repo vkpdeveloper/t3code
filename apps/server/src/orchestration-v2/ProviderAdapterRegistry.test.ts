@@ -1,7 +1,9 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
   type ProviderInstanceConfigMap,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -11,12 +13,17 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
+import * as ProviderAuthFlow from "../provider/ProviderAuthFlow.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
+import type {
+  ProviderAdapterV2OpenSessionInput,
+  ProviderAdapterV2SessionRuntime,
+  ProviderAdapterV2Shape,
+} from "./ProviderAdapter.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -208,4 +215,77 @@ it.effect("keeps a successfully-created adapter scope open until normal release"
 
     assert.strictEqual(yield* Ref.get(releases), 1);
   }),
+);
+
+it.effect("blocks shared credential session opens and drains open sessions on sign-out", () =>
+  Effect.gen(function* () {
+    const auth = yield* ProviderAuthFlow.make({
+      instanceId: personalId,
+      credentialBinding: { owner: "t3", key: "shared-auth" },
+      methods: Effect.succeed([
+        { id: "browser", name: "Browser", description: null, type: "agent" },
+      ]),
+      authenticate: () => Effect.never,
+      logout: Effect.void,
+    });
+    const peerAuth = yield* ProviderAuthFlow.make({
+      instanceId: workId,
+      credentialBinding: { owner: "t3", key: "shared-auth" },
+      methods: Effect.succeed([]),
+      authenticate: () => Effect.void,
+      logout: Effect.void,
+    });
+    const runtime = { instanceId: workId, driver } as ProviderAdapterV2SessionRuntime;
+    const opens = yield* Ref.make(0);
+    const closed = yield* Deferred.make<void>();
+    const peerAdapter = {
+      ...workAdapter,
+      openSession: () =>
+        Effect.gen(function* () {
+          yield* Ref.update(opens, (count) => count + 1);
+          yield* Effect.addFinalizer(() => Deferred.succeed(closed, undefined));
+          return runtime;
+        }),
+    } satisfies ProviderAdapterV2Shape;
+    const guardedInstances = [
+      { ...makeInstance(personalId, personalAdapter), auth },
+      { ...makeInstance(workId, peerAdapter), auth: peerAuth },
+    ];
+    const registry = yield* ProviderAdapterRegistryV2.pipe(
+      Effect.provide(
+        layerFromProviderInstanceRegistry.pipe(
+          Layer.provide(
+            Layer.mock(ProviderInstanceRegistry)({
+              getInstance: (id) =>
+                Effect.succeed(guardedInstances.find((instance) => instance.instanceId === id)),
+              listInstances: Effect.succeed(guardedInstances),
+            }),
+          ),
+        ),
+      ),
+    );
+    const guarded = yield* registry.get(workId);
+    assert.strictEqual(yield* registry.get(workId), guarded);
+    const input = {
+      providerSessionId: ProviderSessionId.make("session-1"),
+    } as ProviderAdapterV2OpenSessionInput;
+
+    const flow = yield* auth.start("owner");
+    const error = yield* Effect.scoped(guarded.openSession(input)).pipe(Effect.flip);
+    assert.strictEqual(error._tag, "ProviderAdapterOpenSessionError");
+    assert.strictEqual(yield* Ref.get(opens), 0);
+    yield* auth.cancel("owner", flow.flowId!);
+
+    // The session scope is the session lifetime: access stays held while it is open.
+    const sessionScope = yield* Scope.make();
+    assert.strictEqual(
+      yield* guarded.openSession(input).pipe(Effect.provideService(Scope.Scope, sessionScope)),
+      runtime,
+    );
+    assert.strictEqual(yield* Ref.get(opens), 1);
+    // Signing out through another instance sharing the binding drains the open session.
+    yield* auth.logout(Effect.void);
+    yield* Deferred.await(closed);
+    yield* Scope.close(sessionScope, Exit.void);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

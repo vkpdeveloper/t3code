@@ -32,6 +32,15 @@ export const THREAD_DETAILS_PANEL_LINK_SPLIT_SECONDARY_CLASS = `h-9 w-8 shrink-0
 /** The trailing half of a link split row when it carries a word ("Merge") rather than an icon. */
 export const THREAD_DETAILS_PANEL_LINK_SPLIT_ACTION_CLASS = `h-9 shrink-0 rounded-s-none border-transparent px-2.5 text-[13px] font-medium text-primary sm:h-9 sm:text-[13px] ${THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS}`;
 
+/** The trailing action half when the action is destructive ("Close"). */
+export const THREAD_DETAILS_PANEL_LINK_SPLIT_DESTRUCTIVE_ACTION_CLASS = `${THREAD_DETAILS_PANEL_LINK_SPLIT_ACTION_CLASS} text-destructive hover:text-destructive data-pressed:text-destructive`;
+
+/** The checks count half of a split row, at the panel's fixed type size. */
+export const THREAD_DETAILS_PANEL_SPLIT_COUNT_CLASS = `${THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS} text-[13px] sm:text-[13px]`;
+
+/** A muted full-width row that expands or collapses a list ("Show 3 more"). */
+export const THREAD_DETAILS_PANEL_EXPAND_ROW_CLASS = `${THREAD_DETAILS_PANEL_ROW_CLASS} text-muted-foreground/70 hover:text-foreground/80 active:scale-100`;
+
 export const THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS =
   "h-9 w-full justify-start gap-2.5 rounded-lg border border-transparent px-2.5 text-[13px] font-medium text-foreground/80 sm:h-9 sm:text-[13px]";
 

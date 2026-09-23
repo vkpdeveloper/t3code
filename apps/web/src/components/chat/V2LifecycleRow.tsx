@@ -197,7 +197,7 @@ export function V2LifecycleRow(props: {
         label={<>Created thread{item.title ? ` · ${item.title}` : ""}</>}
         trailing={
           <InlineButton
-            variant="link"
+            tone="link"
             aria-label={`Open ${item.title ?? "created thread"}`}
             onClick={() => props.onOpenThread(item.targetThreadId)}
           >

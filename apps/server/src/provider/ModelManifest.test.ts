@@ -372,6 +372,84 @@ describe("ModelManifest service", () => {
     );
   });
 
+  // The fork re-fetches after every restart (the disk copy never counts as
+  // fresh), so the restart leg of upstream's test is dropped: only the
+  // in-memory TTL is bypassed here, and the result must reach the disk cache.
+  it.live("explicit refresh bypasses the fresh in-memory cache", () => {
+    let fetchCount = 0;
+    const updated: ModelManifestData = {
+      ...REMOTE_MANIFEST,
+      currentModels: { codex: ["gpt-reloaded"] },
+    };
+    return Effect.gen(function* () {
+      const service = yield* make;
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 1);
+
+      assert.deepStrictEqual(yield* service.forceRefresh, updated);
+      assert.strictEqual(fetchCount, 2);
+      assert.deepStrictEqual(yield* service.current, updated);
+      assert.deepStrictEqual(yield* (yield* make).current, updated);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        serviceLayers({
+          prefix: "model-manifest-force-refresh-test",
+          response: () => Response.json(fetchCount++ === 0 ? REMOTE_MANIFEST : updated),
+        }),
+      ),
+    );
+  });
+
+  it.live("explicit refresh retries immediately after failure and preserves last-good data", () => {
+    let fetchCount = 0;
+    return Effect.gen(function* () {
+      const service = yield* make;
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* service.forceRefresh, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* service.current, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* (yield* make).current, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 2);
+      assert.deepStrictEqual(yield* service.forceRefresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 3);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        serviceLayers({
+          prefix: "model-manifest-force-retry-test",
+          response: () =>
+            fetchCount++ === 1
+              ? new Response(null, { status: 503 })
+              : Response.json(REMOTE_MANIFEST),
+        }),
+      ),
+    );
+  });
+
+  it.live("explicit refresh bypasses the retry delay after an initial failure", () => {
+    let fetchCount = 0;
+    return Effect.gen(function* () {
+      const service = yield* make;
+      assert.deepStrictEqual(yield* service.refresh, BUNDLED_MODEL_MANIFEST);
+      assert.deepStrictEqual(yield* service.refresh, BUNDLED_MODEL_MANIFEST);
+      assert.strictEqual(fetchCount, 1);
+      assert.deepStrictEqual(yield* service.forceRefresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 2);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        serviceLayers({
+          prefix: "model-manifest-force-initial-retry-test",
+          response: () =>
+            fetchCount++ === 0
+              ? new Response(null, { status: 503 })
+              : Response.json(REMOTE_MANIFEST),
+        }),
+      ),
+    );
+  });
+
   it.live("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {
       const service = yield* make;
@@ -503,4 +581,44 @@ describe("ModelManifest service", () => {
       ),
     );
   });
+});
+
+it.effect("caches valid compatibility policies and keeps them after a malformed refresh", () => {
+  const remote: ModelManifestData = {
+    ...REMOTE_MANIFEST,
+    compatibility: [
+      {
+        driver: "codex",
+        t3CodeRange: ">=0.0.42",
+        recommendedVersion: "2.0.0",
+        ranges: [{ range: "=2.0.0", status: "supported" }],
+      },
+    ],
+  };
+  let invalid = false;
+  return Effect.gen(function* () {
+    const service = yield* make;
+    assert.deepStrictEqual((yield* service.refresh).compatibility, remote.compatibility);
+    invalid = true;
+    yield* TestClock.adjust("1 hour");
+    assert.deepStrictEqual((yield* service.refresh).compatibility, remote.compatibility);
+    const rebooted = yield* make;
+    assert.deepStrictEqual((yield* rebooted.current).compatibility, remote.compatibility);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      serviceLayers({
+        prefix: "model-manifest-compatibility-test",
+        response: () =>
+          Response.json(
+            invalid
+              ? {
+                  ...remote,
+                  compatibility: [{ ...remote.compatibility![0], recommendedVersion: "3.0.0" }],
+                }
+              : remote,
+          ),
+      }),
+    ),
+  );
 });
