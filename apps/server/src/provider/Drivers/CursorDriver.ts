@@ -28,7 +28,7 @@ import {
   buildInitialCursorProviderSnapshot,
   checkCursorProviderStatus,
 } from "../Layers/CursorProvider.ts";
-import { CursorSdkCatalogLive } from "../Layers/CursorSdkCatalog.ts";
+import { CursorSdkCatalog, makeCursorSdkCatalog } from "../Layers/CursorSdkCatalog.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -45,7 +45,8 @@ import {
 } from "../providerUpdateSettings.ts";
 import { probeCursorSkills } from "./CursorSkills.ts";
 import { makeCursorAuth } from "../CursorAuth.ts";
-import { FileCredentialStore } from "../cursorSdk.ts";
+import * as CursorCredentialStore from "../CursorCredentialStore.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as CursorAgentSdk from "../../orchestration-v2/Adapters/CursorAgentSdk.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 const isSdkRunnerError = Schema.is(CursorAgentSdk.CursorAgentSdkRunnerError);
@@ -64,6 +65,7 @@ export type CursorDriverEnv =
   | HttpClient.HttpClient
   | BackgroundPolicy.BackgroundPolicy
   | ServerConfig
+  | ServerSecretStore.ServerSecretStore
   | ServerSettingsService;
 
 export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
@@ -80,7 +82,6 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverConfig = yield* ServerConfig;
       const sdkRunner = yield* CursorAgentSdk.CursorAgentSdkRunner;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -95,19 +96,32 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         continuationGroupKey: continuationIdentity.continuationKey,
       });
       const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
+      const credentials = yield* CursorCredentialStore.makeCursorCredentialStore(
+        instanceId,
+        path.join(
+          (yield* ServerConfig).stateDir,
+          "provider-auth",
+          encodeURIComponent(instanceId),
+          "cursor.json",
+        ),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Could not open the Cursor credential store.",
+              cause,
+            }),
+        ),
+      );
       const auth = yield* makeCursorAuth({
         instanceId,
         displayName: displayName ?? "Cursor",
         enabled,
         ...(processEnv.CURSOR_API_KEY ? { apiKey: processEnv.CURSOR_API_KEY } : {}),
-        store: new FileCredentialStore(
-          path.join(
-            serverConfig.stateDir,
-            "provider-auth",
-            encodeURIComponent(instanceId),
-            "cursor.json",
-          ),
-        ),
+        store: credentials.store,
+        credentialBinding: credentials.binding,
         onChanged: (signedIn): Effect.Effect<void, ProviderSetupError> =>
           snapshot.refresh.pipe(
             Effect.flatMap((provider) =>
@@ -184,6 +198,9 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         auth.withAccess,
       );
 
+      // Built once per instance so the catalog's model cache survives between
+      // status checks; explicit refreshes clear it through `invalidateCaches`.
+      const sdkCatalog = yield* makeCursorSdkCatalog();
       const checkProvider = auth.readApiKey.pipe(
         Effect.orElseSucceed(() => undefined),
         Effect.flatMap((apiKey) =>
@@ -211,7 +228,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.map(stampSnapshot),
-        Effect.provide(CursorSdkCatalogLive),
+        Effect.provideService(CursorSdkCatalog, sdkCatalog),
       );
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
@@ -244,6 +261,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         enabled,
         auth: auth.controller,
         snapshot,
+        invalidateCaches: sdkCatalog.invalidate,
         snapshotForCwd: (cwd) =>
           !effectiveConfig.enabled
             ? snapshot.getSnapshot

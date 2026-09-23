@@ -42,6 +42,23 @@ describe("CursorSdkCatalog", () => {
     }),
   );
 
+  it.effect("rediscovers models after invalidation", () =>
+    Effect.gen(function* () {
+      let modelCalls = 0;
+      const catalog = yield* makeCursorSdkCatalog({
+        readUser: () => Effect.succeed(user),
+        readModels: () => Effect.sync(() => ((modelCalls += 1), [model])),
+      });
+
+      yield* catalog.read("test-key");
+      yield* catalog.read("test-key");
+      expect(modelCalls).toBe(1);
+      yield* catalog.invalidate;
+      yield* catalog.read("test-key");
+      expect(modelCalls).toBe(2);
+    }),
+  );
+
   it.effect("does not cache failed or empty model discovery", () =>
     Effect.gen(function* () {
       let modelCalls = 0;

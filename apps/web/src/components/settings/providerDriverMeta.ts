@@ -110,21 +110,6 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     settingsSchema: DevinSettings,
   },
   {
-    value: ProviderDriverKind.make("acpRegistry"),
-    label: "ACP Registry",
-    icon: ACPRegistryIcon,
-    badgeLabel: "V2 Preview",
-    settingsSchema: AcpRegistrySettings,
-    hasDefaultInstance: false,
-  },
-  {
-    value: ProviderDriverKind.make("pi"),
-    label: "Pi",
-    icon: PiAgentIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: PiSettings,
-  },
-  {
     value: ProviderDriverKind.make("opencode"),
     label: "OpenCode",
     icon: OpenCodeIcon,
@@ -135,6 +120,21 @@ const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
     label: "Antigravity",
     icon: AntigravityIcon,
     settingsSchema: AntigravitySettings,
+  },
+  {
+    value: ProviderDriverKind.make("pi"),
+    label: "Pi",
+    icon: PiAgentIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: PiSettings,
+  },
+  {
+    value: ProviderDriverKind.make("acpRegistry"),
+    label: "ACP Registry",
+    icon: ACPRegistryIcon,
+    badgeLabel: "Early Access",
+    settingsSchema: AcpRegistrySettings,
+    hasDefaultInstance: false,
   },
 ];
 

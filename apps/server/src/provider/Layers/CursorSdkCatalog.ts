@@ -30,6 +30,8 @@ export class CursorSdkCatalogError extends Schema.TaggedError<CursorSdkCatalogEr
 
 export interface CursorSdkCatalogShape {
   readonly read: (apiKey: string) => Effect.Effect<CursorSdkCatalogSnapshot, CursorSdkCatalogError>;
+  /** Drop cached model lists so an explicit provider refresh rediscovers them. */
+  readonly invalidate: Effect.Effect<void>;
 }
 
 export class CursorSdkCatalog extends Context.Service<CursorSdkCatalog, CursorSdkCatalogShape>()(
@@ -82,6 +84,7 @@ export const makeCursorSdkCatalog = Effect.fn("CursorSdkCatalog.make")(function*
         },
         { concurrency: "unbounded" },
       ),
+    invalidate: Cache.invalidateAll(modelCache),
   });
 });
 
@@ -90,5 +93,5 @@ export const CursorSdkCatalogLive = Layer.effect(CursorSdkCatalog, makeCursorSdk
 export function makeCursorSdkCatalogTestLayer(
   read: CursorSdkCatalogShape["read"],
 ): Layer.Layer<CursorSdkCatalog> {
-  return Layer.succeed(CursorSdkCatalog, CursorSdkCatalog.of({ read }));
+  return Layer.succeed(CursorSdkCatalog, CursorSdkCatalog.of({ read, invalidate: Effect.void }));
 }
