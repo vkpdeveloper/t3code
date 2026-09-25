@@ -123,7 +123,7 @@ describe("subscription widget snapshots", () => {
       { name: "Codex", detail: "No limits available", windows: [], expiresAt: 0, totalWindows: 0 },
     ]);
   });
-  it("uses upstream deduplication for a native account also present in a proxy hub", () => {
+  it("keeps widget accounts native-only when a proxy hub reports the same account", () => {
     const input = new Map([
       [
         EnvironmentId.make("env"),
@@ -156,7 +156,7 @@ describe("subscription widget snapshots", () => {
     );
     input.get(EnvironmentId.make("env"))!.serverConfig.providers = [];
     const snapshot = buildSubscriptionUsageSnapshot(input, deepLink);
-    expect(snapshot.providers[0]?.name).toBe("Codex");
+    expect(snapshot.providers).toEqual([]);
     expect(JSON.stringify(snapshot)).not.toContain("example.com");
   });
   it("keeps unavailable quotas distinct from zero usage and omits provider error messages", () => {

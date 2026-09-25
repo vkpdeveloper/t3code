@@ -334,7 +334,9 @@ export const ApiLive = Api.make(
       Layer.provideMerge(WebPushDeliveries.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
-      Layer.provideMerge(Layer.merge(EnvironmentPublishSignatures.layer, ManagedEndpointReaper.layer)),
+      Layer.provideMerge(
+        Layer.merge(EnvironmentPublishSignatures.layer, ManagedEndpointReaper.layer),
+      ),
       Layer.provideMerge(
         ManagedEndpointProvider.layerCloudflareBindings(
           managedEndpointTunnelBinding,

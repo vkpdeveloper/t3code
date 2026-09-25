@@ -118,5 +118,8 @@ function toolInstructions(
   available: boolean,
   imageGenerationAvailable = false,
 ) {
-  return buildCodexAdditionalContext(runtime, available, imageGenerationAvailable).t3_code_tools?.value ?? "";
+  return (
+    buildCodexAdditionalContext(runtime, available, imageGenerationAvailable).t3_code_tools
+      ?.value ?? ""
+  );
 }

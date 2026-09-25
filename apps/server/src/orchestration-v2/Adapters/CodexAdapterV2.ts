@@ -5483,7 +5483,8 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                 hasT3Mcp: mcpSession !== undefined,
                 browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
                 deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
-                imageGenerationAvailable: mcpSession?.capabilities?.has("image-generation") ?? false,
+                imageGenerationAvailable:
+                  mcpSession?.capabilities?.has("image-generation") ?? false,
               });
               yield* Ref.update(pendingRootTurns, (current) => {
                 const updated = new Map(current);

@@ -1914,7 +1914,7 @@ export default function GitActionsControl({
                 <MenuPopup
                   align="end"
                   {...(isPanel ? { anchor: panelAnchorRef } : {})}
-                  className={isPanel ? THREAD_DETAILS_PANEL_ROW_POPUP_CLASS : undefined}
+                  className={isPanel ? "w-(--anchor-width)" : undefined}
                 >
                   {gitItems}
                 </MenuPopup>

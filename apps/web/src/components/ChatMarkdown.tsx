@@ -35,7 +35,6 @@ import {
   EnvironmentId,
   ScopedThreadRef,
   type ServerProviderSkill,
-  type ThreadLinkedPullRequest,
   ThreadId,
   ThreadPullRequestKey,
 } from "@t3tools/contracts";
@@ -957,7 +956,7 @@ function MarkdownCodeBlock({
   theme,
   headerActions,
   onRunShellCommand,
-  isStreaming,
+  isStreaming = false,
   children,
 }: {
   code: string;
@@ -966,7 +965,7 @@ function MarkdownCodeBlock({
   theme: "light" | "dark";
   headerActions?: ReactNode;
   onRunShellCommand?: ((command: string) => void) | undefined;
-  isStreaming: boolean;
+  isStreaming?: boolean;
   children: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
@@ -1209,7 +1208,7 @@ function RenderedMermaidCodeBlock({
     >
       {showDiagram ? <MermaidDiagram svg={diagram.svg} /> : source}
       {diagram.status === "error" ? (
-        <div className="chat-markdown-mermaid-error border-t border-border/70 px-3 py-1.5 text-[0.6875rem] text-muted-foreground dark:border-transparent">
+        <div className="border-t border-border/70 px-3 py-1.5 text-2xs text-muted-foreground dark:border-transparent">
           Diagram failed to render: {diagram.message}
         </div>
       ) : null}
