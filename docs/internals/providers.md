@@ -67,11 +67,19 @@ tool denial do not create a native sandbox.
 
 ## Provider updates run only through the owning installer
 
-A one-click update is offered only when the resolved executable path proves which installer owns
-it. Homebrew and npm ownership use real paths, including versioned kegs and global package roots.
-Native installer layouts and the global bin directories of pnpm, Bun, and Vite+ may match the
-resolved path or its real target. Anything unproven stays manual-only but can still report a
-version gap.
+A one-click update is offered only when the resolved executable's path proves which installer owns
+it. Homebrew and npm are proven by the real path (symlinks followed): a versioned keg or cask under
+`brew --prefix`, or `<prefix>/lib/node_modules/<pkg>/` (Windows: the shim beside `node_modules`).
+Native installer layouts and the global bin directories of pnpm, Bun, and Vite+ may match on either
+the resolved path or its real target, since those installers place real files or their own symlinks
+there. Cursor and Grok are the exception: their only updater is the CLI itself, which detects its
+own installer, so any resolved executable runs `<binary> update`. Anything unproven stays
+manual-only but still reports the version gap. npm updates pin
+`--prefix` because the `npm` on `PATH` can belong to a different Node than the one that owns the
+provider. Homebrew
+compares against `brew info` since casks trail npm by hours; native installs share npm's version
+train, so the registry stays authoritative for them.
+See the [resolver](../../apps/server/src/provider/providerMaintenance.ts).
 
 Ownership is cached per instance and re-read immediately before an update. The runner refuses when
 the lock key changed since the advisory and reports success only when the refreshed provider is

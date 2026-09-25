@@ -7,6 +7,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import OrchestrationV2 from "./Migrations/057_OrchestrationV2.ts";
+import PullRequestFilesViewed from "./Migrations/053_PullRequestFilesViewed.ts";
+import RemoveRedundantProjectionIndexes from "./Migrations/055_RemoveRedundantProjectionIndexes.ts";
 
 const reconciledMigrations = [
   [53, "ProjectionThreadBranchPullRequest"],
@@ -16,6 +18,7 @@ const reconciledMigrations = [
   [58, "ProjectionThreadTitleState"],
   [59, "PullRequestFilesViewed"],
   [60, "RemoveRedundantProjectionIndexes"],
+  [61, "ProjectionThreadsAutoSettleDisabledAt"],
 ] as const;
 
 // The V2 schema is unchanged from the published September 15–16 previews.
@@ -43,6 +46,7 @@ describe("V2 preview upgrade", () => {
       assert.deepStrictEqual(yield* runMigrations(), [
         [59, "PullRequestFilesViewed"],
         [60, "RemoveRedundantProjectionIndexes"],
+        [61, "ProjectionThreadsAutoSettleDisabledAt"],
       ]);
       assert.deepStrictEqual(
         (yield* sql<{
@@ -83,6 +87,38 @@ describe("V2 preview upgrade", () => {
       assert.strictEqual((yield* sql`SELECT * FROM pull_request_files_viewed`).length, 1);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
+
+  for (const withIndexes of [false, true]) {
+    it.effect(`upgrades preview migration 54 with index cleanup ${withIndexes}`, () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* Migrator.make({})({
+          loader: Migrator.fromRecord({
+            "53_PullRequestFilesViewed": PullRequestFilesViewed,
+            "54_OrchestrationV2": OrchestrationV2,
+            ...(withIndexes
+              ? { "55_RemoveRedundantProjectionIndexes": RemoveRedundantProjectionIndexes }
+              : {}),
+          }),
+        });
+        yield* runMigrations();
+        assert.deepStrictEqual(yield* runMigrations(), []);
+        const history = yield* sql<{
+          readonly migration_id: number;
+          readonly name: string;
+        }>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+        assert.deepStrictEqual(
+          history.map((row) => [row.migration_id, row.name] as const),
+          migrationManifest,
+        );
+        const columns = yield* sql<{
+          readonly name: string;
+        }>`PRAGMA table_info(projection_threads)`;
+        assert.ok(columns.some((column) => column.name === "auto_settle_disabled_at"));
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+    );
+  }
 
   it.effect("rolls back schema and ledger together on failure and can retry", () =>
     Effect.gen(function* () {

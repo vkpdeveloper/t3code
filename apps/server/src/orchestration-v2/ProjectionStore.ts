@@ -164,6 +164,7 @@ export type ProjectionSettlementCandidate = Pick<
   | "archivedAt"
   | "settledOverride"
   | "pinnedAt"
+  | "autoSettleDisabledAt"
   | "snoozedUntil"
   | "snoozedAt"
   | "latestRunId"
@@ -613,6 +614,7 @@ export function applyToProjection(
     case "thread.unsettled":
     case "thread.snoozed":
     case "thread.unsnoozed":
+    case "thread.auto-settle-set":
     case "thread.pinned":
     case "thread.unpinned":
     case "thread.pin-reordered":
@@ -1350,6 +1352,8 @@ export function threadShellFromProjection(
     snoozedUntil: projection.thread.snoozedUntil ?? null,
     snoozedAt: projection.thread.snoozedAt ?? null,
     pinnedAt: projection.thread.pinnedAt ?? null,
+
+    autoSettleDisabledAt: projection.thread.autoSettleDisabledAt ?? null,
     pinOrderKey: projection.thread.pinOrderKey ?? null,
     lastVisitedAt: projection.thread.lastVisitedAt,
     titleRegeneration: projection.thread.titleRegeneration ?? null,
@@ -1572,6 +1576,8 @@ function shellFromState(input: {
     snoozedUntil: input.state.thread.snoozedUntil ?? null,
     snoozedAt: input.state.thread.snoozedAt ?? null,
     pinnedAt: input.state.thread.pinnedAt ?? null,
+
+    autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
     pinOrderKey: input.state.thread.pinOrderKey ?? null,
     lastVisitedAt: input.state.thread.lastVisitedAt,
     titleRegeneration: input.state.thread.titleRegeneration ?? null,
@@ -1597,6 +1603,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "thread.unsettled":
           case "thread.snoozed":
           case "thread.unsnoozed":
+          case "thread.auto-settle-set":
           case "thread.pinned":
           case "thread.unpinned":
           case "thread.pin-reordered":
@@ -2423,6 +2430,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           event.type !== "thread.unsettled" &&
           event.type !== "thread.snoozed" &&
           event.type !== "thread.unsnoozed" &&
+          event.type !== "thread.auto-settle-set" &&
           event.type !== "thread.pinned" &&
           event.type !== "thread.unpinned" &&
           event.type !== "thread.pin-reordered" &&
@@ -4939,6 +4947,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               AND json_extract(t.payload_json, '$.archivedAt') IS NULL
               AND json_extract(t.payload_json, '$.settledOverride') IS NULL
               AND json_extract(t.payload_json, '$.pinnedAt') IS NULL
+              AND json_extract(t.payload_json, '$.autoSettleDisabledAt') IS NULL
               AND NOT EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_runs active
                 WHERE active.thread_id = t.thread_id
@@ -4966,6 +4975,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 return {
                   ...thread,
                   pinnedAt: thread.pinnedAt ?? null,
+
+                  autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
                   snoozedUntil: thread.snoozedUntil ?? null,
                   snoozedAt: thread.snoozedAt ?? null,
                   status,
@@ -5379,6 +5390,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 thread.archivedAt === null &&
                 thread.settledOverride === null &&
                 thread.pinnedAt == null &&
+                thread.autoSettleDisabledAt == null &&
                 !runs.some(isActivityRunForShell) &&
                 !runtimeRequests.some((request) => request.status === "pending"),
             )
