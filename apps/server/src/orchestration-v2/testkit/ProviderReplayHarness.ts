@@ -1,3 +1,4 @@
+import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
@@ -40,6 +41,8 @@ import { layer as projectionStoreLayer } from "../ProjectionStore.ts";
 import { OrchestratorV2, type OrchestratorV2Error } from "../Orchestrator.ts";
 import { ProviderAdapterRegistryV2 } from "../ProviderAdapterRegistry.ts";
 import { ProviderAuthService } from "../../provider/Services/ProviderAuthService.ts";
+import { layer as providerContinuationRequestsLayer } from "../ProviderContinuationRequests.ts";
+import { workerLive as providerContinuationWorkerLive } from "../ProviderContinuationService.ts";
 import { layer as providerEventIngestorLayer } from "../ProviderEventIngestor.ts";
 import { layerWithOptions as providerSessionManagerLayerWithOptions } from "../ProviderSessionManager.ts";
 import { layer as providerSwitchServiceLayer } from "../ProviderSwitchService.ts";
@@ -110,6 +113,7 @@ export function makeReplayServerConfig(
       traceBatchWindowMs: 200,
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
+      otelEnvironment: OtelEnvironment.none,
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpLogsUrl: undefined,
@@ -189,6 +193,9 @@ export function runOrchestratorV2ProviderReplayScenario<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    // Start continuation runs for provider wake turns, as the live runtime does.
+    // Off by default: most fixtures record no wake turn.
+    readonly runContinuationWorker?: boolean;
   } = {},
 ): Effect.Effect<
   OrchestratorV2ScenarioResult,
@@ -227,6 +234,9 @@ export function makeOrchestratorV2ProviderReplayLayer<
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    // Start continuation runs for provider wake turns, as the live runtime does.
+    // Off by default: most fixtures record no wake turn.
+    readonly runContinuationWorker?: boolean;
     readonly replayGate?: ProviderReplayGate;
   } = {},
 ): Layer.Layer<
@@ -249,6 +259,9 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       MigrationError | PlatformError.PlatformError | SqlError
     >;
     readonly runEffectWorker?: boolean;
+    // Start continuation runs for provider wake turns, as the live runtime does.
+    // Off by default: most fixtures record no wake turn.
+    readonly runContinuationWorker?: boolean;
   } = {},
 ): Layer.Layer<
   OrchestratorV2 | OrchestrationEffectWorkerV2 | EventSinkV2,
@@ -265,6 +278,11 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
           Layer.provide(runtimePolicyLayer),
         );
   const databaseLayer = options.databaseLayer ?? SqlitePersistenceMemory;
+  // One queue shared by the adapters, the orchestrator, and the worker, like
+  // runtimeLayer.ts; layer memoization keeps it a single instance.
+  const continuationRequestsLayer =
+    options.runContinuationWorker === true ? providerContinuationRequestsLayer : Layer.empty;
+  const providedRegistryLayer = registryLayer.pipe(Layer.provide(continuationRequestsLayer));
   const serverSettingsLayer = ServerSettingsService.layerTest({
     responseStreamingMode: "turn",
   }).pipe(Layer.orDie);
@@ -309,7 +327,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
-        registryLayer,
+        providedRegistryLayer,
         eventSinkProvided,
         idAllocatorLayer,
         mcpSessionRegistryTestLayer,
@@ -319,7 +337,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
     ),
   );
   const providerSwitchServiceProvided = providerSwitchServiceLayer.pipe(
-    Layer.provide(registryLayer),
+    Layer.provide(providedRegistryLayer),
   );
   const runExecutionServiceProvided = runExecutionServiceLayer.pipe(
     Layer.provide(
@@ -384,7 +402,8 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         contextHandoffServiceProvided,
         persistenceLayer,
         ProjectionProjectRepositoryLive.pipe(Layer.provide(databaseLayer)),
-        registryLayer,
+        providedRegistryLayer,
+        continuationRequestsLayer,
         runtimeLayer,
         providerSessionManagerProvided,
         providerSwitchServiceProvided,
@@ -393,6 +412,24 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       ),
     ),
   );
+  const threadManagementProvided = Layer.unwrap(
+    Effect.gen(function* () {
+      const orchestrator = yield* OrchestratorV2;
+      return Layer.mock(ThreadManagementService)({
+        dispatch: orchestrator.dispatch,
+        getThreadRecords: orchestrator.getThreadRecords,
+        getThreadProjection: orchestrator.getThreadProjection,
+      });
+    }),
+  ).pipe(Layer.provide(orchestratorProvided));
+  const continuationWorkerProvided =
+    options.runContinuationWorker === true
+      ? providerContinuationWorkerLive.pipe(
+          Layer.provide(
+            Layer.mergeAll(continuationRequestsLayer, threadManagementProvided, idAllocatorLayer),
+          ),
+        )
+      : Layer.empty;
   const effectExecutorProvided = effectExecutorLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -404,16 +441,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         runtimeRequestServiceProvided,
         threadTitleRegenerationTestLayer,
         serverSettingsLayer,
-        Layer.unwrap(
-          Effect.gen(function* () {
-            const orchestrator = yield* OrchestratorV2;
-            return Layer.mock(ThreadManagementService)({
-              dispatch: orchestrator.dispatch,
-              getThreadRecords: orchestrator.getThreadRecords,
-              getThreadProjection: orchestrator.getThreadProjection,
-            });
-          }),
-        ).pipe(Layer.provide(orchestratorProvided)),
+        threadManagementProvided,
       ),
     ),
   );
@@ -424,6 +452,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
     orchestratorProvided,
     effectWorkerProvided,
     eventSinkProvided,
+    continuationWorkerProvided,
   ).pipe(Layer.provide(worktreeRepairDependenciesTestLayer), Layer.provide(NodeServices.layer));
 
   // Build the daemon from the exact worker instance exposed alongside the

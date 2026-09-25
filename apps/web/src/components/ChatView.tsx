@@ -1,3 +1,4 @@
+import { ChatCanvas } from "./chat/ChatCanvas";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
   resolveBackgroundDraftWorkspaceOptions,
@@ -213,8 +214,9 @@ import { useElementWidth } from "../hooks/useElementWidth";
 import { usePreviewPanelInlineSize } from "../hooks/usePreviewPanelInlineSize";
 import {
   RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
-  resolveThreadPanelPresentation,
+  type ThreadPanelPresentation,
 } from "../rightPanelLayout";
+import { PopoverCreateHandle } from "./ui/popover";
 import {
   pullRequestSurface,
   selectActiveRightPanel,
@@ -670,6 +672,8 @@ const TYPE_TO_FOCUS_INTERACTIVE_SELECTOR = [
   '[role="switch"]',
   '[role="tab"]',
 ].join(",");
+// Popups match only while open or closing: some stay mounted when closed,
+// such as the chat header actions menu.
 const TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR = [
   '[role="dialog"][aria-modal="true"]',
   '[data-slot="alert-dialog-popup"]:is([data-open],[data-ending-style])',
@@ -677,11 +681,11 @@ const TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR = [
   '[data-slot="dialog-popup"]:is([data-open],[data-ending-style])',
   '[data-slot="sheet-popup"]:is([data-open],[data-ending-style])',
   '[data-slot="sidebar"][data-mobile="true"]:is([data-open],[data-ending-style])',
-  '[data-slot="menu-popup"]',
-  '[data-slot="select-popup"]',
-  '[data-slot="popover-popup"]',
-  '[data-slot="combobox-popup"]',
-  '[data-slot="autocomplete-popup"]',
+  '[data-slot="menu-popup"]:is([data-open],[data-ending-style])',
+  '[data-slot="select-popup"]:is([data-open],[data-ending-style])',
+  '[data-slot="popover-popup"]:is([data-open],[data-ending-style])',
+  '[data-slot="combobox-popup"]:is([data-open],[data-ending-style])',
+  '[data-slot="autocomplete-popup"]:is([data-open],[data-ending-style])',
 ].join(",");
 
 type EnvironmentUnavailableState = {
@@ -1231,7 +1235,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         "grid shrink-0 overflow-clip",
         active ? (visible ? "grid-rows-[1fr]" : "grid-rows-[0fr]") : "hidden",
         active &&
-          "[[data-panel-animations=true]_&]:transition-[grid-template-rows] [[data-panel-animations=true]_&]:[transition-duration:var(--panel-animation-duration)] [[data-panel-animations=true]_&]:ease-out",
+          "[[data-panel-animations=true]_&]:transition-[grid-template-rows] [[data-panel-animations=true]_&]:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:ease-out",
         active && visible && "[[data-panel-animations=true]_&]:starting:grid-rows-[0fr]!",
       )}
     >
@@ -2225,11 +2229,9 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
-  const threadPanelPresentation = resolveThreadPanelPresentation(
-    workspaceLayoutWidth,
-    inlineRightPanelOwnsTitleBar ? previewPanelInlineSize.width : 0,
-    rightPanelMaximized,
-  );
+  const [threadPanelPresentation, setThreadPanelPresentation] =
+    useState<ThreadPanelPresentation>("inline");
+  const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
   const threadPanelOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(
       state.threadPanelVisibilityByThreadKey,
@@ -2237,7 +2239,6 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
-  const inlineThreadPanelOpen = threadPanelOpen && threadPanelPresentation === "inline";
 
   useEffect(() => {
     if (!activeThreadRef) return;
@@ -4684,6 +4685,23 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const runProjectScriptRef = useRef(runProjectScript);
+  useLayoutEffect(() => {
+    runProjectScriptRef.current = runProjectScript;
+  }, [runProjectScript]);
+  const runShellCommand = useCallback((command: string) => {
+    void runProjectScriptRef.current(
+      {
+        id: "chat-code-block",
+        name: "Chat code block",
+        command,
+        icon: "play",
+        runOnWorktreeCreate: false,
+      },
+      { rememberAsLastInvoked: false },
+    );
+  }, []);
+
   const supportsProjectSettingsOverrides =
     environmentById.get(environmentId)?.serverConfig?.environment.capabilities
       .projectSettingsOverrides === true;
@@ -5484,10 +5502,6 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().toggleThreadPanel(activeThreadRef, threadPanelPresentation);
   }, [activeThreadRef, threadPanelPresentation]);
-  const closeThreadPanelPopover = useCallback(() => {
-    if (!activeThreadRef) return;
-    useRightPanelStore.getState().setThreadPanelOpen(activeThreadRef, "popover", false);
-  }, [activeThreadRef]);
   const toggleRightPanelMaximized = useCallback(() => {
     if (!canMaximizeRightPanel) return;
     setMaximizedRightPanelThreadKey((threadKey) =>
@@ -6339,6 +6353,7 @@ export default function ChatView(props: ChatViewProps) {
     activeWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
+    preparingWorktree: isPreparingWorktree,
   });
   const canOverrideServerThreadEnvMode = Boolean(
     isServerThread &&
@@ -10247,7 +10262,10 @@ export default function ChatView(props: ChatViewProps) {
       </Suspense>
     ) : null
   ) : null;
-  const threadDetailsPanelProps: Omit<ThreadDetailsPanelProps, "mode"> = {
+  const threadDetailsPanelProps: ThreadDetailsPanelProps = {
+    anchor: threadPanelPopoverAnchorRef,
+    handle: threadPanelPopoverHandle,
+    onPresentationChange: setThreadPanelPresentation,
     forceNewWorktree: multipleModelSelections !== null,
     environmentId: activeThread.environmentId,
     threadId: activeThread.id,
@@ -10305,18 +10323,7 @@ export default function ChatView(props: ChatViewProps) {
     terminalShortcutLabel: shortcutLabelForCommand(keybindings, "terminal.toggle"),
     threadPanelOpen,
     threadPanelPresentation,
-    threadPanelPopoverAnchor: threadPanelPopoverAnchorRef,
-    ...(threadPanelPresentation === "popover"
-      ? {
-          threadPanelPopoverContent: (
-            <ThreadDetailsPanel
-              mode="popover"
-              onClose={closeThreadPanelPopover}
-              {...threadDetailsPanelProps}
-            />
-          ),
-        }
-      : {}),
+    threadPanelPopoverHandle,
     threadPanelShortcutLabel: shortcutLabelForCommand(keybindings, "threadPanel.toggle"),
     threadPanelHasAttention:
       activeEnvironmentUnavailableState !== null || showVersionMismatchBanner,
@@ -10360,7 +10367,7 @@ export default function ChatView(props: ChatViewProps) {
           className={cn(
             "flex shrink-0",
             panelAnimationsActive &&
-              "motion-safe:transition-opacity motion-safe:[transition-duration:var(--panel-animation-duration)] motion-safe:ease-out",
+              "motion-safe:transition-opacity motion-safe:duration-(--panel-animation-duration) motion-safe:ease-out",
             rightPanelOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
           )}
           inert={!rightPanelOpen}
@@ -10427,9 +10434,9 @@ export default function ChatView(props: ChatViewProps) {
                   "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
                   reserveTitleBarControlInset &&
                     !inlineRightPanelOwnsTitleBar &&
-                    "wco:pr-[var(--workspace-native-controls-inset)]",
+                    "wco:pr-(--workspace-native-controls-inset)",
                 )
-              : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+              : "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center pl-(--workspace-gutter-start) pr-(--workspace-gutter-end)",
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
@@ -10456,13 +10463,10 @@ export default function ChatView(props: ChatViewProps) {
         </header>
 
         {/* Main content area with optional plan sidebar */}
-        <div
-          className="relative flex min-h-0 min-w-0 flex-1"
-          data-thread-details-inline-reserved={inlineThreadPanelOpen ? "true" : undefined}
-        >
+        <div className="relative flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+          <ChatCanvas
+            composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
             onDragOver={workspaceFileDropHandlers.onDragOver}
@@ -10510,7 +10514,12 @@ export default function ChatView(props: ChatViewProps) {
               <MessagesTimeline
                 citationRequest={paintOnlyDisplayedTimeline ? null : citationRequest}
                 citationHistoryLoading={threadDetailLoading}
-                {...(!paintOnlyDisplayedTimeline ? { onCiteAssistantText: citeAssistantText } : {})}
+                {...(!paintOnlyDisplayedTimeline
+                  ? {
+                      onCiteAssistantText: citeAssistantText,
+                      ...(activeProject ? { onRunShellCommand: runShellCommand } : {}),
+                    }
+                  : {})}
                 isWorking={!paintOnlyDisplayedTimeline && isWorking}
                 activeTurnInProgress={
                   !paintOnlyDisplayedTimeline && (isWorking || !latestRunSettled)
@@ -10633,11 +10642,11 @@ export default function ChatView(props: ChatViewProps) {
             >
               <div
                 ref={draftHeroTransition.transitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem+var(--thread-details-panel-inset))] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem+var(--thread-details-panel-inset))]"
+                className="chat-composer-lane w-full"
               >
                 <div
                   data-chat-composer-stack="true"
-                  className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-3xl"
+                  className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
                 >
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full">
@@ -10847,7 +10856,7 @@ export default function ChatView(props: ChatViewProps) {
                               aria-hidden={showComposerModelStrip ? undefined : true}
                               inert={showComposerModelStrip ? undefined : true}
                               className={cn(
-                                "ps-2 group-data-model-strip-transition/composer-surface:before:backdrop-blur-(--glass-blur) group-data-model-strip-transition/composer-surface:before:bg-[color-mix(in_srgb,var(--chat-composer-glass-surface)_var(--glass-opacity),transparent)]",
+                                "ps-2 group-data-model-strip-transition/composer-surface:before:backdrop-blur-(--glass-blur) group-data-model-strip-transition/composer-surface:before:bg-(--chat-composer-glass-surface)/(--glass-opacity)",
                                 !showComposerModelStrip &&
                                   "pointer-events-none invisible absolute inset-x-0 top-full",
                               )}
@@ -10870,9 +10879,7 @@ export default function ChatView(props: ChatViewProps) {
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}
                                 onStartFromOriginChange={onStartFromOriginChange}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? { effectiveEnvModeOverride: envMode }
-                                  : {})}
+                                envMode={envMode}
                                 {...(canOverrideServerThreadEnvMode
                                   ? {
                                       activeThreadBranchOverride: activeThreadBranch,
@@ -10918,8 +10925,6 @@ export default function ChatView(props: ChatViewProps) {
                 key={`${activeThreadKey}:${previewMiniPlayerSourceKey(activePreviewMiniPlayer.source)}`}
                 threadRef={activeThreadRef}
                 miniPlayer={activePreviewMiniPlayer}
-                composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
-                detailsPanelOpen={inlineThreadPanelOpen}
               />
             ) : null}
 
@@ -10953,6 +10958,8 @@ export default function ChatView(props: ChatViewProps) {
               </AlertDialogPopup>
             </AlertDialog>
 
+            <ThreadDetailsPanel {...threadDetailsPanelProps} />
+
             {pullRequestDialogState ? (
               <PullRequestThreadDialog
                 key={pullRequestDialogState.key}
@@ -10969,11 +10976,8 @@ export default function ChatView(props: ChatViewProps) {
                 onPrepared={handlePreparedPullRequestThread}
               />
             ) : null}
-          </div>
+          </ChatCanvas>
           {/* end chat column */}
-          {inlineThreadPanelOpen ? (
-            <ThreadDetailsPanel mode="inline" {...threadDetailsPanelProps} />
-          ) : null}
         </div>
         {/* end horizontal flex container */}
 
