@@ -479,10 +479,10 @@ interface ProviderInstanceCardProps {
   readonly readOnly?: boolean | undefined;
   readonly onUpdate: (nextInstance: ProviderInstanceConfig) => void;
   /**
-   * Pass `undefined` to hide the delete footer entirely. Built-in default
-   * instance slots use `undefined` — they can't be deleted without losing
-   * the slot, and their "reset to defaults" affordance lives on an outer
-   * reset button instead. Explicit `| undefined` in the type accommodates
+   * Pass `undefined` to hide the delete footer entirely. Legacy default
+   * instances use a reset button instead; added providers have a delete
+   * action even when their instance ID equals the driver name.
+   * Explicit `| undefined` in the type accommodates
    * `exactOptionalPropertyTypes: true`, where an absent key and
    * `{ onDelete: undefined }` are treated as distinct shapes.
    */

@@ -761,9 +761,11 @@ export function EnvironmentProviderSettings({
   }
 
   const defaultSlotIdsBySource = new Set<string>(
-    visibleProviderSettings.map((providerSettings) =>
-      String(defaultInstanceIdForDriver(providerSettings.provider)),
-    ),
+    visibleProviderSettings
+      .filter((providerSettings) =>
+        Object.hasOwn(DEFAULT_UNIFIED_SETTINGS.providers, providerSettings.provider),
+      )
+      .map((providerSettings) => String(defaultInstanceIdForDriver(providerSettings.provider))),
   );
 
   const rows: InstanceRow[] = [];
@@ -819,7 +821,7 @@ export function EnvironmentProviderSettings({
           instanceId: defaultInstanceId,
           instance: effectiveInstance,
           driver,
-          isDefault: true,
+          isDefault: defaultLegacyConfig !== undefined,
           isDirty,
         });
       }
@@ -881,10 +883,13 @@ export function EnvironmentProviderSettings({
   };
 
   const deleteProviderInstance = async (row: InstanceRow) => {
-    const updateResult = await persistProviderInstance({
-      operation: "remove",
-      instanceId: row.instanceId,
-    });
+    const mutation = { operation: "remove" as const, instanceId: row.instanceId };
+    const updateResult =
+      textGenInstanceId === row.instanceId
+        ? await persistProviderInstance(mutation, {
+            textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+          })
+        : await persistProviderInstance(mutation);
     if (updateResult._tag === "Failure") {
       const error = squashAtomCommandFailure(updateResult);
       toastManager.add({
@@ -894,6 +899,14 @@ export function EnvironmentProviderSettings({
       });
       return;
     }
+
+    updateClientSettings({
+      favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], row.instanceId),
+      providerModelPreferences: withoutProviderInstanceKey(
+        settings.providerModelPreferences,
+        row.instanceId,
+      ),
+    });
 
     if (row.driver !== ProviderDriverKind.make("acpRegistry")) return;
     const agentId = providerConfigString(row.instance.config, "agentId");
