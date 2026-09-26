@@ -455,6 +455,10 @@ describe("EnvironmentProviderSettings routing", () => {
       operation: "remove",
       instanceId: customId,
     });
+    expect(settingsState.updateClientSettings).toHaveBeenCalledWith({
+      favorites: [],
+      providerModelPreferences: {},
+    });
 
     settingsState.mutateProviderInstance.mockClear();
     const defaultRow = visitElements(
@@ -481,6 +485,29 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(Object.keys(resetPatch ?? {}).sort()).toEqual(["providers"]);
     expect(resetPatch).not.toHaveProperty("favorites");
     expect(resetPatch).not.toHaveProperty("providerModelPreferences");
+  });
+
+  it.each(["amp", "devin"] as const)("lets an added %s provider be removed", async (driver) => {
+    const instanceId = ProviderInstanceId.make(driver);
+    settingsState.value = {
+      ...DEFAULT_UNIFIED_SETTINGS,
+      providerInstances: {
+        [instanceId]: { driver: ProviderDriverKind.make(driver), enabled: true },
+      },
+    };
+    const panel = renderPanel({ targetInstanceId: instanceId });
+    const card = visitElements(
+      panel,
+      (element) => element.props.instanceId === instanceId && element.props.mode === "editor",
+    );
+    expect(card?.props.onDelete).toEqual(expect.any(Function));
+    expect(card?.props.headerAction).toBeNull();
+    (card?.props.onDelete as (() => void) | undefined)?.();
+    await flushPromises();
+    expect(settingsState.mutateProviderInstance).toHaveBeenCalledWith({
+      operation: "remove",
+      instanceId,
+    });
   });
 
   it("updates one provider instance without sending a stale whole map", async () => {
