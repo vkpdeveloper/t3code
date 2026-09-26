@@ -1,9 +1,9 @@
 /**
  * DevinAcpSupport — spawn, mode, and model helpers for the Devin CLI (`devin acp`).
  *
- * Devin is a stock ACP agent: models and modes arrive as standard session
- * `configOptions`, so this module has no extension protocol to speak of. It
- * exists to keep three Devin-specific decisions in one place:
+ * Devin uses ACP for sessions and standard `configOptions` for modes. Its model
+ * catalog is probed through the CLI. This module keeps three Devin-specific
+ * decisions in one place:
  *
  * - The runtime never sends `authenticate`. Devin's only advertised auth method
  *   (`devin-browser`) starts a browser PKCE flow on every call, even when the CLI

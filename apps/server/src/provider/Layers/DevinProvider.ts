@@ -57,7 +57,7 @@ const DEVIN_MODEL_DISCOVERY_TIMEOUT_MS = 30_000;
 const DEVIN_MODEL_DISCOVERY_FAILED_MESSAGE =
   "Devin CLI is installed but model discovery failed. Model options may be incomplete.";
 
-/** Shown when the session catalog is unavailable; keeps the session's current model. */
+/** Keeps the CLI default available even when model discovery fails. */
 const DEVIN_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: DEVIN_DEFAULT_MODEL_SLUG,
