@@ -140,6 +140,7 @@ export const ACP_PROTOCOL = "acp.ndjson-jsonrpc" as const;
 
 export interface AcpAdapterV2RuntimeInput {
   readonly cwd: string;
+  readonly modelSelection: ModelSelection;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
   /** Scoped credentials for terminal fallback when an ACP agent drops `mcpServers`. */
@@ -1916,6 +1917,7 @@ export function makeAcpAdapterV2(options: AcpAdapterV2Options): ProviderAdapterV
           const mcpContext = acpMcpContext(threadId, self);
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
+            modelSelection: input.modelSelection,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
             ...(mcpContext.processEnvironment === undefined

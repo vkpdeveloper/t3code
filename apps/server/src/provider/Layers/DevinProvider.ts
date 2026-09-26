@@ -1,13 +1,9 @@
 /**
  * DevinProvider — health check and model discovery for the Devin CLI.
  *
- * The probe runs `devin --version`, then `devin auth status`, then opens one
- * short-lived ACP session to read the account's model catalog from the session's
- * `model` config option. That option is the only source of truth for the picker:
- * `devin models list` prints the whole catalog including models the account
- * cannot use, while the session only advertises what a prompt would accept.
- * Devin fills the option in shortly after `session/new`, so the probe keeps the
- * session open until the catalog has settled (see `awaitDevinModelCatalog`).
+ * The probe runs `devin --version`, `devin auth status`, and
+ * `devin models list --format json`. The CLI's account catalog is used because
+ * recent Devin builds can leave the ACP session's model option empty.
  *
  * @module provider/Layers/DevinProvider
  */
@@ -25,7 +21,6 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { HttpClient } from "effect/unstable/http";
@@ -45,12 +40,7 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import {
-  awaitDevinModelCatalog,
-  deleteDevinAcpSession,
-  DEVIN_DEFAULT_MODEL_SLUG,
-  makeDevinAcpRuntime,
-} from "../acp/DevinAcpSupport.ts";
+import { DEVIN_DEFAULT_MODEL_SLUG } from "../acp/DevinAcpSupport.ts";
 
 const DEVIN_PRESENTATION = {
   displayName: "Devin",
@@ -58,19 +48,16 @@ const DEVIN_PRESENTATION = {
   supportsConversationRollback: false,
   showInteractionModeToggle: false,
   reportsContextWindow: true,
-  requiresNewThreadForModelChange: false,
+  requiresNewThreadForModelChange: true,
 } as const;
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({ optionDescriptors: [] });
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
-// One local `initialize` plus `session/new`, then the wait for Devin's catalog
-// push. Session setup boots the user's MCP servers, so it is slower than a bare
-// initialize.
-const DEVIN_ACP_DISCOVERY_TIMEOUT_MS = 30_000;
-const DEVIN_ACP_DISCOVERY_FAILED_MESSAGE =
-  "Devin CLI is installed but ACP model discovery failed. Model options may be incomplete.";
+const DEVIN_MODEL_DISCOVERY_TIMEOUT_MS = 30_000;
+const DEVIN_MODEL_DISCOVERY_FAILED_MESSAGE =
+  "Devin CLI is installed but model discovery failed. Model options may be incomplete.";
 
-/** Shown when the session catalog is unavailable; keeps the session's current model. */
+/** Keeps the CLI default available even when model discovery fails. */
 const DEVIN_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: DEVIN_DEFAULT_MODEL_SLUG,
@@ -155,36 +142,41 @@ const runDevinCliCommand = (
     );
   });
 
-/**
- * Opens a throwaway ACP session, waits for its model catalog to settle, then
- * deletes the session so it does not linger in `devin ls`.
- */
-export const discoverDevinModelsViaAcp = (
-  devinSettings: DevinSettings,
-  environment: NodeJS.ProcessEnv,
-  cwd: string,
-) =>
-  Effect.gen(function* () {
-    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const acp = yield* makeDevinAcpRuntime({
-      devinSettings,
-      environment,
-      childProcessSpawner,
-      cwd,
-      clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
-    });
-    const started = yield* acp.start();
-    // Devin's placeholder catalog has a single entry. A free account legitimately
-    // ends up with one model too, so it waits out the timeout and keeps that one.
-    const models = yield* awaitDevinModelCatalog(acp, (candidates) => candidates.length > 1);
-    yield* deleteDevinAcpSession(acp, started.sessionId);
-    return models;
-  }).pipe(Effect.scoped);
+export function parseDevinModelsList(output: string): ReadonlyArray<ServerProviderModel> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return [];
+  }
+  if (parsed === null || typeof parsed !== "object" || !("families" in parsed)) return [];
+  const families = parsed.families;
+  if (!Array.isArray(families)) return [];
+  const seen = new Set<string>();
+  const models: ServerProviderModel[] = [];
+  for (const family of families) {
+    if (family === null || typeof family !== "object" || !Array.isArray(family.variants)) continue;
+    for (const variant of family.variants) {
+      if (variant === null || typeof variant !== "object") continue;
+      const slug = typeof variant.model_uid === "string" ? variant.model_uid.trim() : "";
+      if (!slug || seen.has(slug) || slug === DEVIN_DEFAULT_MODEL_SLUG) continue;
+      seen.add(slug);
+      models.push({
+        slug,
+        name:
+          typeof variant.label === "string" && variant.label.trim() ? variant.label.trim() : slug,
+        isCustom: false,
+        capabilities: EMPTY_CAPABILITIES,
+      });
+    }
+  }
+  return models;
+}
 
 export const checkDevinProviderStatus = Effect.fn("checkDevinProviderStatus")(function* (
   devinSettings: DevinSettings,
   environment: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd(),
+  _cwd: string = process.cwd(),
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -303,30 +295,30 @@ export const checkDevinProviderStatus = Effect.fn("checkDevinProviderStatus")(fu
     });
   }
 
-  const discoveryExit = yield* discoverDevinModelsViaAcp(devinSettings, environment, cwd).pipe(
-    Effect.timeoutOption(DEVIN_ACP_DISCOVERY_TIMEOUT_MS),
-    Effect.exit,
-  );
-  const discoveredModels = Exit.isSuccess(discoveryExit)
-    ? Option.getOrElse(discoveryExit.value, () => [])
-    : [];
-  const discoveryFailed =
-    Exit.isFailure(discoveryExit) ||
-    Option.isNone(discoveryExit.value) ||
-    discoveredModels.length === 0;
+  const discoveryResult = yield* runDevinCliCommand(
+    devinSettings,
+    ["models", "list", "--format", "json"],
+    environment,
+  ).pipe(Effect.timeoutOption(DEVIN_MODEL_DISCOVERY_TIMEOUT_MS), Effect.result);
+  const discoveredModels =
+    Result.isSuccess(discoveryResult) &&
+    Option.isSome(discoveryResult.success) &&
+    discoveryResult.success.value.code === 0
+      ? parseDevinModelsList(discoveryResult.success.value.stdout)
+      : [];
+  const discoveryFailed = discoveredModels.length === 0;
   if (discoveryFailed) {
-    yield* Effect.logWarning("Devin ACP model discovery failed, timed out, or was empty.", {
-      errorTag: Exit.isFailure(discoveryExit) ? causeErrorTag(discoveryExit.cause) : "Timeout",
-    });
+    yield* Effect.logWarning("Devin CLI model discovery failed, timed out, or was empty.");
   }
 
   return buildServerProvider({
     presentation: DEVIN_PRESENTATION,
     enabled: true,
     checkedAt,
-    models: discoveryFailed
-      ? fallbackModels
-      : devinModelsFromSettings(devinSettings.customModels, discoveredModels),
+    models: devinModelsFromSettings(devinSettings.customModels, [
+      ...DEVIN_BUILT_IN_MODELS,
+      ...discoveredModels,
+    ]),
     slashCommands: [COMPACT_SLASH_COMMAND],
     probe: {
       installed: true,
@@ -334,7 +326,7 @@ export const checkDevinProviderStatus = Effect.fn("checkDevinProviderStatus")(fu
       // A failed catalog probe degrades the model picker; chats still work on the session default.
       status: discoveryFailed ? "warning" : "ready",
       auth,
-      ...(discoveryFailed ? { message: DEVIN_ACP_DISCOVERY_FAILED_MESSAGE } : {}),
+      ...(discoveryFailed ? { message: DEVIN_MODEL_DISCOVERY_FAILED_MESSAGE } : {}),
     },
   });
 });

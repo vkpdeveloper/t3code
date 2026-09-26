@@ -9,9 +9,8 @@
  * - Its ask-user-question tool arrives as `elicitation/create` (with
  *   `_session/elicitation` as the older alias) instead of the spec's
  *   `session/elicitation`, so both are registered as extension requests.
- * - Its model catalog lands in the session `model` config option after
- *   `session/new` returns, so model selection waits for the real catalog
- *   before calling `setModel`.
+ * - Its ACP model option can be empty, so new sessions select their model
+ *   through the CLI's `--model` flag before `session/new`.
  *
  * @module orchestration-v2/Adapters/DevinAdapterV2
  */
@@ -37,7 +36,6 @@ import { ServerConfig } from "../../config.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
 import type { AcpSessionModeState } from "../../provider/acp/AcpRuntimeModel.ts";
 import {
-  applyDevinAcpModelSelection,
   makeDevinAcpRuntime,
   resolveDevinAcpBaseModelId,
   resolveDevinAcpModeId,
@@ -82,7 +80,7 @@ export const DevinProviderCapabilitiesV2 = {
   ...AcpProviderCapabilitiesV2,
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
-    supportsModelSwitchInSession: true,
+    supportsModelSwitchInSession: false,
   },
   threads: {
     ...AcpProviderCapabilitiesV2.threads,
@@ -187,12 +185,8 @@ export function makeDevinAcpAdapterFlavor(options: DevinAdapterV2Options): AcpAd
         modeState: lastModeState,
       }),
     resolveModelId: (selection) => resolveDevinAcpBaseModelId(selection.model),
-    applyModelSelection: ({ runtime, modelSelection }) =>
-      applyDevinAcpModelSelection({
-        runtime,
-        model: modelSelection.model,
-        mapError: (cause) => cause,
-      }).pipe(Effect.as(undefined)),
+    applyModelSelection: ({ modelSelection }) =>
+      Effect.succeed(resolveDevinAcpBaseModelId(modelSelection.model)),
     makeRuntime:
       options.makeRuntime ??
       ((input) =>
@@ -200,6 +194,7 @@ export function makeDevinAcpAdapterFlavor(options: DevinAdapterV2Options): AcpAd
           ...input,
           authenticateOnAuthRequired: false,
           devinSettings: options.settings,
+          model: input.modelSelection.model,
           ...(options.environment === undefined ? {} : { environment: options.environment }),
           childProcessSpawner: options.childProcessSpawner,
         })),

@@ -23,7 +23,6 @@ import {
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
 import {
-  applyDevinAcpModelSelection,
   deleteDevinAcpSession,
   makeDevinAcpRuntime,
   resolveDevinAcpReadOnlyModeId,
@@ -70,6 +69,7 @@ export const makeDevinTextGeneration = Effect.fn("makeDevinTextGeneration")(func
         childProcessSpawner: commandSpawner,
         cwd,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
+        model: modelSelection.model,
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
       yield* runtime.handleSessionUpdate((notification) => {
@@ -86,16 +86,6 @@ export const makeDevinTextGeneration = Effect.fn("makeDevinTextGeneration")(func
 
       const promptResult = yield* Effect.gen(function* () {
         const started = yield* runtime.start();
-        yield* applyDevinAcpModelSelection({
-          runtime,
-          model: modelSelection.model,
-          mapError: (cause) =>
-            new TextGenerationError({
-              operation,
-              detail: "Failed to set Devin ACP model for text generation.",
-              cause,
-            }),
-        });
         const askModeId = resolveDevinAcpReadOnlyModeId(yield* runtime.getModeState);
         if (askModeId) {
           yield* runtime.setMode(askModeId);
