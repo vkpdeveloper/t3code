@@ -2,7 +2,6 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -11,11 +10,13 @@ import * as Schema from "effect/Schema";
 import { DevinSettings } from "@t3tools/contracts";
 
 import { writeFakeCli } from "../../testUtils/fakeCli.ts";
-import { checkDevinProviderStatus, parseDevinAuthStatusOutput } from "./DevinProvider.ts";
+import {
+  checkDevinProviderStatus,
+  parseDevinAuthStatusOutput,
+  parseDevinModelsList,
+} from "./DevinProvider.ts";
 
 const decodeDevinSettings = Schema.decodeSync(DevinSettings);
-const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
-const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 
 // `devin auth status` on devin 3000.10.21.
 const LOGGED_IN_OUTPUT = [
@@ -53,7 +54,7 @@ describe("parseDevinAuthStatusOutput", () => {
 
 /**
  * A fake `devin` that answers the CLI probes from environment variables and
- * hands `acp` over to the shared mock ACP agent.
+ * answers model discovery without opening an ACP session.
  */
 function writeFakeDevin(directory: string, env: Record<string, string>): string {
   return writeFakeCli({
@@ -61,7 +62,6 @@ function writeFakeDevin(directory: string, env: Record<string, string>): string 
     name: "fake-devin",
     env,
     source: [
-      'import { pathToFileURL } from "node:url";',
       "const args = process.argv.slice(2);",
       'if (args[0] === "--version") {',
       '  process.stdout.write("devin 3000.10.21 (611c1cba)\\n");',
@@ -71,12 +71,36 @@ function writeFakeDevin(directory: string, env: Record<string, string>): string 
       '  process.stdout.write(process.env.T3_FAKE_DEVIN_AUTH_OUTPUT ?? "");',
       '  process.exit(Number(process.env.T3_FAKE_DEVIN_AUTH_EXIT ?? "0"));',
       "}",
-      `await import(pathToFileURL(${JSON.stringify(mockAgentPath)}).href);`,
+      'if (args.join(" ") === "models list --format json") {',
+      '  process.stdout.write(process.env.T3_FAKE_DEVIN_MODELS_OUTPUT ?? "");',
+      '  process.exit(Number(process.env.T3_FAKE_DEVIN_MODELS_EXIT ?? "0"));',
+      "}",
+      "process.exit(1);",
     ].join("\n"),
   });
 }
 
 describe("checkDevinProviderStatus", () => {
+  const modelsOutput = JSON.stringify({
+    families: [
+      { variants: [{ model_uid: "swe-2-medium", label: "SWE-2 Medium" }] },
+      { variants: [{ model_uid: "fusion-opus-swe", label: "Fusion" }] },
+    ],
+  });
+
+  it("parses the account catalog and ignores duplicate or malformed variants", () => {
+    expect(
+      parseDevinModelsList(
+        JSON.stringify({
+          families: [
+            { variants: [{ model_uid: "fusion-opus-swe", label: "Fusion" }] },
+            { variants: [{ model_uid: "fusion-opus-swe", label: "Duplicate" }, {}] },
+          ],
+        }),
+      ).map((model) => model.slug),
+    ).toEqual(["fusion-opus-swe"]);
+    expect(parseDevinModelsList("not json")).toEqual([]);
+  });
   it.effect("reports a missing binary as not installed", () =>
     Effect.gen(function* () {
       const snapshot = yield* checkDevinProviderStatus(
@@ -111,12 +135,15 @@ describe("checkDevinProviderStatus", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("reads the model catalog from the ACP session config options", () =>
+  it.effect("reads the account catalog from the CLI even when ACP offers no model choices", () =>
     Effect.gen(function* () {
       const dir = yield* Effect.promise(() =>
         NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-provider-")),
       );
-      const binaryPath = writeFakeDevin(dir, { T3_FAKE_DEVIN_AUTH_OUTPUT: LOGGED_IN_OUTPUT });
+      const binaryPath = writeFakeDevin(dir, {
+        T3_FAKE_DEVIN_AUTH_OUTPUT: LOGGED_IN_OUTPUT,
+        T3_FAKE_DEVIN_MODELS_OUTPUT: modelsOutput,
+      });
       const snapshot = yield* checkDevinProviderStatus(
         decodeDevinSettings({ enabled: true, binaryPath }),
         process.env,
@@ -130,32 +157,32 @@ describe("checkDevinProviderStatus", () => {
         email: "someone@example.com",
       });
       expect(snapshot.status).toBe("ready");
-      // Discovered models replace the `devin-default` fallback entirely.
-      expect(snapshot.models.length).toBeGreaterThan(0);
-      expect(snapshot.models.some((model) => model.slug === "devin-default")).toBe(false);
+      expect(snapshot.models.map((model) => model.slug)).toEqual([
+        "devin-default",
+        "swe-2-medium",
+        "fusion-opus-swe",
+      ]);
       expect(snapshot.models.filter((model) => model.isDefault).length).toBe(1);
       expect(snapshot.slashCommands.map((command) => command.name)).toContain("compact");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  // Real sleeps: the probe polls the wall clock while waiting for the catalog push.
-  it.live("waits for the catalog Devin pushes after session/new", () =>
+  it.effect("keeps the default model and reports a warning if CLI discovery fails", () =>
     Effect.gen(function* () {
       const dir = yield* Effect.promise(() =>
         NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "devin-provider-")),
       );
       const binaryPath = writeFakeDevin(dir, {
         T3_FAKE_DEVIN_AUTH_OUTPUT: LOGGED_IN_OUTPUT,
-        T3_ACP_LATE_MODEL_CATALOG: "1",
+        T3_FAKE_DEVIN_MODELS_EXIT: "1",
       });
       const snapshot = yield* checkDevinProviderStatus(
         decodeDevinSettings({ enabled: true, binaryPath }),
         process.env,
         dir,
       );
-      expect(snapshot.status).toBe("ready");
-      // The placeholder answer lists one model; the pushed catalog lists the rest.
-      expect(snapshot.models.length).toBeGreaterThan(1);
+      expect(snapshot.status).toBe("warning");
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["devin-default"]);
       expect(snapshot.models.filter((model) => model.isDefault).length).toBe(1);
     }).pipe(Effect.provide(NodeServices.layer)),
   );

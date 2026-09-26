@@ -8,6 +8,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  DevinIcon,
   GrokIcon,
   Icon,
   OpenAI,
@@ -31,6 +32,7 @@ const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("grok")]: GrokIcon,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   [ProviderDriverKind.make("pi")]: PiAgentIcon,
+  [ProviderDriverKind.make("devin")]: DevinIcon,
 };
 
 const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
@@ -41,6 +43,7 @@ const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string
   [ProviderDriverKind.make("pi")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
   [ProviderDriverKind.make("opencode")]: "text-[#211E1E] dark:text-[#F1ECEC]",
   [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
+  [ProviderDriverKind.make("devin")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
 };
 
 export function providerTextColorClassName(driverKind: ProviderDriverKind): string | undefined {
