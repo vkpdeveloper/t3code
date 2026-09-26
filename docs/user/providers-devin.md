@@ -8,14 +8,12 @@ connect from another device.
 
 ## Models
 
-T3 Code reads the model list from the Devin session itself during the provider status check, so
-the picker only shows models your Devin plan can run. On the Free plan that is a single Cognition
-model; Pro and above add the frontier models. Refresh provider status after changing plans or
-signing in again to reload the list.
+T3 Code reads the model list from `devin models list` during the provider status check. Refresh
+provider status after changing plans or signing in again to reload the list. Devin may reject a
+model that your account cannot use.
 
-`Devin default` is the fallback shown when the list is unavailable. Selecting it keeps whatever
-model the Devin session already runs on. Model changes take effect on the next turn without a new
-thread.
+`Devin default` lets the CLI choose its default model and remains available if model discovery
+fails. Choose a model when starting a thread; changing models requires a new thread.
 
 ## Permissions
 
