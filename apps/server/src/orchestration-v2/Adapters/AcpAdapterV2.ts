@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodePath from "node:path";
 
 import {
   type ChatAttachment,
