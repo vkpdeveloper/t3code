@@ -437,6 +437,7 @@ const config: ExpoConfig = {
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidAgentStatusService.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
+    "./plugins/withAndroidFbjniVersion.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
     "./plugins/withAndroidModernAlertDialog.cjs",
