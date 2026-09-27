@@ -23,10 +23,6 @@
       "types": "./src/worktreeSetup.ts",
       "default": "./src/worktreeSetup.ts"
     },
-    "./message-token-speed": {
-      "types": "./src/messageTokenSpeed.ts",
-      "default": "./src/messageTokenSpeed.ts"
-    },
     "./load-balancing": {
       "types": "./src/load-balancing.ts",
       "default": "./src/load-balancing.ts"

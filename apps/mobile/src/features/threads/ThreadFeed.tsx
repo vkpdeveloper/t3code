@@ -23,7 +23,6 @@ import {
   type RunId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
-import { messageTokenSpeed } from "@t3tools/client-runtime/message-token-speed";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import {
   parseComposerContextHref,
@@ -1626,7 +1625,6 @@ function renderFeedEntry(
       props.terminalAssistantMessageIds.has(message.id) &&
       !assistantTurnStillInProgress &&
       !message.streaming;
-    const speed = showAssistantMeta ? messageTokenSpeed(message) : null;
 
     if (isUser) {
       const enterAnimated = isFreshTimestamp(message.createdAt);
@@ -1889,20 +1887,6 @@ function renderFeedEntry(
             <Text className="font-t3-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
             </Text>
-            {speed ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={speed.label}
-                accessibilityHint="Show how reply speed is estimated"
-                onPress={() => Alert.alert("Reply speed", speed.description)}
-                hitSlop={8}
-                className="px-1"
-              >
-                <Text className="font-t3-medium text-xs tabular-nums text-adaptive-neutral-600-400">
-                  {speed.label}
-                </Text>
-              </Pressable>
-            ) : null}
           </View>
         ) : null}
       </Animated.View>
