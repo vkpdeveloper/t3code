@@ -45,14 +45,19 @@ import type {
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItem,
   OrchestrationV2UserMessageInputIntent,
-  RunId,
   RunAttemptId,
   ScheduledTaskId,
 } from "@t3tools/contracts";
-import { ThreadId } from "@t3tools/contracts";
+import { RunId, ThreadId } from "@t3tools/contracts";
+import {
+  classifyToolActivity,
+  collectToolFilePaths,
+  computerUseToolTitle,
+  formatReadToolLabel,
+  formatSearchToolLabel,
+} from "@t3tools/shared/toolActivity";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
-import { computerUseToolTitle } from "@t3tools/shared/toolActivity";
 import * as DateTime from "effect/DateTime";
 
 export type PendingApproval = ThreadPendingApproval;
@@ -85,6 +90,7 @@ export interface ThreadFeedActivity {
     | "edit"
     | "eye"
     | "globe"
+    | "search"
     | "hammer"
     | "lock"
     | "message"
@@ -212,9 +218,32 @@ export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = fa
   const presentation = resolveWorkEntryToolPresentation(entry);
   if (presentation) return presentation.displayName;
   if (entry.command?.trim()) return compactWorkEntryText(commandDisplayText(entry.command));
+  const action = toolGroupAction(entry);
+  const isToolRead = action === "read" && entry.itemType === "dynamic_tool";
+  if (action === "code-search" || action === "search") {
+    const toolData =
+      entry.toolData !== null &&
+      typeof entry.toolData === "object" &&
+      !Array.isArray(entry.toolData)
+        ? (entry.toolData as Record<string, unknown>)
+        : undefined;
+    // Adapters title file searches with their target; the item keeps only the pattern.
+    const searchLabel =
+      entry.itemType === "file_search" ? entry.label : formatSearchToolLabel(toolData);
+    if (searchLabel) return searchLabel;
+  }
+  if (isToolRead) {
+    const [firstPath] = entry.changedFiles ?? collectToolFilePaths(entry.toolData);
+    if (firstPath) {
+      return formatReadToolLabel(firstPath, Math.max(0, (entry.changedFiles?.length ?? 1) - 1));
+    }
+    if (!expanded) return "Read file";
+  }
   const preview =
     entry.command ??
-    entry.detail ??
+    (isToolRead || (!expanded && (action === "code-search" || action === "search"))
+      ? null
+      : entry.detail) ??
     (entry.changedFiles?.length
       ? entry.changedFiles.length === 1
         ? entry.changedFiles[0]!
@@ -420,6 +449,16 @@ function itemWorkLogTone(item: OrchestrationV2TurnItem): WorkLogPresentationEntr
 
 function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
   if (item.type === "notification") return "zap";
+  if (item.type === "dynamic_tool") {
+    const classified = classifyToolActivity({
+      itemType: "dynamic_tool_call",
+      data: { toolName: item.toolName ?? undefined, input: item.input },
+    });
+    if (classified === "read") {
+      return "eye";
+    }
+    if (classified === "search") return "search";
+  }
   switch (item.type) {
     case "reasoning":
       return "agent";
@@ -428,7 +467,7 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
     case "file_change":
       return "edit";
     case "file_search":
-      return "eye";
+      return "search";
     case "web_search":
       return "globe";
     case "approval_request":
@@ -492,7 +531,7 @@ function itemSummary(
         ? `Changed ${item.changes.length} files`
         : `Changed ${item.fileName}`;
     case "file_search":
-      return "Searched files";
+      return item.title?.trim() || formatSearchToolLabel(item) || "Searched files";
     case "web_search":
       return "Searched the web";
     case "approval_request":
@@ -513,8 +552,20 @@ function itemSummary(
       return "Thread forked";
     case "thread_created":
       return "Thread created";
-    case "dynamic_tool":
+    case "dynamic_tool": {
+      const classified = classifyToolActivity({
+        itemType: "dynamic_tool_call",
+        data: { toolName: item.toolName ?? undefined, input: item.input },
+      });
+      if (classified === "read") {
+        const [path] = collectToolFilePaths({ input: item.input });
+        return formatReadToolLabel(path ?? "");
+      }
+      if (classified === "search") {
+        return formatSearchToolLabel({ input: item.input }) ?? item.toolName ?? "Tool call";
+      }
       return toolPresentation?.displayName ?? item.toolName ?? "Tool call";
+    }
     case "proposed_plan":
       return "Proposed plan";
     case "todo_list":
@@ -657,8 +708,15 @@ function toFeedActivity(
   const detail = item.type === "notification" ? null : itemPreview(item);
   const createdAt = DateTime.formatIso(item.startedAt ?? item.updatedAt);
   const workEntry = toWorkLogEntry(item, createdAt, summary, detail);
-  const getFullDetail = memoizeValue(() =>
-    JSON.stringify(
+  const readPaths =
+    item.type === "dynamic_tool" && toolGroupAction(workEntry) === "read"
+      ? collectToolFilePaths(item)
+      : null;
+  const getFullDetail = memoizeValue(() => {
+    if (readPaths) {
+      return readPaths.join("\n") || null;
+    }
+    return JSON.stringify(
       {
         visibility: row.visibility,
         sourceThreadId: row.sourceThreadId,
@@ -667,8 +725,8 @@ function toFeedActivity(
       },
       null,
       2,
-    ),
-  );
+    );
+  });
   const getCopyText = memoizeValue(() =>
     [summary, detail, getFullDetail()]
       .filter(
@@ -684,7 +742,7 @@ function toFeedActivity(
     attemptId,
     summary,
     detail,
-    canExpand: !(item.type === "error" && item.status === "failed"),
+    canExpand: !(item.type === "error" && item.status === "failed") && (readPaths?.length ?? 1) > 0,
     getFullDetail,
     getCopyText,
     icon: workEntry.toolSurface ?? itemIcon(item),
@@ -891,46 +949,38 @@ export function failedFeedRunIds(
   return failed;
 }
 
+/**
+ * A thread without runs (a provider-native subagent) folds each prompt's
+ * response like a run; `isWorking` keeps its latest response open.
+ */
 function deriveThreadFeedRunFolds(
   feed: ReadonlyArray<ThreadFeedEntry>,
   latestRun: ThreadFeedLatestRun | null,
+  isWorking: boolean,
 ): ReadonlyMap<string, ThreadFeedRunFold> {
   const firstAssistantMessageIdByRun = new Map<RunId, string>();
   const terminalAssistantMessageIdByRun = new Map<RunId, string>();
   const interruptedRunIds = new Set<RunId>();
-  for (const entry of feed) {
-    if (entry.type === "message" && entry.message.role === "assistant" && entry.message.runId) {
-      if (!firstAssistantMessageIdByRun.has(entry.message.runId)) {
-        firstAssistantMessageIdByRun.set(entry.message.runId, entry.id);
-      }
-      terminalAssistantMessageIdByRun.set(entry.message.runId, entry.id);
-    }
-    if (
-      entry.type === "activity-group" &&
-      entry.runId !== null &&
-      entry.activities.some(
-        (activity) => activity.projectedItem.item.type === "run_interrupt_result",
-      )
-    ) {
-      interruptedRunIds.add(entry.runId);
-    }
-  }
-
+  const failedRunIds = failedFeedRunIds(feed, latestRun);
   const groupsByRunId = new Map<
     RunId,
     { entries: ThreadFeedEntry[]; startBoundary: string | null }
   >();
+  // Fold state is keyed by run, so each prompt of a runless thread lends its
+  // response a stable key of its own.
+  let runlessKey: RunId | null = null;
   let pendingUserBoundary: string | null = null;
   for (const entry of feed) {
     if (entry.type === "message" && entry.message.role === "user") {
       pendingUserBoundary = entry.message.createdAt;
+      runlessKey = latestRun === null ? RunId.make(`runless:${entry.id}`) : null;
       continue;
     }
     const runId =
       entry.type === "message" && entry.message.role === "assistant"
-        ? entry.message.runId
+        ? (entry.message.runId ?? runlessKey)
         : entry.type === "activity-group"
-          ? entry.runId
+          ? (entry.runId ?? runlessKey)
           : null;
     if (!runId) continue;
     let group = groupsByRunId.get(runId);
@@ -940,14 +990,33 @@ function deriveThreadFeedRunFolds(
       groupsByRunId.set(runId, group);
     }
     group.entries.push(entry);
+    if (entry.type === "message") {
+      if (!firstAssistantMessageIdByRun.has(runId)) {
+        firstAssistantMessageIdByRun.set(runId, entry.id);
+      }
+      terminalAssistantMessageIdByRun.set(runId, entry.id);
+    }
+    if (entry.type !== "activity-group") continue;
+    for (const activity of entry.activities) {
+      const item = activity.projectedItem.item;
+      if (item.type === "run_interrupt_result") interruptedRunIds.add(runId);
+      if (
+        runId === runlessKey &&
+        item.type === "error" &&
+        item.status === "failed" &&
+        item.parentItemId === null
+      ) {
+        failedRunIds.add(runId);
+      }
+    }
   }
 
   const activeRunId = unsettledRunId(latestRun);
-  const failedRunIds = failedFeedRunIds(feed, latestRun);
   const foldsByAnchorId = new Map<string, ThreadFeedRunFold>();
   for (const [runId, group] of groupsByRunId) {
     if (
       runId === activeRunId ||
+      (isWorking && runId === runlessKey) ||
       interruptedRunIds.has(runId) ||
       failedRunIds.has(runId) ||
       group.entries.some((entry) => entry.type === "message" && entry.message.streaming)
@@ -1025,6 +1094,8 @@ export function deriveThreadFeedPresentation(
   expandedRunIds: ReadonlySet<RunId>,
   expandedWorkGroupIds: ReadonlySet<string> = new Set(),
   activeWorkStartedAt: string | null = null,
+  /** The live work is a provider-native subagent's runless root turn. */
+  runlessWorkActive = false,
 ): ThreadFeedEntry[] {
   const sourceFeed = feed.filter(
     (entry) =>
@@ -1032,9 +1103,9 @@ export function deriveThreadFeedPresentation(
   );
   const failedRunIds = failedFeedRunIds(sourceFeed, latestRun);
   const activeTailGroup = sourceFeed.at(-1);
-  const foldsByAnchorId = deriveThreadFeedRunFolds(sourceFeed, latestRun);
   const activeRunId = unsettledRunId(latestRun);
   const isWorking = activeWorkStartedAt !== null && latestRun?.status !== "preparing";
+  const foldsByAnchorId = deriveThreadFeedRunFolds(sourceFeed, latestRun, isWorking);
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorId.values()) {
     if (!expandedRunIds.has(fold.runId)) {
@@ -1043,9 +1114,11 @@ export function deriveThreadFeedPresentation(
   }
   const result: ThreadFeedEntry[] = [];
   for (const entry of sourceFeed) {
+    // A provider-native subagent works without a run: its null-run tail is
+    // live only while that runless work is active.
     const isActiveTailGroup =
       isWorking &&
-      activeRunId !== null &&
+      (activeRunId !== null || runlessWorkActive) &&
       entry.type === "activity-group" &&
       activeTailGroup?.type === "activity-group" &&
       activeTailGroup.id === entry.id &&
