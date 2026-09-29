@@ -62,6 +62,10 @@ export interface Preferences {
   readonly agentStatusLiveUpdatesEnabled?: boolean;
   /** Android only. Local alerts when an agent finishes, fails, or needs a reply. */
   readonly agentAlertsEnabled?: boolean;
+  /** iPhone only. Opens Dock mode when the phone is charging and turned sideways. */
+  readonly dockModeAutoEnterEnabled?: boolean;
+  /** Chime in Dock mode when an agent finishes or fails. On unless explicitly false. */
+  readonly dockModeSoundEnabled?: boolean;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedError<MobilePreferencesLoadError>()(
@@ -126,6 +130,8 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     agentStatusNotificationEnabled?: boolean;
     agentStatusLiveUpdatesEnabled?: boolean;
     agentAlertsEnabled?: boolean;
+    dockModeAutoEnterEnabled?: boolean;
+    dockModeSoundEnabled?: boolean;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -221,6 +227,12 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.agentAlertsEnabled === "boolean") {
     preferences.agentAlertsEnabled = parsed.agentAlertsEnabled;
+  }
+  if (typeof parsed.dockModeAutoEnterEnabled === "boolean") {
+    preferences.dockModeAutoEnterEnabled = parsed.dockModeAutoEnterEnabled;
+  }
+  if (typeof parsed.dockModeSoundEnabled === "boolean") {
+    preferences.dockModeSoundEnabled = parsed.dockModeSoundEnabled;
   }
   return preferences;
 }

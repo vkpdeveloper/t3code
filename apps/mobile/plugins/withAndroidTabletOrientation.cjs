@@ -12,18 +12,28 @@ const { withMainActivity } = require("expo/config-plugins");
 // smallestScreenWidthDp on fold/unfold without recreating the activity
 // (smallestScreenSize is in the manifest's configChanges), so the policy is
 // re-evaluated in onConfigurationChanged: unfolding past the tablet breakpoint
-// unlocks rotation, and folding back restores the portrait lock.
+// unlocks rotation, and folding back restores the portrait lock. Other config
+// changes (including rotation) leave requestedOrientation alone, so screens
+// that set their own orientation through react-native-screens keep it.
 
 const ORIENTATION_METHODS = `
   // Applied in onCreate and re-applied on fold/unfold; added by
   // withAndroidTabletOrientation.
+  private var appliedTabletOrientation: Boolean? = null
+
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     applyTabletOrientation()
   }
 
+  // Only acts when the phone/tablet class changes. Rotating also fires
+  // onConfigurationChanged, and re-locking then would undo a screen that
+  // asked for its own orientation, such as landscape Dock mode.
   private fun applyTabletOrientation() {
-    requestedOrientation = if (resources.configuration.smallestScreenWidthDp >= 600) {
+    val tablet = resources.configuration.smallestScreenWidthDp >= 600
+    if (tablet == appliedTabletOrientation) return
+    appliedTabletOrientation = tablet
+    requestedOrientation = if (tablet) {
       ActivityInfo.SCREEN_ORIENTATION_FULL_USER
     } else {
       ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

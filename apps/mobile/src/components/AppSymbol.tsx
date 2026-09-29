@@ -4,6 +4,7 @@ import type { Icon } from "@tabler/icons-react-native/types";
  * the entire Tabler icon set in Metro.
  */
 import IconAdjustmentsHorizontal from "@tabler/icons-react-native/IconAdjustmentsHorizontal";
+import IconAlarm from "@tabler/icons-react-native/IconAlarm";
 import IconAlignLeft from "@tabler/icons-react-native/IconAlignLeft";
 import IconAlertCircle from "@tabler/icons-react-native/IconAlertCircle";
 import IconAlertTriangle from "@tabler/icons-react-native/IconAlertTriangle";
@@ -107,6 +108,8 @@ import IconTypography from "@tabler/icons-react-native/IconTypography";
 import IconUpload from "@tabler/icons-react-native/IconUpload";
 import IconUserCircle from "@tabler/icons-react-native/IconUserCircle";
 import IconUsers from "@tabler/icons-react-native/IconUsers";
+import IconVolume from "@tabler/icons-react-native/IconVolume";
+import IconVolumeOff from "@tabler/icons-react-native/IconVolumeOff";
 import IconWifiOff from "@tabler/icons-react-native/IconWifiOff";
 import IconWorld from "@tabler/icons-react-native/IconWorld";
 import IconX from "@tabler/icons-react-native/IconX";
@@ -114,6 +117,7 @@ import type { AndroidSymbol, SFSymbol, SymbolViewProps } from "expo-symbols";
 import { withUniwind } from "uniwind";
 
 const ANDROID_ICON_BY_SF_SYMBOL = {
+  alarm: IconAlarm,
   "arrow.branch": IconGitBranch,
   "arrow.left": IconArrowLeft,
   "arrow.right": IconArrowRight,
@@ -213,6 +217,8 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "square.split.2x1": IconLayoutColumns,
   star: IconStar,
   "star.fill": IconStarFilled,
+  "speaker.slash.fill": IconVolumeOff,
+  "speaker.wave.2.fill": IconVolume,
   "sun.max": IconSun,
   "stop.fill": IconPlayerStopFilled,
   terminal: IconTerminal2,

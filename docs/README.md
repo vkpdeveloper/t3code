@@ -17,6 +17,7 @@
 - [Keyboard shortcuts](./user/keybindings.md)
 - [SnapShots](./user/snap-shot.md)
 - [Mobile appearance](./user/mobile-appearance.md)
+- [Mobile Dock mode](./user/mobile-dock-mode.md)
 - [Environment themes](./user/environment-theme.md)
 - [Import browser sessions](./user/browser-import.md)
 - [Devices](./user/devices.md)
