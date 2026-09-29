@@ -927,7 +927,6 @@ const RootStackConfig = createNativeStackNavigator({
           (route.params as { source?: unknown } | undefined)?.source,
         ),
         presentation: "fullScreenModal",
-        statusBarHidden: true,
       }),
     }),
     NotFound: createNativeStackScreen({

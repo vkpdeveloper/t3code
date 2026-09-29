@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { formatDockAlarmCountdown, nextDockAlarm, parseDockAlarmTimes } from "./dockAlarms";
+import {
+  formatDockAlarmCountdown,
+  formatDockTime,
+  nextDockAlarm,
+  parseDockAlarmTimes,
+} from "./dockAlarms";
 
 describe("parseDockAlarmTimes", () => {
   it("reads 24-hour, 12-hour, and ISO times from Shortcuts", () => {
@@ -50,5 +55,13 @@ describe("formatDockAlarmCountdown", () => {
     expect(formatDockAlarmCountdown(new Date(2026, 8, 30, 1, 10), now)).toBe("in 2h");
     expect(formatDockAlarmCountdown(new Date(2026, 8, 29, 23, 10, 30), now)).toBe("in 1m");
     expect(formatDockAlarmCountdown(now, now)).toBe("now");
+  });
+});
+
+describe("formatDockTime", () => {
+  it("always uses 24-hour time", () => {
+    expect(formatDockTime(new Date(2026, 8, 30, 0, 5))).toBe("00:05");
+    expect(formatDockTime(new Date(2026, 8, 30, 7, 0))).toBe("07:00");
+    expect(formatDockTime(new Date(2026, 8, 30, 23, 45))).toBe("23:45");
   });
 });

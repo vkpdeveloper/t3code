@@ -28,8 +28,6 @@ export interface DockAgentRow {
   readonly startedAtMs: number | null;
   /** Subagents of this thread that are still running. */
   readonly runningSubagents: number;
-  /** App path that opens the thread. */
-  readonly deepLink: string;
   /** When the row turned done or failed; null while the agent is active. */
   readonly finishedAtMs: number | null;
 }
@@ -44,9 +42,11 @@ export interface DockAgentsReconcileInput {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly nowMs: number;
+  /** Agents the user swiped off the dock. They never appear or chime again. */
+  readonly hiddenKeys: ReadonlySet<string>;
 }
 
-function rowKey(environmentId: EnvironmentId, threadId: string): string {
+export function dockAgentKey(environmentId: EnvironmentId, threadId: string): string {
   return `${environmentId}:${threadId}`;
 }
 
@@ -57,7 +57,7 @@ function countRunningSubagents(
   for (const thread of threads) {
     if (thread.lineage.relationshipToParent !== "subagent") continue;
     if (thread.archivedAt !== null || !threadRuntimeIsActive(thread.runtime)) continue;
-    const key = rowKey(thread.environmentId, thread.lineage.rootThreadId);
+    const key = dockAgentKey(thread.environmentId, thread.lineage.rootThreadId);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
@@ -105,8 +105,9 @@ export function reconcileDockAgents(
   }).rows;
   const subagents = countRunningSubagents(input.threads);
   const activeByKey = new Map(
-    active.map((row) => {
-      const key = rowKey(row.environmentId, row.threadId);
+    active.flatMap((row) => {
+      const key = dockAgentKey(row.environmentId, row.threadId);
+      if (input.hiddenKeys.has(key)) return [];
       const next: DockAgentRow = {
         key,
         environmentId: row.environmentId,
@@ -116,10 +117,9 @@ export function reconcileDockAgents(
         phase: row.phase,
         startedAtMs: row.startedAtMs,
         runningSubagents: subagents.get(key) ?? 0,
-        deepLink: row.deepLink,
         finishedAtMs: null,
       };
-      return [key, next] as const;
+      return [[key, next] as const];
     }),
   );
 
@@ -127,6 +127,7 @@ export function reconcileDockAgents(
   const rows: DockAgentRow[] = [];
   const finished: DockAgentRow[] = [];
   for (const row of previous) {
+    if (input.hiddenKeys.has(row.key)) continue;
     const current = activeByKey.get(row.key);
     if (current) {
       rows.push(current);
@@ -149,13 +150,25 @@ export function reconcileDockAgents(
   return { rows, finished };
 }
 
-/** Removes a finished row the user swiped away. Active agents cannot be dismissed. */
+/** Removes a row the user swiped away, running or finished. */
 export function dismissDockAgent(
   rows: ReadonlyArray<DockAgentRow>,
   key: string,
 ): ReadonlyArray<DockAgentRow> {
-  const kept = rows.filter((row) => row.key !== key || row.finishedAtMs === null);
+  const kept = rows.filter((row) => row.key !== key);
   return kept.length === rows.length ? rows : kept;
+}
+
+/** Hidden agents kept per device; the oldest are forgotten first. */
+export const DOCK_HIDDEN_AGENT_LIMIT = 500;
+
+/** Adds an agent to the persisted hidden list, newest last. */
+export function hideDockAgentKey(
+  hiddenKeys: ReadonlyArray<string>,
+  key: string,
+): ReadonlyArray<string> {
+  const next = [...hiddenKeys.filter((hidden) => hidden !== key), key];
+  return next.length > DOCK_HIDDEN_AGENT_LIMIT ? next.slice(-DOCK_HIDDEN_AGENT_LIMIT) : next;
 }
 
 /** Drops finished rows whose linger time has passed. */
@@ -203,8 +216,7 @@ export function sameDockAgentRows(
       row.projectTitle === other.projectTitle &&
       row.startedAtMs === other.startedAtMs &&
       row.runningSubagents === other.runningSubagents &&
-      row.finishedAtMs === other.finishedAtMs &&
-      row.deepLink === other.deepLink
+      row.finishedAtMs === other.finishedAtMs
     );
   });
 }

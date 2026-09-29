@@ -1,15 +1,17 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import {
-  StackActions,
-  useLinkTo,
-  useNavigation,
-  type StaticScreenProps,
-} from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { useKeepAwake } from "expo-keep-awake";
 import { useEffect, useEffectEvent, useState } from "react";
-import { AppState, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import {
+  AppState,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   FadeIn,
@@ -26,8 +28,15 @@ import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { environmentPresentations } from "../../state/presentation";
 import { dockAgentPhaseLabel, type DockAgentPhase, type DockAgentRow } from "./dockAgents";
-import { formatDockAlarmCountdown, nextDockAlarm, parseDockAlarmTimes } from "./dockAlarms";
+import {
+  formatDockAlarmCountdown,
+  formatDockTime,
+  nextDockAlarm,
+  parseDockAlarmTimes,
+} from "./dockAlarms";
+import { dockMachines, type DockMachine, type DockMachineStatus } from "./dockMachines";
 import { dockAlarmTimesAtom, suppressDockAutoEntry, useIsCharging } from "./dockMode";
 import { useDockAgents } from "./useDockAgents";
 
@@ -39,7 +48,7 @@ type DockRouteParams = {
 };
 
 const MAX_VISIBLE_AGENTS = 4;
-/** How far a finished row must be dragged, or how fast flung, to clear it. */
+/** How far a row must be dragged, or how fast flung, to hide it. */
 const SWIPE_DISMISS_DISTANCE = 96;
 const SWIPE_DISMISS_VELOCITY = 800;
 const FINISHED_SOUND = require("../../../assets/sounds/dock-agent-finished.wav");
@@ -56,26 +65,14 @@ const COLORS = {
   attention: "#F5B544",
   done: "#4CC38A",
   failed: "#F0605D",
+  offline: "#5C5C5C",
 };
 
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
   weekday: "long",
   month: "long",
   day: "numeric",
 });
-
-function formatClock(date: Date): { readonly time: string; readonly period: string | null } {
-  const parts = TIME_FORMAT.formatToParts(date);
-  return {
-    time: parts
-      .filter((part) => part.type !== "dayPeriod")
-      .map((part) => part.value)
-      .join("")
-      .trim(),
-    period: parts.find((part) => part.type === "dayPeriod")?.value ?? null,
-  };
-}
 
 function formatElapsed(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
@@ -119,7 +116,6 @@ function useMinuteClock(): Date {
 export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | undefined>) {
   useKeepAwake("dock-mode");
   const navigation = useNavigation();
-  const linkTo = useLinkTo();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
@@ -152,7 +148,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
     }).catch(() => undefined);
   }, []);
 
-  const { rows: agents, dismiss: dismissAgent } = useDockAgents(() => {
+  const { rows: agents, hide: hideAgent } = useDockAgents(() => {
     if (!soundEnabled) return;
     player.seekTo(0).catch(() => undefined);
     player.play();
@@ -182,12 +178,9 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
     if (autoEntered && wasLandscape && !landscape) closeAutomatically();
   }, [autoEntered, landscape, wasLandscape]);
 
-  const openThread = (row: DockAgentRow) => {
-    close(true);
-    if (row.deepLink) linkTo(row.deepLink);
-  };
+  const machines = dockMachines(useAtomValue(environmentPresentations.presentationsAtom));
+  const machineStatus = new Map(machines.map((machine) => [machine.environmentId, machine.status]));
 
-  const clock = formatClock(now);
   const timeSize = Math.min(height * 0.34, width * 0.16, 160);
   const visibleAgents = agents.slice(0, MAX_VISIBLE_AGENTS);
   const hiddenCount = agents.length - visibleAgents.length;
@@ -205,6 +198,10 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
         },
       ]}
     >
+      {/* React Native's StatusBar restores the app's own settings on unmount.
+          The native-stack statusBarHidden option would instead take over the
+          status bar for every screen, leaving light icons on light screens. */}
+      <StatusBar hidden />
       <View style={styles.clockPane}>
         <View style={styles.timeRow}>
           <Text
@@ -213,18 +210,15 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
             adjustsFontSizeToFit
             style={[styles.time, { fontSize: timeSize, lineHeight: timeSize * 1.05 }]}
           >
-            {clock.time}
+            {formatDockTime(now)}
           </Text>
-          {clock.period ? (
-            <Text style={[styles.period, { fontSize: timeSize * 0.22 }]}>{clock.period}</Text>
-          ) : null}
         </View>
         <Text style={styles.date}>{DATE_FORMAT.format(now)}</Text>
         {nextAlarm ? (
           <View style={styles.alarmRow}>
             <SymbolView name="alarm" size={18} tintColor={COLORS.secondary} type="monochrome" />
             <Text style={styles.alarmText}>
-              {TIME_FORMAT.format(nextAlarm)}
+              {formatDockTime(nextAlarm)}
               <Text style={styles.alarmCountdown}>
                 {"  "}
                 {formatDockAlarmCountdown(nextAlarm, now)}
@@ -232,6 +226,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
             </Text>
           </View>
         ) : null}
+        {machines.length > 0 ? <DockMachineList machines={machines} /> : null}
       </View>
 
       <View style={styles.agentsPane}>
@@ -245,9 +240,9 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
             <DockAgentRowView
               key={row.key}
               row={row}
+              machineStatus={machineStatus.get(row.environmentId) ?? "offline"}
               nowMs={now.getTime()}
-              onPress={openThread}
-              onDismiss={dismissAgent}
+              onHide={hideAgent}
             />
           ))
         )}
@@ -293,55 +288,95 @@ function DockControlButton(props: {
   );
 }
 
-function phaseAppearance(phase: DockAgentPhase): {
-  readonly color: string;
-  readonly icon: AppSymbolName | null;
-} {
+function phaseAppearance(
+  phase: DockAgentPhase,
+  machine: DockMachineStatus,
+  finished: boolean,
+): { readonly color: string; readonly icon: AppSymbolName | null; readonly label: string } {
+  // A "Working" row from a machine the dock cannot reach would be a lie.
+  if (!finished && machine !== "online") {
+    return machine === "connecting"
+      ? { color: COLORS.secondary, icon: null, label: "Connecting" }
+      : { color: COLORS.failed, icon: "wifi.slash", label: "Machine offline" };
+  }
+  const label = dockAgentPhaseLabel(phase);
   switch (phase) {
     case "starting":
     case "running":
-      return { color: COLORS.working, icon: null };
+      return { color: COLORS.working, icon: null, label };
     case "waiting_for_approval":
     case "waiting_for_input":
-      return { color: COLORS.attention, icon: "exclamationmark.circle" };
+      return { color: COLORS.attention, icon: "exclamationmark.circle", label };
     case "completed":
-      return { color: COLORS.done, icon: "checkmark.circle" };
+      return { color: COLORS.done, icon: "checkmark.circle", label };
     case "failed":
-      return { color: COLORS.failed, icon: "xmark.circle.fill" };
+      return { color: COLORS.failed, icon: "xmark.circle.fill", label };
   }
+}
+
+/** Every paired machine with a dot; anything not connected is called out. */
+function DockMachineList(props: { readonly machines: ReadonlyArray<DockMachine> }) {
+  return (
+    <View style={styles.machineList}>
+      {props.machines.map((machine) => {
+        const color =
+          machine.status === "online"
+            ? COLORS.done
+            : machine.status === "connecting"
+              ? COLORS.attention
+              : COLORS.failed;
+        return (
+          <View
+            key={machine.environmentId}
+            accessibilityLabel={`${machine.label}, ${machine.status}`}
+            style={styles.machine}
+          >
+            <View style={[styles.machineDot, { backgroundColor: color }]} />
+            <Text numberOfLines={1} style={styles.machineLabel}>
+              {machine.label}
+            </Text>
+            {machine.status === "online" ? null : (
+              <Text style={[styles.machineStatus, { color }]}>
+                {machine.status === "connecting" ? "Connecting" : "Offline"}
+              </Text>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
 }
 
 function DockAgentRowView(props: {
   readonly row: DockAgentRow;
+  readonly machineStatus: DockMachineStatus;
   readonly nowMs: number;
-  readonly onPress: (row: DockAgentRow) => void;
-  readonly onDismiss: (key: string) => void;
+  readonly onHide: (key: string) => void;
 }) {
-  const { row, onDismiss } = props;
-  const appearance = phaseAppearance(row.phase);
+  const { row, onHide } = props;
   const finished = row.finishedAtMs !== null;
+  const appearance = phaseAppearance(row.phase, props.machineStatus, finished);
 
-  // Finished rows can be swiped away in either direction; active agents stay put.
+  // Any row can be swiped away in either direction; that agent stays hidden.
   const offsetX = useSharedValue(0);
   const swipe = Gesture.Pan()
-    .enabled(finished)
     .activeOffsetX([-12, 12])
     .failOffsetY([-12, 12])
     .onUpdate((event) => {
       offsetX.set(event.translationX);
     })
     .onEnd((event) => {
-      const dismissed =
+      const hidden =
         Math.abs(event.translationX) > SWIPE_DISMISS_DISTANCE ||
         Math.abs(event.velocityX) > SWIPE_DISMISS_VELOCITY;
-      if (!dismissed) {
+      if (!hidden) {
         offsetX.set(withTiming(0, { duration: 150 }));
         return;
       }
       const direction = event.translationX + event.velocityX * 0.1 < 0 ? -1 : 1;
       offsetX.set(
         withTiming(direction * 1_000, { duration: 180 }, (done) => {
-          if (done) runOnJS(onDismiss)(row.key);
+          if (done) runOnJS(onHide)(row.key);
         }),
       );
     });
@@ -350,7 +385,7 @@ function DockAgentRowView(props: {
     transform: [{ translateX: offsetX.get() }],
   }));
   const details = [
-    row.finishedAtMs === null && row.startedAtMs !== null
+    !finished && props.machineStatus === "online" && row.startedAtMs !== null
       ? formatElapsed(props.nowMs - row.startedAtMs)
       : null,
     row.runningSubagents > 0
@@ -359,6 +394,7 @@ function DockAgentRowView(props: {
     row.projectTitle || null,
   ].filter((detail) => detail !== null);
 
+  // Rows are glanceable only: no tap target, so nothing opens a thread.
   return (
     <Animated.View
       entering={FadeIn.duration(200)}
@@ -366,39 +402,36 @@ function DockAgentRowView(props: {
       layout={LinearTransition.duration(250)}
     >
       <GestureDetector gesture={swipe}>
-        <Animated.View style={swipeStyle}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${row.threadTitle}, ${dockAgentPhaseLabel(row.phase)}`}
-            accessibilityActions={finished ? [{ name: "dismiss", label: "Clear" }] : undefined}
-            onAccessibilityAction={(event) => {
-              if (event.nativeEvent.actionName === "dismiss") onDismiss(row.key);
-            }}
-            onPress={() => props.onPress(row)}
-            style={({ pressed }) => [styles.agentRow, pressed ? styles.pressed : null]}
-          >
-            <View style={styles.agentStatusIcon}>
-              {appearance.icon ? (
-                <SymbolView
-                  name={appearance.icon}
-                  size={20}
-                  tintColor={appearance.color}
-                  type="monochrome"
-                />
-              ) : (
-                <View style={[styles.workingDot, { backgroundColor: appearance.color }]} />
-              )}
-            </View>
-            <View style={styles.agentText}>
-              <Text numberOfLines={1} style={styles.agentTitle}>
-                {row.threadTitle || "Untitled thread"}
-              </Text>
-              <Text numberOfLines={1} style={styles.agentDetail}>
-                <Text style={{ color: appearance.color }}>{dockAgentPhaseLabel(row.phase)}</Text>
-                {details.length > 0 ? ` · ${details.join(" · ")}` : ""}
-              </Text>
-            </View>
-          </Pressable>
+        <Animated.View
+          accessible
+          accessibilityLabel={`${row.threadTitle}, ${appearance.label}`}
+          accessibilityActions={[{ name: "hide", label: "Hide from Dock" }]}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === "hide") onHide(row.key);
+          }}
+          style={[styles.agentRow, swipeStyle]}
+        >
+          <View style={styles.agentStatusIcon}>
+            {appearance.icon ? (
+              <SymbolView
+                name={appearance.icon}
+                size={20}
+                tintColor={appearance.color}
+                type="monochrome"
+              />
+            ) : (
+              <View style={[styles.workingDot, { backgroundColor: appearance.color }]} />
+            )}
+          </View>
+          <View style={styles.agentText}>
+            <Text numberOfLines={1} style={styles.agentTitle}>
+              {row.threadTitle || "Untitled thread"}
+            </Text>
+            <Text numberOfLines={1} style={styles.agentDetail}>
+              <Text style={{ color: appearance.color }}>{appearance.label}</Text>
+              {details.length > 0 ? ` · ${details.join(" · ")}` : ""}
+            </Text>
+          </View>
         </Animated.View>
       </GestureDetector>
     </Animated.View>
@@ -430,10 +463,6 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     flexShrink: 1,
   },
-  period: {
-    color: COLORS.secondary,
-    fontWeight: "400",
-  },
   date: {
     color: COLORS.secondary,
     fontSize: 20,
@@ -451,6 +480,33 @@ const styles = StyleSheet.create({
   },
   alarmCountdown: {
     color: COLORS.secondary,
+  },
+  machineList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    columnGap: 16,
+    rowGap: 6,
+    marginTop: 14,
+  },
+  machine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: 240,
+  },
+  machineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  machineLabel: {
+    color: COLORS.secondary,
+    fontSize: 14,
+    flexShrink: 1,
+  },
+  machineStatus: {
+    fontSize: 14,
+    fontWeight: "600",
   },
   agentsPane: {
     flex: 1,
