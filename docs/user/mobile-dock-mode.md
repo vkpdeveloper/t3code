@@ -1,6 +1,6 @@
 # Mobile Dock mode
 
-Dock mode turns your phone into a bedside or desk display. It shows the time, the date, your next alarm, and up to four running agents, and keeps the screen on while it is open. An agent that needs approval or input stays on the list until you answer it. Finished and failed agents are marked, play a short chime, and leave the list after a few seconds. Use the speaker button in Dock mode to turn the chime on or off. The chime follows the silent switch.
+Dock mode turns your phone into a landscape bedside or desk display. It shows the time, the date, your next alarm, and up to four running agents, and keeps the screen on while it is open. An agent that needs approval or input stays on the list until you answer it. Finished and failed agents are marked, play a short chime, and leave the list after a few seconds. Use the speaker button in Dock mode to turn the chime on or off. The chime follows the silent switch.
 
 Open it from **Settings → Dock Mode → Open Dock Mode**. On iPhone, turn on **Open when charging sideways** to open Dock mode whenever the phone is charging and you turn it sideways. It closes when you unplug the phone or turn it upright. If you close Dock mode yourself, it will not reopen until the phone has been unplugged. Tap an agent to open its thread.
 

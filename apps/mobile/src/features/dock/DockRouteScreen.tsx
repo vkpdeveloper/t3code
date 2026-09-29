@@ -176,7 +176,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
   };
 
   const clock = formatClock(now);
-  const timeSize = Math.min(landscape ? height * 0.34 : width * 0.24, 160);
+  const timeSize = Math.min(height * 0.34, width * 0.16, 160);
   const visibleAgents = agents.slice(0, MAX_VISIBLE_AGENTS);
   const hiddenCount = agents.length - visibleAgents.length;
   const activeCount = agents.filter((row) => row.finishedAtMs === null).length;
@@ -185,7 +185,6 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
     <View
       style={[
         styles.root,
-        landscape ? styles.rootLandscape : styles.rootPortrait,
         {
           paddingTop: Math.max(insets.top, 20),
           paddingBottom: Math.max(insets.bottom, 20),
@@ -194,7 +193,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
         },
       ]}
     >
-      <View style={[styles.clockPane, landscape ? styles.clockPaneLandscape : null]}>
+      <View style={styles.clockPane}>
         <View style={styles.timeRow}>
           <Text
             accessibilityRole="header"
@@ -223,7 +222,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
         ) : null}
       </View>
 
-      <View style={[styles.agentsPane, landscape ? styles.agentsPaneLandscape : null]}>
+      <View style={styles.agentsPane}>
         <Text style={styles.agentsHeader}>
           {activeCount > 0 ? `${activeCount} agent${activeCount === 1 ? "" : "s"}` : "Agents"}
         </Text>
@@ -350,25 +349,18 @@ function DockAgentRowView(props: {
 }
 
 const styles = StyleSheet.create({
+  // Landscape only: clock on the left, agents stacked on the right.
   root: {
     flex: 1,
-    backgroundColor: COLORS.background,
-    gap: 24,
-  },
-  rootLandscape: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  rootPortrait: {
-    flexDirection: "column",
-    justifyContent: "center",
+    backgroundColor: COLORS.background,
+    gap: 32,
   },
   clockPane: {
+    flex: 1.2,
     justifyContent: "center",
     gap: 6,
-  },
-  clockPaneLandscape: {
-    flex: 1.35,
   },
   timeRow: {
     flexDirection: "row",
@@ -404,12 +396,12 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
   },
   agentsPane: {
-    gap: 8,
-  },
-  agentsPaneLandscape: {
     flex: 1,
     alignSelf: "stretch",
     justifyContent: "center",
+    gap: 8,
+    // Clears the sound and close buttons in the top corner.
+    paddingTop: 44,
   },
   agentsHeader: {
     color: COLORS.secondary,

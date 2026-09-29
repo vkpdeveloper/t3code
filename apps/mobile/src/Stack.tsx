@@ -109,7 +109,11 @@ import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNo
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsThreadsRouteScreen } from "./features/settings/SettingsThreadsRouteScreen";
 import { DockRouteScreen } from "./features/dock/DockRouteScreen";
-import { DOCK_AUTO_ENTRY_SUPPORTED, useDockAutoEntryArmed } from "./features/dock/dockMode";
+import {
+  dockScreenOrientation,
+  rootScreenOrientation,
+  useDockAutoEntryArmed,
+} from "./features/dock/dockMode";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
 import {
@@ -914,16 +918,17 @@ const RootStackConfig = createNativeStackNavigator({
     Dock: createNativeStackScreen({
       screen: DockRouteScreen,
       linking: "dock",
-      options: {
+      options: ({ route }) => ({
         animation: "fade",
         autoHideHomeIndicator: true,
         gestureEnabled: false,
         headerShown: false,
+        orientation: dockScreenOrientation(
+          (route.params as { source?: unknown } | undefined)?.source,
+        ),
         presentation: "fullScreenModal",
         statusBarHidden: true,
-        // iPhone screens are otherwise portrait-only; Dock mode follows the phone.
-        ...(DOCK_AUTO_ENTRY_SUPPORTED ? { orientation: "default" as const } : {}),
-      },
+      }),
     }),
     NotFound: createNativeStackScreen({
       screen: NotFoundScreen,
@@ -961,12 +966,12 @@ function ScreenRenderFallback(props: RenderFailureProps & { readonly routeName: 
 
 export const RootStack = RootStackConfig.with(function AdaptiveRootStack({ Navigator }) {
   const { width, height } = useWindowDimensions();
-  // iPhone keeps the app upright, except while Dock mode is armed: then the
-  // interface may follow the phone sideways, which is what opens Dock mode.
   const dockArmed = useDockAutoEntryArmed();
-  const phoneOrientation = DOCK_AUTO_ENTRY_SUPPORTED
-    ? { orientation: dockArmed ? ("default" as const) : ("portrait_up" as const) }
-    : {};
+  const orientation = rootScreenOrientation({
+    dockArmed,
+    smallestWindowSide: Math.min(width, height),
+  });
+  const phoneOrientation = orientation ? { orientation } : {};
   const usesWorkspaceFlowScreens =
     Platform.OS === "android" || deriveLayout({ width, height }).usesSplitView;
 
