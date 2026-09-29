@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime";
 
 import {
   DOCK_FINISHED_ROW_LINGER_MS,
+  dismissDockAgent,
   nextDockAgentExpiryMs,
   pruneFinishedDockAgents,
   reconcileDockAgents,
@@ -154,6 +155,23 @@ describe("reconcileDockAgents", () => {
 });
 
 describe("finished row lifetime", () => {
+  it("lets a finished row be swiped away but never an active one", () => {
+    const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
+    const done = reconcile(first.rows, [makeThread("b", "running")], 10_000).rows;
+
+    expect(summary(dismissDockAgent(done, "env-a:a"))).toEqual([["b", "running", null]]);
+    expect(dismissDockAgent(done, "env-a:b")).toBe(done);
+
+    // A dismissed agent that is still finished does not come back.
+    const after = reconcile(
+      dismissDockAgent(done, "env-a:a"),
+      [makeThread("b", "running")],
+      11_000,
+    );
+    expect(summary(after.rows)).toEqual([["b", "running", null]]);
+    expect(after.finished).toEqual([]);
+  });
+
   it("drops finished rows once they have lingered", () => {
     const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
     const done = reconcile(first.rows, [makeThread("b", "running")], 10_000).rows;

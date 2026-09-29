@@ -1,9 +1,10 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useState } from "react";
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentProjects } from "../../state/projects";
 import { environmentThreadShells } from "../../state/threads";
 import {
+  dismissDockAgent,
   nextDockAgentExpiryMs,
   pruneFinishedDockAgents,
   reconcileDockAgents,
@@ -25,8 +26,12 @@ function reconcileWithCurrentShells(previous: ReadonlyArray<DockAgentRow>) {
  * Live agent rows for Dock mode. Shell updates stream per token during a
  * turn, so they are debounced and only a real change re-renders the dock.
  * `onFinished` runs once per pass in which any agent finished or failed.
+ * Finished rows leave when swiped away (`dismiss`) or after they linger.
  */
-export function useDockAgents(onFinished: () => void): ReadonlyArray<DockAgentRow> {
+export function useDockAgents(onFinished: () => void): {
+  readonly rows: ReadonlyArray<DockAgentRow>;
+  readonly dismiss: (key: string) => void;
+} {
   const [rows, setRows] = useState(() => reconcileWithCurrentShells([]).rows);
 
   const reconcile = useEffectEvent(() => {
@@ -65,6 +70,10 @@ export function useDockAgents(onFinished: () => void): ReadonlyArray<DockAgentRo
     };
   }, []);
 
+  const dismiss = useCallback((key: string) => {
+    setRows((current) => dismissDockAgent(current, key));
+  }, []);
+
   // Removing a finished row is what triggers its slide-out.
   useEffect(() => {
     const expiry = nextDockAgentExpiryMs(rows);
@@ -73,5 +82,5 @@ export function useDockAgents(onFinished: () => void): ReadonlyArray<DockAgentRo
     return () => clearTimeout(timer);
   }, [rows]);
 
-  return rows;
+  return { rows, dismiss };
 }

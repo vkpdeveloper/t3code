@@ -10,7 +10,16 @@ import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { useKeepAwake } from "expo-keep-awake";
 import { useEffect, useEffectEvent, useState } from "react";
 import { AppState, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import Animated, { FadeIn, LinearTransition, SlideOutRight } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  FadeIn,
+  LinearTransition,
+  SlideOutRight,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
@@ -30,6 +39,9 @@ type DockRouteParams = {
 };
 
 const MAX_VISIBLE_AGENTS = 4;
+/** How far a finished row must be dragged, or how fast flung, to clear it. */
+const SWIPE_DISMISS_DISTANCE = 96;
+const SWIPE_DISMISS_VELOCITY = 800;
 const FINISHED_SOUND = require("../../../assets/sounds/dock-agent-finished.wav");
 
 // Dock mode is a nightstand surface, so it keeps its own dim dark look
@@ -140,7 +152,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
     }).catch(() => undefined);
   }, []);
 
-  const agents = useDockAgents(() => {
+  const { rows: agents, dismiss: dismissAgent } = useDockAgents(() => {
     if (!soundEnabled) return;
     player.seekTo(0).catch(() => undefined);
     player.play();
@@ -230,7 +242,13 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
           <Text style={styles.emptyText}>No agents running</Text>
         ) : (
           visibleAgents.map((row) => (
-            <DockAgentRowView key={row.key} row={row} nowMs={now.getTime()} onPress={openThread} />
+            <DockAgentRowView
+              key={row.key}
+              row={row}
+              nowMs={now.getTime()}
+              onPress={openThread}
+              onDismiss={dismissAgent}
+            />
           ))
         )}
         {hiddenCount > 0 ? <Text style={styles.moreText}>+{hiddenCount} more</Text> : null}
@@ -297,9 +315,40 @@ function DockAgentRowView(props: {
   readonly row: DockAgentRow;
   readonly nowMs: number;
   readonly onPress: (row: DockAgentRow) => void;
+  readonly onDismiss: (key: string) => void;
 }) {
-  const { row } = props;
+  const { row, onDismiss } = props;
   const appearance = phaseAppearance(row.phase);
+  const finished = row.finishedAtMs !== null;
+
+  // Finished rows can be swiped away in either direction; active agents stay put.
+  const offsetX = useSharedValue(0);
+  const swipe = Gesture.Pan()
+    .enabled(finished)
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-12, 12])
+    .onUpdate((event) => {
+      offsetX.set(event.translationX);
+    })
+    .onEnd((event) => {
+      const dismissed =
+        Math.abs(event.translationX) > SWIPE_DISMISS_DISTANCE ||
+        Math.abs(event.velocityX) > SWIPE_DISMISS_VELOCITY;
+      if (!dismissed) {
+        offsetX.set(withTiming(0, { duration: 150 }));
+        return;
+      }
+      const direction = event.translationX + event.velocityX * 0.1 < 0 ? -1 : 1;
+      offsetX.set(
+        withTiming(direction * 1_000, { duration: 180 }, (done) => {
+          if (done) runOnJS(onDismiss)(row.key);
+        }),
+      );
+    });
+  const swipeStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(Math.abs(offsetX.get()) / 400, 0.7),
+    transform: [{ translateX: offsetX.get() }],
+  }));
   const details = [
     row.finishedAtMs === null && row.startedAtMs !== null
       ? formatElapsed(props.nowMs - row.startedAtMs)
@@ -316,34 +365,42 @@ function DockAgentRowView(props: {
       exiting={SlideOutRight.duration(350)}
       layout={LinearTransition.duration(250)}
     >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${row.threadTitle}, ${dockAgentPhaseLabel(row.phase)}`}
-        onPress={() => props.onPress(row)}
-        style={({ pressed }) => [styles.agentRow, pressed ? styles.pressed : null]}
-      >
-        <View style={styles.agentStatusIcon}>
-          {appearance.icon ? (
-            <SymbolView
-              name={appearance.icon}
-              size={20}
-              tintColor={appearance.color}
-              type="monochrome"
-            />
-          ) : (
-            <View style={[styles.workingDot, { backgroundColor: appearance.color }]} />
-          )}
-        </View>
-        <View style={styles.agentText}>
-          <Text numberOfLines={1} style={styles.agentTitle}>
-            {row.threadTitle || "Untitled thread"}
-          </Text>
-          <Text numberOfLines={1} style={styles.agentDetail}>
-            <Text style={{ color: appearance.color }}>{dockAgentPhaseLabel(row.phase)}</Text>
-            {details.length > 0 ? ` · ${details.join(" · ")}` : ""}
-          </Text>
-        </View>
-      </Pressable>
+      <GestureDetector gesture={swipe}>
+        <Animated.View style={swipeStyle}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${row.threadTitle}, ${dockAgentPhaseLabel(row.phase)}`}
+            accessibilityActions={finished ? [{ name: "dismiss", label: "Clear" }] : undefined}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === "dismiss") onDismiss(row.key);
+            }}
+            onPress={() => props.onPress(row)}
+            style={({ pressed }) => [styles.agentRow, pressed ? styles.pressed : null]}
+          >
+            <View style={styles.agentStatusIcon}>
+              {appearance.icon ? (
+                <SymbolView
+                  name={appearance.icon}
+                  size={20}
+                  tintColor={appearance.color}
+                  type="monochrome"
+                />
+              ) : (
+                <View style={[styles.workingDot, { backgroundColor: appearance.color }]} />
+              )}
+            </View>
+            <View style={styles.agentText}>
+              <Text numberOfLines={1} style={styles.agentTitle}>
+                {row.threadTitle || "Untitled thread"}
+              </Text>
+              <Text numberOfLines={1} style={styles.agentDetail}>
+                <Text style={{ color: appearance.color }}>{dockAgentPhaseLabel(row.phase)}</Text>
+                {details.length > 0 ? ` · ${details.join(" · ")}` : ""}
+              </Text>
+            </View>
+          </Pressable>
+        </Animated.View>
+      </GestureDetector>
     </Animated.View>
   );
 }

@@ -34,8 +34,11 @@ export interface DockAgentRow {
   readonly finishedAtMs: number | null;
 }
 
-/** How long a finished row stays on the dock before it slides away. */
-export const DOCK_FINISHED_ROW_LINGER_MS = 4_000;
+/**
+ * How long a finished row stays on the dock if nobody swipes it away, long
+ * enough to notice on a glance across the room.
+ */
+export const DOCK_FINISHED_ROW_LINGER_MS = 60_000;
 
 export interface DockAgentsReconcileInput {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
@@ -144,6 +147,15 @@ export function reconcileDockAgents(
   }
   rows.push(...activeByKey.values());
   return { rows, finished };
+}
+
+/** Removes a finished row the user swiped away. Active agents cannot be dismissed. */
+export function dismissDockAgent(
+  rows: ReadonlyArray<DockAgentRow>,
+  key: string,
+): ReadonlyArray<DockAgentRow> {
+  const kept = rows.filter((row) => row.key !== key || row.finishedAtMs === null);
+  return kept.length === rows.length ? rows : kept;
 }
 
 /** Drops finished rows whose linger time has passed. */
