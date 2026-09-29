@@ -2475,6 +2475,7 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
 
 interface ActiveClaudeTurnContext {
   readonly input: ProviderAdapterV2TurnInput;
+  readonly settled: Deferred.Deferred<void>;
   readonly nativeTurnId: string;
   nativeMessageCursor: string | null;
   readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
@@ -4545,6 +4546,7 @@ export function makeClaudeAdapterV2(
             next.delete(input.context.providerTurnId);
             return next;
           });
+          yield* Deferred.succeed(input.context.settled, undefined);
         });
 
         const emitAssistantTextArtifacts = Effect.fnUntraced(function* (input: {
@@ -6393,6 +6395,7 @@ export function makeClaudeAdapterV2(
             yield* rememberProviderThread(turnInput.providerThread);
             const context: ActiveClaudeTurnContext = {
               input: turnInput,
+              settled: Deferred.makeUnsafe<void>(),
               nativeTurnId,
               nativeMessageCursor: null,
               providerTurnId,
@@ -6577,7 +6580,14 @@ export function makeClaudeAdapterV2(
               next.add(turnInput.providerTurnId);
               return next;
             });
-            yield* existing.query.interrupt;
+            // Give Claude a chance to persist the aborted turn before closing
+            // its query. A forced close on the first turn can strand a resume
+            // cursor for a conversation that Claude never saved.
+            yield* existing.query.interrupt.pipe(
+              Effect.ignore,
+              Effect.andThen(Deferred.await(currentTurn.settled)),
+              Effect.timeoutOption("3 seconds"),
+            );
             yield* existing.query.close.pipe(Effect.ignore);
             const closed = yield* Deferred.await(existing.closed).pipe(
               Effect.timeoutOption("10 seconds"),

@@ -43,6 +43,7 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/unstable/ai";
 import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeCompaction";
 
@@ -4764,6 +4765,56 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("lets Claude settle an interrupted turn before closing its query", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const interruptStarted = yield* Deferred.make<void>();
+        let closeCalls = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          interrupt: Deferred.succeed(interruptStarted, undefined),
+          close: (messages) =>
+            Effect.sync(() => {
+              closeCalls++;
+            }).pipe(Effect.andThen(Queue.shutdown(messages))),
+        });
+        const idAllocator = yield* IdAllocatorV2;
+        const attemptId = RunAttemptId.make("attempt-claude-graceful-interrupt");
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: CLAUDE_PROVIDER,
+          nativeTurnId: `turn:${attemptId}`,
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId,
+            text: "Stop after saving this turn.",
+            attachments: [],
+          }),
+        );
+        const stop = yield* harness.runtime
+          .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(interruptStarted);
+        assert.equal(closeCalls, 0);
+
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000117",
+            result: "Request was aborted.",
+            terminalReason: "aborted_streaming",
+          }),
+        );
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        yield* Fiber.join(stop);
+        assert.equal(closeCalls, 1);
+        assert.equal(terminal.status, "interrupted");
+      }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+    ),
+  );
+
   it.effect(
     "emits one interrupted terminal for a positive task-notification result racing interrupt",
     () =>
@@ -4869,6 +4920,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         let debrisYields = 0;
         yield* awaitUntil(() => debrisYields++ >= 50, "zero-turn debris consumed");
+        yield* TestClock.adjust("3 seconds");
         yield* Deferred.succeed(closeGate, undefined);
         yield* awaitUntil(() => harness.terminalEvents().length === 1, "interrupted terminal");
         assert.lengthOf(harness.terminalEvents(), 1);
