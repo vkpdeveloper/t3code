@@ -26,6 +26,7 @@ import {
   supportsAndroidLiveUpdateSettings,
 } from "../agent-awareness/androidNotifications";
 import { AgentStatusSettingsSection } from "../agent-status/AgentStatusSettingsSection";
+import { DockModeSettingsSection } from "../dock/DockModeSettingsSection";
 import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
@@ -145,6 +146,8 @@ function LocalSettingsRouteScreen() {
         </SettingsSection>
 
         <AgentStatusSettingsSection />
+
+        <DockModeSettingsSection />
 
         <GeneralSettingsSection />
 
@@ -593,6 +596,8 @@ function ConfiguredSettingsRouteScreen() {
         </SettingsSection>
 
         <AgentStatusSettingsSection />
+
+        <DockModeSettingsSection />
 
         <GeneralSettingsSection />
 

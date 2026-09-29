@@ -266,6 +266,14 @@ const config: ExpoConfig = {
         "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
       NSPhotoLibraryAddUsageDescription: "Allow T3 Code to save images to your photo library.",
       ITSAppUsesNonExemptEncryption: false,
+      // iPhone screens stay portrait through the root stack's per-screen
+      // orientation; landscape is declared so Dock mode can follow the phone
+      // sideways. This replaces the iOS half of `orientation` above.
+      UISupportedInterfaceOrientations: [
+        "UIInterfaceOrientationPortrait",
+        "UIInterfaceOrientationLandscapeLeft",
+        "UIInterfaceOrientationLandscapeRight",
+      ],
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
       // Simulator menu scripting needs), and iPadOS ignores programmatic

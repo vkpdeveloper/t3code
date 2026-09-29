@@ -108,6 +108,8 @@ import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRoute
 import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsThreadsRouteScreen } from "./features/settings/SettingsThreadsRouteScreen";
+import { DockRouteScreen } from "./features/dock/DockRouteScreen";
+import { DOCK_AUTO_ENTRY_SUPPORTED, useDockAutoEntryArmed } from "./features/dock/dockMode";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
 import {
@@ -533,6 +535,7 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "ConnectOnboarding",
   "Connections",
   "ConnectionsNew",
+  "Dock",
   "GitBranches",
   "GitCommit",
   "GitConfirm",
@@ -568,6 +571,26 @@ function workspaceLocationFromState(state: NavigationState) {
 // connection statuses. Hosting it in a null-rendering leaf keeps those
 // updates from re-rendering RootStackLayout (and with it every screen) on
 // each enqueue, shell change, or reconnect.
+/**
+ * Opens Dock mode when the phone is turned sideways while armed. The root
+ * stack only allows landscape while armed, so a landscape window here means
+ * the phone itself is sideways.
+ */
+function DockAutoEntryWorker(props: { readonly topRouteName: string | undefined }) {
+  const navigation = useNavigation();
+  const armed = useDockAutoEntryArmed();
+  const { width, height } = useWindowDimensions();
+  const landscape = width > height;
+
+  useEffect(() => {
+    if (armed && landscape && props.topRouteName !== "Dock") {
+      navigation.navigate("Dock", { source: "auto" });
+    }
+  }, [armed, landscape, navigation, props.topRouteName]);
+
+  return null;
+}
+
 function ThreadOutboxDrainWorker() {
   useThreadOutboxDrain();
   useComposerAttachmentUploadWorker();
@@ -612,6 +635,7 @@ function RootStackLayout(props: {
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
       <ThreadOutboxDrainWorker />
+      <DockAutoEntryWorker topRouteName={props.state.routes[props.state.index]?.name} />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ExistingThreadSettingsRouteProvider>
         <AdaptiveWorkspaceLayout
@@ -887,6 +911,20 @@ const RootStackConfig = createNativeStackNavigator({
         headerShown: false,
       },
     }),
+    Dock: createNativeStackScreen({
+      screen: DockRouteScreen,
+      linking: "dock",
+      options: {
+        animation: "fade",
+        autoHideHomeIndicator: true,
+        gestureEnabled: false,
+        headerShown: false,
+        presentation: "fullScreenModal",
+        statusBarHidden: true,
+        // iPhone screens are otherwise portrait-only; Dock mode follows the phone.
+        ...(DOCK_AUTO_ENTRY_SUPPORTED ? { orientation: "default" as const } : {}),
+      },
+    }),
     NotFound: createNativeStackScreen({
       screen: NotFoundScreen,
       linking: "*",
@@ -923,6 +961,12 @@ function ScreenRenderFallback(props: RenderFailureProps & { readonly routeName: 
 
 export const RootStack = RootStackConfig.with(function AdaptiveRootStack({ Navigator }) {
   const { width, height } = useWindowDimensions();
+  // iPhone keeps the app upright, except while Dock mode is armed: then the
+  // interface may follow the phone sideways, which is what opens Dock mode.
+  const dockArmed = useDockAutoEntryArmed();
+  const phoneOrientation = DOCK_AUTO_ENTRY_SUPPORTED
+    ? { orientation: dockArmed ? ("default" as const) : ("portrait_up" as const) }
+    : {};
   const usesWorkspaceFlowScreens =
     Platform.OS === "android" || deriveLayout({ width, height }).usesSplitView;
 
@@ -931,13 +975,14 @@ export const RootStack = RootStackConfig.with(function AdaptiveRootStack({ Navig
       screenLayout={GuardedScreenLayout}
       screenOptions={({ route }) => {
         if (route.name !== "SettingsSheet" && route.name !== "NewTaskSheet") {
-          return {};
+          return phoneOrientation;
         }
 
         // Follow the workspace viewport as it resizes; compact iOS keeps sheets.
         return usesWorkspaceFlowScreens
-          ? { presentation: "card" }
+          ? { ...phoneOrientation, presentation: "card" }
           : {
+              ...phoneOrientation,
               ...FORM_SHEET_PRESENTATION_OPTIONS,
               sheetAllowedDetents: [0.92],
               sheetGrabberVisible: true,
