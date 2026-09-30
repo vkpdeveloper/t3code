@@ -65,7 +65,6 @@ const COLORS = {
   attention: "#F5B544",
   done: "#4CC38A",
   failed: "#F0605D",
-  offline: "#5C5C5C",
 };
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
@@ -180,6 +179,8 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
 
   const machines = dockMachines(useAtomValue(environmentPresentations.presentationsAtom));
   const machineStatus = new Map(machines.map((machine) => [machine.environmentId, machine.status]));
+  // Only trouble earns space on the dock: connected machines are not listed.
+  const offlineMachines = machines.filter((machine) => machine.status === "offline");
 
   const timeSize = Math.min(height * 0.34, width * 0.16, 160);
   const visibleAgents = agents.slice(0, MAX_VISIBLE_AGENTS);
@@ -226,7 +227,7 @@ export function DockRouteScreen({ route }: StaticScreenProps<DockRouteParams | u
             </Text>
           </View>
         ) : null}
-        {machines.length > 0 ? <DockMachineList machines={machines} /> : null}
+        {offlineMachines.length > 0 ? <DockMachineList machines={offlineMachines} /> : null}
       </View>
 
       <View style={styles.agentsPane}>
@@ -314,35 +315,23 @@ function phaseAppearance(
   }
 }
 
-/** Every paired machine with a dot; anything not connected is called out. */
+/** Machines the dock cannot reach, each with a red dot and "Offline". */
 function DockMachineList(props: { readonly machines: ReadonlyArray<DockMachine> }) {
   return (
     <View style={styles.machineList}>
-      {props.machines.map((machine) => {
-        const color =
-          machine.status === "online"
-            ? COLORS.done
-            : machine.status === "connecting"
-              ? COLORS.attention
-              : COLORS.failed;
-        return (
-          <View
-            key={machine.environmentId}
-            accessibilityLabel={`${machine.label}, ${machine.status}`}
-            style={styles.machine}
-          >
-            <View style={[styles.machineDot, { backgroundColor: color }]} />
-            <Text numberOfLines={1} style={styles.machineLabel}>
-              {machine.label}
-            </Text>
-            {machine.status === "online" ? null : (
-              <Text style={[styles.machineStatus, { color }]}>
-                {machine.status === "connecting" ? "Connecting" : "Offline"}
-              </Text>
-            )}
-          </View>
-        );
-      })}
+      {props.machines.map((machine) => (
+        <View
+          key={machine.environmentId}
+          accessibilityLabel={`${machine.label}, offline`}
+          style={styles.machine}
+        >
+          <View style={[styles.machineDot, { backgroundColor: COLORS.failed }]} />
+          <Text numberOfLines={1} style={styles.machineLabel}>
+            {machine.label}
+          </Text>
+          <Text style={[styles.machineStatus, { color: COLORS.failed }]}>Offline</Text>
+        </View>
+      ))}
     </View>
   );
 }

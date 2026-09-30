@@ -28,7 +28,7 @@ type Fixture = "running" | "input" | "completed" | "failed" | "interrupted";
 function makeThread(
   threadId: string,
   fixture: Fixture,
-  options: { readonly subagentOf?: string } = {},
+  options: { readonly subagentOf?: string; readonly settled?: boolean } = {},
 ): EnvironmentThreadShell {
   const active = fixture === "running" || fixture === "input";
   const lineage = options.subagentOf
@@ -44,6 +44,7 @@ function makeThread(
     projectId: PROJECT_ID,
     title: `Task ${threadId}`,
     archivedAt: null,
+    settledOverride: options.settled ? "settled" : null,
     lineage,
     runtime: active ? { status: "running", activeRunId: `run:${threadId}` } : null,
     pendingBackgroundTasks: [],
@@ -202,6 +203,37 @@ describe("hiding agents", () => {
     expect(next).toHaveLength(DOCK_HIDDEN_AGENT_LIMIT);
     expect(next[0]).toBe("k1");
     expect(next.at(-1)).toBe("new");
+  });
+});
+
+describe("settled threads", () => {
+  it("never lists a settled thread, even while it runs", () => {
+    const { rows } = reconcile(
+      [],
+      [makeThread("a", "running", { settled: true }), makeThread("b", "input", { settled: true })],
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("drops a row silently when its thread is settled, and brings it back when unsettled", () => {
+    const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
+    const settled = reconcile(
+      first.rows,
+      [makeThread("a", "running", { settled: true }), makeThread("b", "running")],
+      2_000,
+    );
+    expect(summary(settled.rows)).toEqual([["b", "running", null]]);
+    expect(settled.finished).toEqual([]);
+
+    const unsettled = reconcile(
+      settled.rows,
+      [makeThread("a", "running"), makeThread("b", "running")],
+      3_000,
+    );
+    expect(summary(unsettled.rows)).toEqual([
+      ["b", "running", null],
+      ["a", "running", null],
+    ]);
   });
 });
 
