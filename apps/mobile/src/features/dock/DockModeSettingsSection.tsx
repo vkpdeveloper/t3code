@@ -52,8 +52,8 @@ export function DockModeSettingsSection() {
         ) : null}
       </SettingsSection>
       <Text className="px-2 text-sm text-foreground-muted">
-        Keeps the screen on and shows the time, your next alarm, your machines, and running agents.
-        Swipe an agent off the dock to hide it for good.
+        Keeps the screen on and shows the time, your next alarm, offline machines, and running
+        agents. Swipe an agent off the dock to hide it for good.
       </Text>
     </View>
   );

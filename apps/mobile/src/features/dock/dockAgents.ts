@@ -104,10 +104,18 @@ export function reconcileDockAgents(
     environmentLabels: new Map(),
   }).rows;
   const subagents = countRunningSubagents(input.threads);
+  // Settled threads are history, even with work still running inside them.
+  // Unlike a swipe this is not permanent: unsettling brings the row back.
+  const excluded = new Set(input.hiddenKeys);
+  for (const thread of input.threads) {
+    if (thread.settledOverride === "settled") {
+      excluded.add(dockAgentKey(thread.environmentId, thread.id));
+    }
+  }
   const activeByKey = new Map(
     active.flatMap((row) => {
       const key = dockAgentKey(row.environmentId, row.threadId);
-      if (input.hiddenKeys.has(key)) return [];
+      if (excluded.has(key)) return [];
       const next: DockAgentRow = {
         key,
         environmentId: row.environmentId,
@@ -127,7 +135,7 @@ export function reconcileDockAgents(
   const rows: DockAgentRow[] = [];
   const finished: DockAgentRow[] = [];
   for (const row of previous) {
-    if (input.hiddenKeys.has(row.key)) continue;
+    if (excluded.has(row.key)) continue;
     const current = activeByKey.get(row.key);
     if (current) {
       rows.push(current);
