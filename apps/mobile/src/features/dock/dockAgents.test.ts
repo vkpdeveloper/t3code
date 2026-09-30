@@ -8,7 +8,9 @@ import * as DateTime from "effect/DateTime";
 
 import {
   DOCK_FINISHED_ROW_LINGER_MS,
+  DOCK_HIDDEN_AGENT_LIMIT,
   dismissDockAgent,
+  hideDockAgentKey,
   nextDockAgentExpiryMs,
   pruneFinishedDockAgents,
   reconcileDockAgents,
@@ -26,7 +28,7 @@ type Fixture = "running" | "input" | "completed" | "failed" | "interrupted";
 function makeThread(
   threadId: string,
   fixture: Fixture,
-  options: { readonly subagentOf?: string } = {},
+  options: { readonly subagentOf?: string; readonly settled?: boolean } = {},
 ): EnvironmentThreadShell {
   const active = fixture === "running" || fixture === "input";
   const lineage = options.subagentOf
@@ -42,6 +44,7 @@ function makeThread(
     projectId: PROJECT_ID,
     title: `Task ${threadId}`,
     archivedAt: null,
+    settledOverride: options.settled ? "settled" : null,
     lineage,
     runtime: active ? { status: "running", activeRunId: `run:${threadId}` } : null,
     pendingBackgroundTasks: [],
@@ -72,8 +75,14 @@ function reconcile(
   previous: ReadonlyArray<DockAgentRow>,
   threads: ReadonlyArray<EnvironmentThreadShell>,
   nowMs = 1_000,
+  hiddenKeys: ReadonlyArray<string> = [],
 ) {
-  return reconcileDockAgents(previous, { threads, projects: PROJECTS, nowMs });
+  return reconcileDockAgents(previous, {
+    threads,
+    projects: PROJECTS,
+    nowMs,
+    hiddenKeys: new Set(hiddenKeys),
+  });
 }
 
 function summary(rows: ReadonlyArray<DockAgentRow>) {
@@ -93,7 +102,6 @@ describe("reconcileDockAgents", () => {
       ["a", "running", null],
     ]);
     expect(rows[1]?.projectTitle).toBe("t3code");
-    expect(rows[1]?.deepLink).toBe("/threads/env-a/a");
     expect(finished).toEqual([]);
   });
 
@@ -154,24 +162,82 @@ describe("reconcileDockAgents", () => {
   });
 });
 
-describe("finished row lifetime", () => {
-  it("lets a finished row be swiped away but never an active one", () => {
+describe("hiding agents", () => {
+  it("removes a swiped row whether it is running or finished", () => {
     const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
     const done = reconcile(first.rows, [makeThread("b", "running")], 10_000).rows;
 
     expect(summary(dismissDockAgent(done, "env-a:a"))).toEqual([["b", "running", null]]);
-    expect(dismissDockAgent(done, "env-a:b")).toBe(done);
-
-    // A dismissed agent that is still finished does not come back.
-    const after = reconcile(
-      dismissDockAgent(done, "env-a:a"),
-      [makeThread("b", "running")],
-      11_000,
-    );
-    expect(summary(after.rows)).toEqual([["b", "running", null]]);
-    expect(after.finished).toEqual([]);
+    expect(summary(dismissDockAgent(done, "env-a:b"))).toEqual([["a", "completed", 10_000]]);
+    expect(dismissDockAgent(done, "env-a:missing")).toBe(done);
   });
 
+  it("never shows or chimes for a hidden agent again", () => {
+    const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
+
+    // Hidden while running: gone now, silent when it finishes, absent when it runs again.
+    const hidden = ["env-a:a"];
+    const finishing = reconcile(
+      first.rows,
+      [makeThread("a", "completed"), makeThread("b", "running")],
+      2_000,
+      hidden,
+    );
+    expect(summary(finishing.rows)).toEqual([["b", "running", null]]);
+    expect(finishing.finished).toEqual([]);
+
+    const again = reconcile(
+      finishing.rows,
+      [makeThread("a", "running"), makeThread("b", "running")],
+      3_000,
+      hidden,
+    );
+    expect(summary(again.rows)).toEqual([["b", "running", null]]);
+  });
+
+  it("keeps the hidden list unique, newest last, and bounded", () => {
+    expect(hideDockAgentKey(["x", "y"], "x")).toEqual(["y", "x"]);
+
+    const full = Array.from({ length: DOCK_HIDDEN_AGENT_LIMIT }, (_, index) => `k${index}`);
+    const next = hideDockAgentKey(full, "new");
+    expect(next).toHaveLength(DOCK_HIDDEN_AGENT_LIMIT);
+    expect(next[0]).toBe("k1");
+    expect(next.at(-1)).toBe("new");
+  });
+});
+
+describe("settled threads", () => {
+  it("never lists a settled thread, even while it runs", () => {
+    const { rows } = reconcile(
+      [],
+      [makeThread("a", "running", { settled: true }), makeThread("b", "input", { settled: true })],
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("drops a row silently when its thread is settled, and brings it back when unsettled", () => {
+    const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
+    const settled = reconcile(
+      first.rows,
+      [makeThread("a", "running", { settled: true }), makeThread("b", "running")],
+      2_000,
+    );
+    expect(summary(settled.rows)).toEqual([["b", "running", null]]);
+    expect(settled.finished).toEqual([]);
+
+    const unsettled = reconcile(
+      settled.rows,
+      [makeThread("a", "running"), makeThread("b", "running")],
+      3_000,
+    );
+    expect(summary(unsettled.rows)).toEqual([
+      ["b", "running", null],
+      ["a", "running", null],
+    ]);
+  });
+});
+
+describe("finished row lifetime", () => {
   it("drops finished rows once they have lingered", () => {
     const first = reconcile([], [makeThread("a", "running"), makeThread("b", "running")]);
     const done = reconcile(first.rows, [makeThread("b", "running")], 10_000).rows;

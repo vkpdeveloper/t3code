@@ -73,3 +73,8 @@ export function formatDockAlarmCountdown(alarm: Date, now: Date): string {
   if (hours === 0) return `in ${minutes}m`;
   return minutes === 0 ? `in ${hours}h` : `in ${hours}h ${minutes}m`;
 }
+
+/** Dock mode always shows 24-hour time ("07:05", "23:40"), whatever the locale. */
+export function formatDockTime(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}

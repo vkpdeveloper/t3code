@@ -66,6 +66,8 @@ export interface Preferences {
   readonly dockModeAutoEnterEnabled?: boolean;
   /** Chime in Dock mode when an agent finishes or fails. On unless explicitly false. */
   readonly dockModeSoundEnabled?: boolean;
+  /** `environmentId:threadId` keys swiped off Dock mode, newest last. */
+  readonly dockHiddenAgentKeys?: ReadonlyArray<string>;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedError<MobilePreferencesLoadError>()(
@@ -132,6 +134,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     agentAlertsEnabled?: boolean;
     dockModeAutoEnterEnabled?: boolean;
     dockModeSoundEnabled?: boolean;
+    dockHiddenAgentKeys?: ReadonlyArray<string>;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -233,6 +236,11 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.dockModeSoundEnabled === "boolean") {
     preferences.dockModeSoundEnabled = parsed.dockModeSoundEnabled;
+  }
+  if (Array.isArray(parsed.dockHiddenAgentKeys)) {
+    preferences.dockHiddenAgentKeys = parsed.dockHiddenAgentKeys.filter(
+      (key): key is string => typeof key === "string",
+    );
   }
   return preferences;
 }

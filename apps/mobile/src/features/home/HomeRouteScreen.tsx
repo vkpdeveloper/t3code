@@ -167,7 +167,10 @@ export function HomeRouteScreen() {
       <>
         {/* Restore the header after leaving split view; screen options are
             shallow-merged. The brand slot also doubles as the connection
-            status surface while an environment reconnects. */}
+            status surface while an environment reconnects. Android draws its
+            own toolbar in HomeHeader, and these options reapply on every
+            width change (rotation, folding), so they must not reveal the
+            native bar there. */}
         <NativeStackScreenOptions
           optionsVersion={windowWidth}
           options={{
@@ -179,7 +182,7 @@ export function HomeRouteScreen() {
                   params: { screen: "SettingsEnvironments" },
                 }),
             }),
-            headerShown: true,
+            headerShown: Platform.OS !== "android",
           }}
         />
         <HomeHeader
