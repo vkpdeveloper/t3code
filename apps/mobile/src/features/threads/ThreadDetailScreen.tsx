@@ -29,6 +29,7 @@ import {
   type CodexArtifactTemplate,
 } from "@t3tools/client-runtime/codex-artifact-templates";
 import type { ThreadUserInputQuestion } from "@t3tools/client-runtime/state/thread-requests";
+import { presentPendingBackgroundWork } from "@t3tools/client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
 import {
   formatModelSelectionEffort,
@@ -61,6 +62,7 @@ import {
   useWindowDimensions,
   View,
   type GestureResponderEvent,
+  type ViewInstance,
 } from "react-native";
 import {
   KeyboardController,
@@ -382,7 +384,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   }, [editingRunId]);
   const draftMessageRef = useRef(props.draftMessage);
   draftMessageRef.current = props.draftMessage;
-  const composerOverlayRef = useRef<View>(null);
+  const composerOverlayRef = useRef<ViewInstance>(null);
   const usageLimitResume = props.selectedThread.usageLimitResume ?? null;
   const [isCancellingUsageLimitResume, setIsCancellingUsageLimitResume] = useState(false);
   useEffect(() => {
@@ -440,6 +442,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   // One floating pill above the composer: it reads the connection phase while
   // disconnected, the sync state while messages load, then the working timer
   // once the feed is settled.
+  // The shell's roster is the server's post-settlement view of what still runs.
+  const pendingBackgroundWork = presentPendingBackgroundWork(
+    props.selectedThread.pendingBackgroundTasks,
+  );
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
       connectionError: props.connectionError,
@@ -472,6 +478,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     }
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return { kind: "working", startedAt: props.activeWorkStartedAt };
+    }
+    if (pendingBackgroundWork !== null && contentPresentationKind === "ready") {
+      return {
+        kind: "waiting",
+        label: pendingBackgroundWork.title,
+        accessibilityLabel: `${pendingBackgroundWork.title}: ${pendingBackgroundWork.items
+          .map((item) => item.label)
+          .join(", ")}`,
+      };
     }
     return null;
   })();

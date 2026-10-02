@@ -57,6 +57,13 @@ client carries the return URL back to the environment because the provider's loo
 be on another machine. A successful callback HTTP request is not proof that authentication
 finished. The native process owns token exchange and storage.
 
+Managed ChatGPT sign-in for a remote environment can finish on a local primary. The
+[primary handoff](../../apps/server/src/provider/CodexChatGptHandoff.ts) uses an ephemeral
+credential store and the destination's environment ID. It exchanges and verifies the code before
+transferring the issued client registration and tokens. Only the destination persists and refreshes
+that session; retaining a primary refresh session would race refresh-token rotation. Without a local
+primary, the client uses the remote callback completion flow.
+
 Sign-out closes admission to new processes and stops existing processes before clearing account
 metadata. Cached model lists do not establish current access, and an authoritative empty catalog
 must clear the old list.

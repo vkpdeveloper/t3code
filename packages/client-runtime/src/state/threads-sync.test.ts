@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   ORCHESTRATION_V2_WS_METHODS,
   ThreadId,
   TurnItemId,
@@ -36,17 +37,14 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { v2Projection, v2ThreadId } from "./orchestrationV2TestFixtures.ts";
-import {
-  ThreadHistoryController,
-  threadHistoryControllerLayer,
-} from "./threadHistoryController.ts";
+import * as ThreadHistoryController from "./threadHistoryController.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   makeEnvironmentThreadState,
-  ThreadSnapshotLoader,
   type EnvironmentThreadState,
   type ThreadSnapshotLoadResult,
 } from "./threads.ts";
+import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
 
 const TARGET = new PrimaryConnectionTarget({
   environmentId: EnvironmentId.make("environment-1"),
@@ -159,7 +157,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const prepared = yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(
     Option.some(PREPARED),
   );
-  const snapshotLoader = ThreadSnapshotLoader.of({
+  const snapshotLoader = ThreadSnapshotLoader.ThreadSnapshotLoader.of({
     load: (_prepared, threadId) =>
       Ref.update(loaderCalls, (count) => count + 1).pipe(
         Effect.as(
@@ -220,7 +218,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   let makeThreadState = makeEnvironmentThreadState(THREAD_ID, options?.resumeCache).pipe(
     Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
     Effect.provideService(Persistence.EnvironmentCacheStore, cache),
-    Effect.provideService(ThreadSnapshotLoader, snapshotLoader),
+    Effect.provideService(ThreadSnapshotLoader.ThreadSnapshotLoader, snapshotLoader),
     Effect.provideService(
       ConnectionWakeups.ConnectionWakeups,
       ConnectionWakeups.ConnectionWakeups.of({ changes: Stream.fromQueue(wakeups) }),
@@ -235,12 +233,12 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       ),
     );
   }
-  const historyController = yield* ThreadHistoryController.pipe(
-    Effect.provide(threadHistoryControllerLayer),
+  const historyController = yield* ThreadHistoryController.ThreadHistoryController.pipe(
+    Effect.provide(ThreadHistoryController.layer),
   );
   if (options?.historyPaging !== "no-controller") {
     makeThreadState = makeThreadState.pipe(
-      Effect.provideService(ThreadHistoryController, historyController),
+      Effect.provideService(ThreadHistoryController.ThreadHistoryController, historyController),
     );
   }
   const threadState = yield* makeThreadState;
@@ -1768,6 +1766,68 @@ describe("EnvironmentThreads", () => {
         (value) => value.status === "live" && Option.isSome(value.data),
       );
       expect(Option.getOrThrow(live.data).thread.title).toBe("Caught-up title");
+    }),
+  );
+
+  it.effect("skips an unknown event type and resumes after it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ cached: BASE_PROJECTION, completionMarker: true });
+      const unknown = (sequence: number): OrchestrationV2ThreadStreamItem => ({
+        kind: "unknown-event",
+        sequence,
+        eventType: "run.from-a-future-server",
+      });
+      const occurredAt = DateTime.makeUnsafe("2026-06-20T01:00:00.000Z");
+      yield* Queue.offerAll(harness.inputs, [
+        {
+          kind: "event",
+          sequence: CACHED_SNAPSHOT_SEQUENCE + 1,
+          event: {
+            id: EventId.make("event-message"),
+            type: "message.updated",
+            threadId: THREAD_ID,
+            occurredAt,
+            payload: {
+              id: MessageId.make("message-before"),
+              threadId: THREAD_ID,
+              runId: null,
+              nodeId: null,
+              role: "assistant",
+              text: "Before",
+              streaming: false,
+              attachments: [],
+              createdBy: "agent",
+              creationSource: "provider",
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+          },
+        },
+        unknown(CACHED_SNAPSHOT_SEQUENCE + 2),
+        titleUpdated("After", CACHED_SNAPSHOT_SEQUENCE + 3),
+        // A trailing unknown event must still advance the resume cursor.
+        unknown(CACHED_SNAPSHOT_SEQUENCE + 4),
+        synchronized(),
+      ]);
+      const live = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          value.status === "live" &&
+          Option.isSome(value.data) &&
+          value.data.value.thread.title === "After",
+      );
+      expect(Option.isNone(live.error)).toBe(true);
+      expect(Option.getOrThrow(live.data).messages.map((message) => message.text)).toEqual([
+        "Before",
+      ]);
+
+      yield* harness.replaceSession;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if ((yield* Ref.get(harness.subscriptionCount)) >= 2) break;
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(2);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE + 4);
     }),
   );
 
