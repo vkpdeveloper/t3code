@@ -1,7 +1,6 @@
 import * as Schema from "effect/Schema";
 
 import { ChatAttachment } from "./chatAttachment.ts";
-import { OrchestrationMessageRole } from "./orchestration.ts";
 import {
   IsoDateTime,
   MessageId,
@@ -41,7 +40,7 @@ export type ThreadReferenceReadInput = typeof ThreadReferenceReadInput.Type;
 
 export const ThreadReferenceTranscriptMessage = Schema.Struct({
   id: MessageId,
-  role: OrchestrationMessageRole,
+  role: Schema.Literals(["user", "assistant", "system"]),
   text: Schema.String,
   textStart: NonNegativeInt,
   textEnd: NonNegativeInt,

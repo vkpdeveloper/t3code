@@ -1035,7 +1035,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const handleFeedTouchCancel = useCallback(() => {
     feedTouchStartRef.current = null;
   }, []);
-  const feedBlurTarget = useRef<View>(null);
+  const feedBlurTarget = useRef<ViewInstance>(null);
 
   return (
     <View className="flex-1">

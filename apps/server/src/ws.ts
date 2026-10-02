@@ -213,7 +213,6 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as VibeProxyUsageService from "./usage/VibeProxyUsageService.ts";
-import * as WorktreeCleanup from "./worktreeCleanup.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -1127,7 +1126,6 @@ const makeWsRpcLayer = (
             );
       const usage = yield* UsageService.UsageService;
       const vibeProxyUsage = yield* VibeProxyUsageService.VibeProxyUsageService;
-      const worktreeCleanup = yield* Effect.serviceOption(WorktreeCleanup.WorktreeCleanup);
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
@@ -3630,28 +3628,13 @@ const makeWsRpcLayer = (
                   payload: { settings },
                 })),
               );
-              const worktreeCleanupUpdates = Option.match(worktreeCleanup, {
-                onNone: () => Stream.empty,
-                onSome: (cleanup) =>
-                  cleanup.noticeChanges.pipe(
-                    Stream.map((notices) => ({
-                      version: 1 as const,
-                      type: "worktreeCleanupUpdated" as const,
-                      payload: { notices },
-                    })),
-                  ),
-              });
-
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
                 Stream.merge(
                   providerStatuses,
                   Stream.merge(
                     settingsUpdates,
-                    Stream.merge(
-                      worktreeCleanupUpdates,
-                      Stream.merge(environmentThemeUpdates, usageLimitSourceUpdates),
-                    ),
+                    Stream.merge(environmentThemeUpdates, usageLimitSourceUpdates),
                   ),
                 ),
               );

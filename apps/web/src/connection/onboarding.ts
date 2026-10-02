@@ -37,7 +37,9 @@ export const renameSavedEnvironment = createRuntimeCommand(connectionAtomRuntime
     key: (input: { readonly environmentId: EnvironmentId }) => input.environmentId,
   },
   execute: (input: { readonly environmentId: EnvironmentId; readonly label: string }) =>
-    ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.rename(input))),
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.rename(input)),
+    ),
 });
 
 export const connectSshEnvironment = createRuntimeCommand(connectionAtomRuntime, {

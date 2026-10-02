@@ -45,7 +45,7 @@ describe("CursorSdkCatalog", () => {
   it.effect("rediscovers models after invalidation", () =>
     Effect.gen(function* () {
       let modelCalls = 0;
-      const catalog = yield* makeCursorSdkCatalog({
+      const catalog = yield* CursorSdkCatalog.makeCursorSdkCatalog({
         readUser: () => Effect.succeed(user),
         readModels: () => Effect.sync(() => ((modelCalls += 1), [model])),
       });

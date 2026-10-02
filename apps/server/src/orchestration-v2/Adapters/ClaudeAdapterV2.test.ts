@@ -5085,10 +5085,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               closeCalls++;
             }).pipe(Effect.andThen(Queue.shutdown(messages))),
         });
-        const idAllocator = yield* IdAllocatorV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
         const attemptId = RunAttemptId.make("attempt-claude-graceful-interrupt");
         const providerTurnId = idAllocator.derive.providerTurn({
-          driver: CLAUDE_PROVIDER,
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
           nativeTurnId: `turn:${attemptId}`,
         });
         yield* harness.runtime.startTurn(
@@ -5119,7 +5119,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* Fiber.join(stop);
         assert.equal(closeCalls, 1);
         assert.equal(terminal.status, "interrupted");
-      }).pipe(Effect.provide(Layer.merge(idAllocatorLayer, NodeServices.layer))),
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );
 
