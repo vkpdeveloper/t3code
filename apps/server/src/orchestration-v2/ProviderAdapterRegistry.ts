@@ -14,18 +14,12 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import {
   ProviderAdapterDriverCreateError,
   type AnyProviderAdapterDriver,
 } from "./ProviderAdapterDriver.ts";
-import {
-  ProviderAdapterV2,
-  ProviderAdapterOpenSessionError,
-  type ProviderAdapterV2Shape,
-  type ProviderAdapterV2SessionRuntime,
-  type ProviderAdapterV2Error,
-} from "./ProviderAdapter.ts";
+import * as ProviderAdapter from "./ProviderAdapter.ts";
 
 const isProviderSetupError = Schema.is(ProviderSetupError);
 
@@ -55,11 +49,11 @@ export type ProviderAdapterRegistryV2Error = typeof ProviderAdapterRegistryV2Err
 export interface ProviderAdapterRegistryV2Shape {
   readonly get: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderAdapterV2Shape, ProviderAdapterRegistryV2Error>;
+  ) => Effect.Effect<ProviderAdapter.ProviderAdapterV2Shape, ProviderAdapterRegistryV2Error>;
   readonly list: () => Effect.Effect<ReadonlyArray<ProviderInstanceId>>;
   readonly getMetadata?: (instanceId: ProviderInstanceId) => Effect.Effect<
     {
-      readonly driver: ProviderAdapterV2Shape["driver"];
+      readonly driver: ProviderAdapter.ProviderAdapterV2Shape["driver"];
       readonly continuationKey: string;
       readonly enabled: boolean;
       readonly capabilities: OrchestrationV2ProviderCapabilities;
@@ -81,14 +75,14 @@ export class ProviderAdapterRegistryV2 extends Context.Service<
 export const layerFromProviderInstanceRegistry: Layer.Layer<
   ProviderAdapterRegistryV2,
   never,
-  ProviderInstanceRegistry
+  ProviderInstanceRegistry.ProviderInstanceRegistry
 > = Layer.effect(
   ProviderAdapterRegistryV2,
   Effect.gen(function* () {
-    const instances = yield* ProviderInstanceRegistry;
+    const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     // Stable identity per instance so callers can compare adapters across lookups.
-    const guarded = new WeakMap<ProviderInstance, ProviderAdapterV2Shape>();
-    const guard = (instance: ProviderInstance): ProviderAdapterV2Shape => {
+    const guarded = new WeakMap<ProviderInstance, ProviderAdapter.ProviderAdapterV2Shape>();
+    const guard = (instance: ProviderInstance): ProviderAdapter.ProviderAdapterV2Shape => {
       const auth = instance.auth;
       if (!auth || (!auth.withAccess && !auth.isChangingCredentials && !auth.credentialBinding)) {
         return instance.orchestrationAdapter;
@@ -96,7 +90,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
       const cached = guarded.get(instance);
       if (cached) return cached;
       const adapter = instance.orchestrationAdapter;
-      const openSession: ProviderAdapterV2Shape["openSession"] = (input) =>
+      const openSession: ProviderAdapter.ProviderAdapterV2Shape["openSession"] = (input) =>
         Effect.gen(function* () {
           const binding = auth.credentialBinding;
           const related = binding
@@ -116,8 +110,8 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
             }
           }
           let admitted: Effect.Effect<
-            ProviderAdapterV2SessionRuntime,
-            ProviderAdapterV2Error | ProviderSetupError,
+            ProviderAdapter.ProviderAdapterV2SessionRuntime,
+            ProviderAdapter.ProviderAdapterV2Error | ProviderSetupError,
             Scope.Scope
           > = adapter.openSession(input);
           // Unlike V1, the caller's scope is the session lifetime, so every
@@ -130,7 +124,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
         }).pipe(
           Effect.mapError((cause) =>
             isProviderSetupError(cause)
-              ? new ProviderAdapterOpenSessionError({
+              ? new ProviderAdapter.ProviderAdapterOpenSessionError({
                   driver: adapter.driver,
                   providerSessionId: input.providerSessionId,
                   cause,
@@ -138,7 +132,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
               : cause,
           ),
         );
-      const wrapped: ProviderAdapterV2Shape = { ...adapter, openSession };
+      const wrapped: ProviderAdapter.ProviderAdapterV2Shape = { ...adapter, openSession };
       guarded.set(instance, wrapped);
       return wrapped;
     };
@@ -185,7 +179,7 @@ export const ProviderAdapterRegistryBuildError = Schema.Union([ProviderAdapterDr
 export type ProviderAdapterRegistryBuildError = typeof ProviderAdapterRegistryBuildError.Type;
 
 function makeRegistry(
-  adapters: ReadonlyArray<ProviderAdapterV2Shape>,
+  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>,
 ): ProviderAdapterRegistryV2Shape {
   return {
     get: (instanceId) =>
@@ -201,7 +195,7 @@ function makeRegistry(
 }
 
 export function makeLayer(
-  adapters: ReadonlyArray<ProviderAdapterV2Shape>,
+  adapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>,
 ): Layer.Layer<ProviderAdapterRegistryV2> {
   return Layer.succeed(
     ProviderAdapterRegistryV2,
@@ -210,7 +204,7 @@ export function makeLayer(
 }
 
 export function makeLayerEffect<R, E>(
-  adapters: Effect.Effect<ReadonlyArray<ProviderAdapterV2Shape>, E, R>,
+  adapters: Effect.Effect<ReadonlyArray<ProviderAdapter.ProviderAdapterV2Shape>, E, R>,
 ): Layer.Layer<ProviderAdapterRegistryV2, E, R> {
   return Layer.effect(
     ProviderAdapterRegistryV2,
@@ -219,7 +213,7 @@ export function makeLayerEffect<R, E>(
 }
 
 export function makeSingleLayer(
-  adapter: ProviderAdapterV2Shape,
+  adapter: ProviderAdapter.ProviderAdapterV2Shape,
 ): Layer.Layer<ProviderAdapterRegistryV2> {
   return makeLayer([adapter]);
 }
@@ -233,7 +227,7 @@ const decodedConfigEnabled = (config: unknown): boolean | undefined => {
 };
 
 interface LiveAdapterEntry {
-  readonly adapter: ProviderAdapterV2Shape;
+  readonly adapter: ProviderAdapter.ProviderAdapterV2Shape;
   readonly scope: Scope.Closeable;
   readonly entry: ProviderInstanceConfig;
 }
@@ -366,17 +360,20 @@ export function makeDriverLayer<R>(input: {
   ) as Layer.Layer<ProviderAdapterRegistryV2, ProviderAdapterRegistryBuildError, R>;
 }
 
-const layerFromProviderAdapter: Layer.Layer<ProviderAdapterRegistryV2, never, ProviderAdapterV2> =
-  Layer.effect(
-    ProviderAdapterRegistryV2,
-    Effect.gen(function* () {
-      const adapter = yield* ProviderAdapterV2;
-      return ProviderAdapterRegistryV2.of({
-        get: (instanceId) =>
-          adapter.instanceId === instanceId
-            ? Effect.succeed(adapter)
-            : Effect.fail(new ProviderAdapterRegistryLookupError({ instanceId })),
-        list: () => Effect.succeed([adapter.instanceId]),
-      } satisfies ProviderAdapterRegistryV2Shape);
-    }),
-  );
+const layerFromProviderAdapter: Layer.Layer<
+  ProviderAdapterRegistryV2,
+  never,
+  ProviderAdapter.ProviderAdapterV2
+> = Layer.effect(
+  ProviderAdapterRegistryV2,
+  Effect.gen(function* () {
+    const adapter = yield* ProviderAdapter.ProviderAdapterV2;
+    return ProviderAdapterRegistryV2.of({
+      get: (instanceId) =>
+        adapter.instanceId === instanceId
+          ? Effect.succeed(adapter)
+          : Effect.fail(new ProviderAdapterRegistryLookupError({ instanceId })),
+      list: () => Effect.succeed([adapter.instanceId]),
+    } satisfies ProviderAdapterRegistryV2Shape);
+  }),
+);

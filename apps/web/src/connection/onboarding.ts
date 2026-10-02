@@ -24,7 +24,9 @@ export const connectPairing = createRuntimeCommand(connectionAtomRuntime, {
     readonly pairingCode?: string;
     readonly label?: string;
   }) =>
-    ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.registerPairing(input))),
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.registerPairing(input)),
+    ),
 });
 
 export const renameSavedEnvironment = createRuntimeCommand(connectionAtomRuntime, {
@@ -35,7 +37,9 @@ export const renameSavedEnvironment = createRuntimeCommand(connectionAtomRuntime
     key: (input: { readonly environmentId: EnvironmentId }) => input.environmentId,
   },
   execute: (input: { readonly environmentId: EnvironmentId; readonly label: string }) =>
-    ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.rename(input))),
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.rename(input)),
+    ),
 });
 
 export const connectSshEnvironment = createRuntimeCommand(connectionAtomRuntime, {
@@ -46,5 +50,7 @@ export const connectSshEnvironment = createRuntimeCommand(connectionAtomRuntime,
     key: (input: { readonly target: DesktopSshEnvironmentTarget }) => JSON.stringify(input.target),
   },
   execute: (input: { readonly target: DesktopSshEnvironmentTarget; readonly label?: string }) =>
-    ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.registerSsh(input))),
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.registerSsh(input)),
+    ),
 });
