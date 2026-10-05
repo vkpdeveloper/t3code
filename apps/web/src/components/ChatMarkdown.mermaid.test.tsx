@@ -61,7 +61,7 @@ vi.mock("./chat/MermaidDiagram", () => ({
       </div>
     ) : (
       <div
-        className="chat-markdown-mermaid"
+        data-mermaid-diagram
         dangerouslySetInnerHTML={{ __html: result.status === "ready" ? result.svg : "" }}
       />
     );
@@ -87,11 +87,7 @@ function codeButton(renderer: ReactTestRenderer, label: string) {
 }
 
 function diagrams(renderer: ReactTestRenderer) {
-  return renderer.root.findAll(
-    (instance) =>
-      typeof instance.props.className === "string" &&
-      instance.props.className.split(" ").includes("chat-markdown-mermaid"),
-  );
+  return renderer.root.findAll((instance) => instance.props["data-mermaid-diagram"] === true);
 }
 
 describe("ChatMarkdown mermaid", () => {
