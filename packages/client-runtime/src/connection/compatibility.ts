@@ -12,12 +12,29 @@ export function orchestrationProtocolCompatibilityError(
   if (descriptor.orchestrationProtocolVersion === ORCHESTRATION_PROTOCOL_VERSION) {
     return null;
   }
-  const hostProtocol = descriptor.orchestrationProtocolVersion;
-  const detail =
-    hostProtocol === undefined
-      ? `Update T3 Code on ${descriptor.label} before reconnecting. This host predates orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`
-      : `Update T3 Code on ${descriptor.label} and this client before reconnecting. The host uses orchestration protocol ${hostProtocol}, while this client requires ${ORCHESTRATION_PROTOCOL_VERSION}.`;
-  return new ConnectionBlockedError({ reason: "unsupported", detail });
+  const serverProtocolVersion = descriptor.orchestrationProtocolVersion ?? 0;
+  return serverProtocolVersion > ORCHESTRATION_PROTOCOL_VERSION
+    ? new ConnectionBlockedError({
+        reason: "unsupported",
+        detail: `This client is not supported by this server. Update your app or use a compatible release to connect to ${descriptor.label}.`,
+      })
+    : new ConnectionBlockedError({
+        reason: "unsupported",
+        detail:
+          descriptor.orchestrationProtocolVersion === undefined
+            ? `Update T3 Code on ${descriptor.label} before reconnecting. This host predates orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`
+            : `This client requires a newer server. Update T3 Code on ${descriptor.label} to connect.`,
+        ...(canSelfUpdate(descriptor) ? { serverUpdateRequired: true } : {}),
+      });
+}
+
+/** Whether this client can drive the host's update remotely. */
+function canSelfUpdate(descriptor: ExecutionEnvironmentDescriptor): boolean {
+  const { serverSelfUpdate, desktopAppUpdate } = descriptor.capabilities;
+  return (
+    serverSelfUpdate !== undefined &&
+    (serverSelfUpdate !== "desktop-managed" || desktopAppUpdate === true)
+  );
 }
 
 export function appendOrchestrationProtocol(socketUrl: string): string {

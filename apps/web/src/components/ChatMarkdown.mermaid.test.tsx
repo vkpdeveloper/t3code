@@ -51,9 +51,21 @@ vi.mock("~/lib/openPullRequestLink", () => ({
   useOpenChangeRequestLink: () => vi.fn(),
 }));
 
-vi.mock("./MarkdownMermaid", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./MarkdownMermaid")>()),
-  useMermaidSvg: (code: string) => mermaidState(code),
+vi.mock("./chat/MermaidDiagram", () => ({
+  MermaidDiagram: ({ source }: { source: string }) => {
+    const result = mermaidState(source);
+    return result.status === "error" ? (
+      <div>
+        <p>Unable to render diagram: {result.message}</p>
+        <pre>{source}</pre>
+      </div>
+    ) : (
+      <div
+        className="chat-markdown-mermaid"
+        dangerouslySetInnerHTML={{ __html: result.status === "ready" ? result.svg : "" }}
+      />
+    );
+  },
 }));
 
 import ChatMarkdown from "./ChatMarkdown";
@@ -98,7 +110,7 @@ describe("ChatMarkdown mermaid", () => {
       expect(rendered).not.toHaveBeenCalled();
       expect(diagrams(renderer!)).toHaveLength(0);
       expect(renderer!.root.findAllByProps({ className: "chat-markdown-shiki" })).toHaveLength(1);
-      expect(codeButton(renderer!, "Show source")).toBeUndefined();
+      expect(codeButton(renderer!, "Show code")).toBeUndefined();
 
       await act(async () => {
         renderer!.update(<ChatMarkdown cwd="/tmp/project" text={FENCE} />);
@@ -120,7 +132,7 @@ describe("ChatMarkdown mermaid", () => {
       await act(async () => {
         renderer = create(<ChatMarkdown cwd="/tmp/project" text={FENCE} />);
       });
-      const toggle = codeButton(renderer!, "Show source");
+      const toggle = codeButton(renderer!, "Show code");
       if (!toggle) throw new Error("Missing diagram toggle");
       await act(async () => {
         toggle.onClick?.({} as Parameters<NonNullable<typeof toggle.onClick>>[0]);
@@ -143,8 +155,7 @@ describe("ChatMarkdown mermaid", () => {
         renderer = create(<ChatMarkdown cwd="/tmp/project" text={FENCE} />);
       });
       expect(diagrams(renderer!)).toHaveLength(0);
-      expect(renderer!.root.findAllByProps({ className: "chat-markdown-shiki" })).toHaveLength(1);
-      expect(codeButton(renderer!, "Show source")).toBeUndefined();
+      expect(renderer!.root.findAllByType("pre")[0]?.children.join("")).toContain("flowchart TD");
       expect(JSON.stringify(renderer!.toJSON())).toContain("Parse error on line 2");
     } finally {
       await act(async () => renderer?.unmount());
