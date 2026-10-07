@@ -17,12 +17,12 @@ describe("resolveMarkdownLinkIcon", () => {
 });
 
 describe("resolveMarkdownLinkPresentation", () => {
-  it("preserves T3 task references for in-app navigation", () => {
-    expect(resolveMarkdownLinkPresentation("t3-thread:///environment-1/thread-2")).toEqual({
-      kind: "link",
-      href: "t3-thread:///environment-1/thread-2",
-    });
-  });
+  it.each(["t3-thread:///environment-1/thread-2", "t3-thread://v1/environment-1/thread-2"])(
+    "preserves T3 task reference %s for in-app navigation",
+    (href) => {
+      expect(resolveMarkdownLinkPresentation(href)).toEqual({ kind: "link", href });
+    },
+  );
 
   it("treats protocol-relative media as an external URL, not a filesystem path", () => {
     expect(resolveMarkdownLinkPresentation("//cdn.example.com/clip.mp4?sig=a%2fb#t=2")).toEqual({

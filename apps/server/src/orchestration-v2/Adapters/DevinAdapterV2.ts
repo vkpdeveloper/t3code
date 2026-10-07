@@ -29,7 +29,7 @@ import * as Schema from "effect/Schema";
 import type * as Path from "effect/Path";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import type * as Scope from "effect/Scope";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
 import { ServerConfig } from "../../config.ts";
@@ -49,7 +49,7 @@ import {
 } from "../../provider/acp/DevinAcpExtension.ts";
 import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { ProviderEventLoggers } from "../../provider/Layers/ProviderEventLoggers.ts";
+import { ProviderEventLoggers } from "../../provider/ProviderEventLoggers.ts";
 import { IdAllocatorV2 } from "../IdAllocator.ts";
 import { ProviderContinuationRequests } from "../ProviderContinuationRequests.ts";
 import { ProviderAdapterV2 } from "../ProviderAdapter.ts";

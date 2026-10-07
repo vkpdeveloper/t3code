@@ -4,7 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useMemo, useRef } from "react";
 import { AppState, Platform } from "react-native";
 

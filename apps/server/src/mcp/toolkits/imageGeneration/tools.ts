@@ -4,7 +4,7 @@ import {
   GenerateImageResult,
   ImageGenerationUnavailableError,
 } from "@t3tools/contracts";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import { ImageGenerationService } from "../../../imageGeneration/ImageGenerationService.ts";

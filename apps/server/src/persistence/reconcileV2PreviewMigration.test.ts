@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import OrchestrationV2 from "./Migrations/057_OrchestrationV2.ts";
@@ -19,6 +19,9 @@ const reconciledMigrations = [
   [59, "PullRequestFilesViewed"],
   [60, "RemoveRedundantProjectionIndexes"],
   [61, "ProjectionThreadsAutoSettleDisabledAt"],
+  [62, "ScheduledTaskWebhooks"],
+  [63, "WebhookRelayDeliveries"],
+  [64, "McpAppModelContext"],
 ] as const;
 
 // The V2 schema is unchanged from the published September 15–16 previews.
@@ -47,6 +50,9 @@ describe("V2 preview upgrade", () => {
         [59, "PullRequestFilesViewed"],
         [60, "RemoveRedundantProjectionIndexes"],
         [61, "ProjectionThreadsAutoSettleDisabledAt"],
+        [62, "ScheduledTaskWebhooks"],
+        [63, "WebhookRelayDeliveries"],
+        [64, "McpAppModelContext"],
       ]);
       assert.deepStrictEqual(
         (yield* sql<{

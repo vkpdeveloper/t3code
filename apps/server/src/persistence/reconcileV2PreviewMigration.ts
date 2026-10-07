@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
-import * as Migrator from "effect/unstable/sql/Migrator";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import ProjectionThreadBranchPullRequest from "./Migrations/053_ProjectionThreadBranchPullRequest.ts";
 import ProjectionThreadsActiveOrderKey from "./Migrations/054_ProjectionThreadsActiveOrderKey.ts";

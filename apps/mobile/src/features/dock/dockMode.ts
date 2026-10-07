@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { NativeStackNavigationOptions } from "@react-navigation/native-stack";
 import * as Battery from "expo-battery";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
 import { Platform } from "react-native";
 
