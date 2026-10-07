@@ -98,7 +98,7 @@ describe("ChangedFilesTree", () => {
           deletions: 3,
         },
         {
-          path: "apps/server/src/provider/Layers/CodexAdapter.ts",
+          path: "apps/server/src/provider/CodexAdapter.ts",
           kind: "modified",
           additions: 7,
           deletions: 2,
@@ -163,7 +163,7 @@ describe("ChangedFilesTree", () => {
           deletions: 3,
         },
         {
-          path: "apps/server/src/provider/Layers/CodexAdapter.ts",
+          path: "apps/server/src/provider/CodexAdapter.ts",
           kind: "modified",
           additions: 7,
           deletions: 2,

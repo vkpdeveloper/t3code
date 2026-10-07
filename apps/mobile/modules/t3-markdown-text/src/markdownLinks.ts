@@ -1,3 +1,4 @@
+import { parseComposerThreadLink } from "@t3tools/shared/composerTrigger";
 import {
   fileBasename,
   formatFilePathPosition,
@@ -5,6 +6,7 @@ import {
   normalizeMarkdownLinkDestination,
   parseMarkdownFileLink,
 } from "@t3tools/client-runtime/markdown-links";
+import { parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { videoMimeType } from "@t3tools/shared/video";
 
 import type { MARKDOWN_FILE_ICON_SOURCES } from "./markdownFileIcons.generated";
@@ -293,7 +295,13 @@ export function resolveMarkdownLinkPresentation(href: string): MarkdownLinkPrese
 
   return {
     kind: "link",
-    href: /^(?:mailto|tel|t3-thread):/i.test(normalized) ? normalized : null,
+    // A thread link keeps its href so a press reaches the feed, which opens the thread.
+    href:
+      /^(?:mailto|tel):/i.test(normalized) ||
+      parseThreadLinkHref(normalized) !== null ||
+      parseComposerThreadLink(normalized) !== null
+        ? normalized
+        : null,
   };
 }
 

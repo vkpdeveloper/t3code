@@ -2,7 +2,7 @@ import { makeAmpTextGeneration } from "../../textGeneration/AmpTextGeneration.ts
 import { makeAmpRouting } from "../amp/AmpRouting.ts";
 import * as Path from "effect/Path";
 import * as FileSystem from "effect/FileSystem";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import { AmpSettings, ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -15,7 +15,7 @@ import {
   buildInitialAmpProviderSnapshot,
   checkAmpProviderStatus,
   discoverAmpSkills,
-} from "../Layers/AmpProvider.ts";
+} from "../AmpProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { defaultProviderContinuationIdentity, type ProviderDriver } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";

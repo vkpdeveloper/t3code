@@ -130,6 +130,9 @@ export function UsageRouteScreen() {
       ),
     ),
   ];
+  const canReadDiagnostics = selectedEnvironments.some(
+    (environment) => environment.canReadDiagnostics,
+  );
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -276,16 +279,18 @@ export function UsageRouteScreen() {
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         refreshControl={
-          <RefreshControl
-            refreshing={
-              showingLimits ? vibeProxyUsage.isRefreshing || limits.refreshing : refreshingUsage
-            }
-            onRefresh={
-              showingLimits
-                ? () => void Promise.all([vibeProxyUsage.refresh(), limits.refresh()])
-                : refreshWindow
-            }
-          />
+          showingLimits || canReadDiagnostics ? (
+            <RefreshControl
+              refreshing={
+                showingLimits ? vibeProxyUsage.isRefreshing || limits.refreshing : refreshingUsage
+              }
+              onRefresh={
+                showingLimits
+                  ? () => void Promise.all([vibeProxyUsage.refresh(), limits.refresh()])
+                  : refreshWindow
+              }
+            />
+          ) : undefined
         }
       >
         <SegmentedControl options={TAB_OPTIONS} selected={tab} onSelect={setTab} role="tab" />
@@ -348,6 +353,20 @@ export function UsageRouteScreen() {
                     ? "Connect an environment to see usage."
                     : "Select an environment to see usage."}
                 </Text>
+              ) : !canReadDiagnostics ? (
+                // Each environment explains itself: a denied grant and a failed
+                // access check are different problems.
+                <View className="gap-2 py-16">
+                  {selectedEnvironments.map((environment) => (
+                    <Text
+                      key={environment.environmentId}
+                      className="text-center text-base text-foreground-muted"
+                    >
+                      {selectedEnvironments.length > 1 ? `${environment.label}: ` : null}
+                      {environment.error}
+                    </Text>
+                  ))}
+                </View>
               ) : (
                 <>
                   {sourceMessages.map((message) => (
@@ -870,10 +889,11 @@ function usageEnvironmentStatus(environment: EnvironmentUsageStatus): string {
           : "clientBehind",
     });
   }
+  // The reason matters: a denied grant and a failed scan need different fixes.
+  if (environment.error)
+    return environment.summary ? `${environment.error} Showing saved totals.` : environment.error;
   if (!environment.isConnected)
     return environment.summary ? "Disconnected · showing saved usage" : "Waiting for connection…";
-  if (environment.error)
-    return environment.summary ? "Usage unavailable · showing saved totals" : "Usage unavailable";
   if (isUsageLoading(environment))
     return environment.summary ? "Updating usage…" : "Loading usage…";
   return "Usage up to date";

@@ -6,7 +6,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { runAmpCommand } from "../Layers/AmpProvider.ts";
+import { runAmpCommand } from "../AmpProvider.ts";
 import { AMP_ROUTING_LIST_ARGS } from "./AmpProtocol.ts";
 
 const decodeConnections = Schema.decodeEffect(

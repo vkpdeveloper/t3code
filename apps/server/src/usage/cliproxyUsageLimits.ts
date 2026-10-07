@@ -18,7 +18,7 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import { codexPlanLabel } from "../provider/Layers/CodexProvider.ts";
+import { codexPlanLabel } from "../provider/CodexProvider.ts";
 import { clampPercent, makeUsageLimits } from "../provider/providerUsageLimits.ts";
 
 const QuotaWindow = Schema.Struct({

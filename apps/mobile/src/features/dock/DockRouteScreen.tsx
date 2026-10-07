@@ -1,6 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { useKeepAwake } from "expo-keep-awake";
 import { useEffect, useEffectEvent, useState } from "react";

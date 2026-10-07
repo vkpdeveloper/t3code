@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
-import * as OpenApi from "effect/unstable/httpapi/OpenApi";
+import * as OpenApi from "effect/http-api/OpenApi";
 
-import { RelayApi, RelayDeviceRegistrationRequest, RelayWebPushRegistrationRequest } from "./relay.ts";
+import {
+  RelayApi,
+  RelayDeviceRegistrationRequest,
+  RelayWebPushRegistrationRequest,
+} from "./relay.ts";
 
 const decodeDevice = Schema.decodeUnknownExit(RelayDeviceRegistrationRequest);
 const device = {

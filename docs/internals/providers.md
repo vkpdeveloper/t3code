@@ -54,9 +54,12 @@ executables under a running agent.
 
 ## Setup must not happen as a health-check side effect
 
-Opening a provider session can start MCP servers, run hooks, or launch a login browser. Grok probes
-therefore use version, model, and initialization checks without authenticating or creating a
-session. A failed initialization can degrade to a warning when the installed CLI and model catalog
+Opening a provider session can start MCP servers, run hooks, or launch a login browser.
+[Grok probes](../../apps/server/src/provider/GrokProvider.ts) avoid authentication and
+session creation for this reason. Antigravity likewise reserves authenticated catalog sessions for
+explicit setup or model refresh; background checks use initialization only.
+
+A failed Grok initialization can degrade to a warning when the installed CLI and model catalog
 are still usable.
 
 Antigravity reserves authenticated catalog sessions for explicit setup or model refresh.
@@ -125,10 +128,18 @@ option is authoritative because the CLI catalog can include models unavailable t
 Amp emits complete content blocks rather than token deltas. Its adapter normalizes those blocks at
 the provider boundary so orchestration and clients keep the same streaming model.
 
-Capabilities must describe what a provider can actually do. Antigravity can capture workspace
-checkpoints but cannot roll back its conversation, so revert is rejected before touching files.
-Native permission and question option IDs must survive normalization because a display label is not
-necessarily a valid reply.
+Native `/goal` state belongs to the provider and is mirrored on the provider thread. Codex starts
+the next goal turn on its own milliseconds after the last one completes, so the
+[adapter](../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts) keeps the run open
+and adds that turn to it. One run can therefore own several native turns. `/goal` commands that
+start no Codex turn settle on a provider turn without a native ref, which native rollback must
+not count. Claude's SDK mode emits no goal events; its adapter reads goal state from the
+synthetic command output and Stop hook feedback in the transcript.
+
+Capabilities must describe what the provider can actually do. Antigravity can capture workspace
+checkpoints but cannot roll back its conversation. The [checkpoint boundary](./overview.md#turn-completion-and-checkpoints)
+therefore rejects revert before touching files. Native permission and question option IDs must
+also survive normalization; a display label is not necessarily a valid reply.
 
 ## Attachments and stored history
 
