@@ -15,6 +15,15 @@ import {
 } from "./driver.ts";
 
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
+
+it("accepts an optional positive context window and rejects invalid token counts", () => {
+  expect(decodeSettings({}).contextWindowTokens).toBe("");
+  expect(decodeSettings({ contextWindowTokens: " 200000 " }).contextWindowTokens).toBe("200000");
+  for (const contextWindowTokens of ["0", "-1", "1.5", "200k", "Infinity", "9007199254740992"]) {
+    expect(() => decodeSettings({ contextWindowTokens })).toThrow();
+  }
+});
+
 const identity = {
   instanceId: ProviderInstanceId.make("acpRegistry_test"),
   displayName: "Test ACP",

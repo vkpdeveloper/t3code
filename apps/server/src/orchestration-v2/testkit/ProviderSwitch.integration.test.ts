@@ -409,6 +409,8 @@ describe("orchestration v2 provider switching", () => {
     "compact-native",
     "compact-legacy",
     "large-current-input",
+    "stored-command-output-fallback",
+    "stored-command-output-native",
     "screenshot-fallback",
     "screenshot-reported-capacity-native",
     "screenshot-option-change-retry-native",
@@ -434,8 +436,12 @@ describe("orchestration v2 provider switching", () => {
         const priorImages = scenario.includes("prior-images");
         const replaceNative = scenario.includes("replacement");
         const capacityScenario = modelScenario || scenario.includes("reported-capacity");
+        const storedCommandOutput = scenario.startsWith("stored-command-output");
         const returning =
-          scenario === "large-current-input" || scenario.includes("-change-") || priorImages;
+          scenario === "large-current-input" ||
+          scenario.includes("-change-") ||
+          priorImages ||
+          storedCommandOutput;
         const targetSelection: ModelSelection = !modelScenario
           ? CLAUDE_MODEL_SELECTION
           : {
@@ -608,6 +614,42 @@ describe("orchestration v2 provider switching", () => {
               CLAUDE_MODEL_SELECTION,
             );
             yield* wait(2);
+            if (storedCommandOutput) {
+              const existing = yield* orchestrator.getThreadProjection(threadId);
+              const targetRun = existing.runs[1]!;
+              const now = yield* DateTime.now;
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: EventId.make("stored-command-output"),
+                    type: "turn-item.updated",
+                    threadId,
+                    runId: targetRun.id,
+                    occurredAt: now,
+                    payload: {
+                      id: TurnItemId.make("stored-command-output"),
+                      threadId,
+                      runId: targetRun.id,
+                      nodeId: targetRun.rootNodeId,
+                      providerThreadId: targetRun.providerThreadId,
+                      providerTurnId: null,
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: 250,
+                      status: "completed",
+                      title: null,
+                      startedAt: now,
+                      completedAt: now,
+                      updatedAt: now,
+                      type: "command_execution",
+                      input: "vp test",
+                      output: "test passed\n".repeat(20_000),
+                      exitCode: 0,
+                    },
+                  },
+                ],
+              });
+            }
             if (modelScenario && !turnUsageScenario) {
               const target = (yield* orchestrator.getThreadProjection(
                 threadId,
@@ -774,6 +816,20 @@ describe("orchestration v2 provider switching", () => {
           }
           const projection = yield* orchestrator.getThreadProjection(threadId);
           assert.equal(projection.runs.at(-1)?.status, "completed");
+          if (storedCommandOutput) {
+            const turns = yield* Ref.get(capturedTurns);
+            assert.lengthOf(turns, 4);
+            assert.equal(turns[1]!.nativeThreadId, turns[3]!.nativeThreadId);
+            const context = scenario.endsWith("-native")
+              ? yield* encodeJson(yield* Ref.get(injectedHistory))
+              : turns[3]!.text;
+            assert.include(context, "New source constraint");
+            assert.equal(
+              projection.contextHandoffs.at(-1)?.delivery?.status,
+              scenario.endsWith("-native") ? "injected" : "inline",
+            );
+            return;
+          }
           if (priorImages) {
             const handoff = projection.contextHandoffs.at(-1)!;
             const context = scenario.endsWith("-native")
@@ -993,7 +1049,7 @@ describe("orchestration v2 provider switching", () => {
             );
             const historyBeforeRetry = (yield* Ref.get(injectedHistory)).length;
             const retryText =
-              failure === "large-missed-request" ? "y".repeat(10_000) : "Retry target request";
+              failure === "large-missed-request" ? "y".repeat(30_000) : "Retry target request";
             yield* dispatch(3, retryText, CLAUDE_MODEL_SELECTION);
             yield* wait(3, "completed");
             const retried = yield* orchestrator.getThreadProjection(threadId);

@@ -40,6 +40,7 @@ import {
   attachmentTokenAllowance,
   contextUsageForHandoff,
   historicalMessage,
+  estimateTextTokens,
   latestNativeContextUsage,
 } from "@t3tools/provider-core/server/handoffBudget";
 import { deliverContextHandoffs } from "./ContextHandoffDelivery.ts";
@@ -1063,7 +1064,7 @@ export const layer: Layer.Layer<
                   : 0;
               return (
                 sum +
-                (historical === null ? 0 : Buffer.byteLength(historical.text)) +
+                (historical === null ? 0 : estimateTextTokens(historical.text)) +
                 nativeAttachments
               );
             }, 0)
