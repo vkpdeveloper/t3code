@@ -463,6 +463,7 @@ describe("AcpRegistryAdapterV2", () => {
       readonly setup: unknown;
       readonly pickFrames: ReadonlyArray<Frame>;
       readonly customModels?: ReadonlyArray<string>;
+      readonly contextWindowTokens?: string;
       readonly storedModel?: string;
       readonly storedModePick?: string;
       readonly turnModels?: ReadonlyArray<string>;
@@ -515,6 +516,9 @@ describe("AcpRegistryAdapterV2", () => {
           agentId: "fixture-agent",
           authMethodId: "test",
           customModels: input.customModels ?? [],
+          ...(input.contextWindowTokens === undefined
+            ? {}
+            : { contextWindowTokens: input.contextWindowTokens }),
         }),
         environment: {},
         makeRuntime: makeAcpReplayRuntime({
@@ -555,6 +559,7 @@ describe("AcpRegistryAdapterV2", () => {
           : { options: [{ id: ACP_SESSION_MODE_OPTION_ID, value: input.storedModePick }] }),
       };
       const configurations: Array<AcpRegistryLiveConfiguration | undefined> = [];
+      let modelContextWindow: number | undefined;
       yield* Effect.gen(function* () {
         const runtime = yield* adapter.openSession({
           threadId,
@@ -562,6 +567,7 @@ describe("AcpRegistryAdapterV2", () => {
           modelSelection: stored,
           runtimePolicy,
         });
+        modelContextWindow = runtime.getModelContextWindow?.(stored);
         configurations.push(published);
         if (input.turnModels === undefined) return;
         const providerThread = yield* runtime.ensureThread({
@@ -606,8 +612,21 @@ describe("AcpRegistryAdapterV2", () => {
       }).pipe(Effect.scoped);
       yield* Effect.all(agentExits, { discard: true });
       yield* makeAcpReplayCompletenessAssertion(fileSystem, statusPath, transcript);
-      return { configurations };
+      return { configurations, modelContextWindow };
     });
+
+    it.live.each([undefined, "", "200000"])(
+      "uses the configured ACP context window %s without usage telemetry",
+      (contextWindowTokens) =>
+        Effect.gen(function* () {
+          const result = yield* openWithStoredPicks({
+            setup: {},
+            pickFrames: [],
+            ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+          });
+          assert.equal(result.modelContextWindow, contextWindowTokens ? 200_000 : undefined);
+        }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
 
     it.effect("switches an agent that only advertises modes with session/set_mode", () =>
       openWithStoredPicks({

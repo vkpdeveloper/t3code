@@ -418,12 +418,15 @@ describe("orchestration v2 provider switching", () => {
     "prior-images-unsent-native",
     "prior-images-legacy-replacement-native",
     "delivery-write-failure",
+    "stored-history-fallback-native",
+    "stored-history-configured-native",
   ] as const)("preserves handoffs through %s", (scenario) =>
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = yield* checkpointWorkspace(`handoff-${scenario}`);
         const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
         const injectedHistory = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const storedHistory = scenario.startsWith("stored-history");
         const reasoningScenario = scenario.includes("reasoning-change");
         const turnUsageScenario = reasoningScenario || scenario.includes("turn-usage");
         const modelScenario =
@@ -435,7 +438,10 @@ describe("orchestration v2 provider switching", () => {
         const replaceNative = scenario.includes("replacement");
         const capacityScenario = modelScenario || scenario.includes("reported-capacity");
         const returning =
-          scenario === "large-current-input" || scenario.includes("-change-") || priorImages;
+          scenario === "large-current-input" ||
+          scenario.includes("-change-") ||
+          priorImages ||
+          storedHistory;
         const targetSelection: ModelSelection = !modelScenario
           ? CLAUDE_MODEL_SELECTION
           : {
@@ -462,6 +468,9 @@ describe("orchestration v2 provider switching", () => {
             modelSelection: CLAUDE_MODEL_SELECTION,
             responseByRunOrdinal: {},
             capturedTurns,
+            ...(scenario === "stored-history-configured-native"
+              ? { getModelContextWindow: () => 200_000 }
+              : {}),
             ...(scenario.includes("retry") || scenario.includes("unsent") ? { failStartOnce } : {}),
             ...(replaceNative ? { failResumeOnce, nativeThreadGeneration: generation } : {}),
             ...(scenario.includes("reported-capacity")
@@ -604,10 +613,44 @@ describe("orchestration v2 provider switching", () => {
             if (scenario.includes("unsent")) yield* Ref.set(failStartOnce, true);
             yield* dispatch(
               2,
-              turnUsageScenario ? "x".repeat(27_460) : "Establish target",
+              turnUsageScenario
+                ? "x".repeat(27_460)
+                : storedHistory
+                  ? "Read the build output.\n".repeat(
+                      scenario.includes("configured") ? 3_500 : 1_300,
+                    )
+                  : "Establish target",
               CLAUDE_MODEL_SELECTION,
             );
             yield* wait(2);
+            if (storedHistory) {
+              const existing = yield* orchestrator.getThreadProjection(threadId);
+              const assistant = existing.turnItems
+                .filter((item) => item.type === "assistant_message")
+                .find((item) => item.runId === existing.runs[1]!.id)!;
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: EventId.make("stored-command-output"),
+                    type: "turn-item.updated",
+                    threadId,
+                    runId: assistant.runId!,
+                    occurredAt: yield* DateTime.now,
+                    payload: {
+                      ...assistant,
+                      id: TurnItemId.make("stored-command-output"),
+                      ordinal: assistant.ordinal + 1,
+                      type: "command_execution",
+                      input: "vp test",
+                      output: "PASS build validation\n".repeat(
+                        scenario.includes("configured") ? 12_500 : 8_200,
+                      ),
+                      exitCode: 0,
+                    },
+                  },
+                ],
+              });
+            }
             if (modelScenario && !turnUsageScenario) {
               const target = (yield* orchestrator.getThreadProjection(
                 threadId,
@@ -774,6 +817,14 @@ describe("orchestration v2 provider switching", () => {
           }
           const projection = yield* orchestrator.getThreadProjection(threadId);
           assert.equal(projection.runs.at(-1)?.status, "completed");
+          if (storedHistory) {
+            const turns = yield* Ref.get(capturedTurns);
+            assert.equal(turns.at(-1)!.nativeThreadId, turns[1]!.nativeThreadId);
+            assert.include(
+              yield* encodeJson(yield* Ref.get(injectedHistory)),
+              "New source constraint",
+            );
+          }
           if (priorImages) {
             const handoff = projection.contextHandoffs.at(-1)!;
             const context = scenario.endsWith("-native")

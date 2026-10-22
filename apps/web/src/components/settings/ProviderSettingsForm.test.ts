@@ -39,6 +39,18 @@ describe("ProviderSettingsForm helpers", () => {
     expect(next).toEqual({ forkOwned: 1 });
   });
 
+  it("lets local ACP instances set and clear their handoff context window", () => {
+    const acp = providerClients.get(ProviderDriverKind.make("acpRegistry"))!;
+    const config = { source: "local", commandPath: "droid" };
+    const field = deriveProviderSettingsFields(acp, config).find(
+      (field) => field.key === "contextWindowTokens",
+    );
+    expect(field).toBeDefined();
+    const configured = nextProviderConfigWithFieldValue(config, field!, "200000");
+    expect(configured).toEqual({ ...config, contextWindowTokens: "200000" });
+    expect(nextProviderConfigWithFieldValue(configured, field!, "")).toEqual(config);
+  });
+
   it("stores false boolean fields when true is the default", () => {
     const next = nextProviderConfigWithFieldValue(
       undefined,

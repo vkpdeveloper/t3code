@@ -43,6 +43,14 @@ function catalogWithInspection(
 }
 
 describe("acpRegistrySnapshotReadiness", () => {
+  it("validates an optional context window without changing existing configurations", () => {
+    expect(decodeSettings({}).contextWindowTokens).toBe("");
+    expect(decodeSettings({ contextWindowTokens: " 200000 " }).contextWindowTokens).toBe("200000");
+    for (const value of ["0", "-1", "1.5", "200k", "Infinity", "9007199254740992"]) {
+      expect(() => decodeSettings({ contextWindowTokens: value })).toThrow();
+    }
+  });
+
   it("treats a live empty command advertisement as an authoritative replacement", () => {
     const provider = buildCheckedAcpRegistrySnapshot({
       ...identity,
