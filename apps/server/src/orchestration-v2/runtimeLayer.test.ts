@@ -2523,7 +2523,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("wakes once for a state it reported, across a restart and a new watch", () =>
+  it.effect("baselines a fresh watch across restarts and new watches", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const threadId = ThreadId.make("runtime-pull-request-watch-told");
@@ -2563,6 +2563,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       yield* watch(true, "start");
 
       let headSha = "ad70160aaa";
+      let status: "pending" | "success" = "success";
       const host = Layer.mergeAll(
         NodeServices.layer,
         Layer.mock(PullRequestService.PullRequestService)({
@@ -2576,7 +2577,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
               headSha,
               checks: ["lint", "test"].map((name) => ({
                 name,
-                status: "success" as const,
+                status,
                 description: null,
                 url: null,
                 required: true,
@@ -2599,12 +2600,26 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
 
       const reactor = yield* PullRequestWatchReactor.make.pipe(Effect.provide(host));
       yield* reactor.sweep;
+      assert.deepEqual(yield* summaries, []);
+      const baseline = (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch;
+      assert.equal(baseline?.headSha, headSha);
+      assert.isTrue(baseline?.passed);
+      assert.deepEqual(baseline?.passedChecks, ["lint", "test"]);
       yield* TestClock.adjust("10 minutes");
       yield* reactor.sweep;
-      assert.deepEqual(yield* summaries, ["#12: checks passed"]);
+      assert.deepEqual(yield* summaries, []);
 
       // A restart keeps nothing in memory; the watch state is all it has.
       const restarted = yield* PullRequestWatchReactor.make.pipe(Effect.provide(host));
+      yield* restarted.sweep;
+      assert.deepEqual(yield* summaries, []);
+
+      status = "pending";
+      yield* TestClock.adjust("10 minutes");
+      yield* restarted.sweep;
+      assert.deepEqual(yield* summaries, []);
+      status = "success";
+      yield* TestClock.adjust("10 minutes");
       yield* restarted.sweep;
       assert.deepEqual(yield* summaries, ["#12: checks passed"]);
 
@@ -2966,10 +2981,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         assert.deepEqual(held?.remarkIds, initialWatch?.remarkIds);
         assert.deepEqual(held?.failedChecks, ["lint"]);
         const { messages } = yield* orchestrator.getThreadRecords(threadId, ["messages"]);
-        assert.deepEqual(
-          messages.map((message) => message.notification?.summary),
-          ["#7: checks failed"],
-        );
+        assert.deepEqual(messages, []);
         yield* TestClock.adjust("1 millis");
         recovering = true;
       }
@@ -2983,9 +2995,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         messages.flatMap((message) =>
           message.notification === undefined ? [] : [message.notification.summary],
         ),
-        incomplete
-          ? ["#7: checks failed", "#7: new comments"]
-          : ["#7: checks failed, new comments"],
+        ["#7: new comments"],
       );
       if (mode !== "single page") {
         const wake = messages.at(-1);
@@ -2998,7 +3008,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       assert.deepEqual(watch?.remarkIds, [remark.id]);
       assert.deepEqual(
         { headSha: watch?.headSha, failedChecks: watch?.failedChecks, wakes: watch?.wakes },
-        { headSha: "abc1234def", failedChecks: ["lint"], wakes: incomplete ? 1 : 0 },
+        { headSha: "abc1234def", failedChecks: ["lint"], wakes: 1 },
       );
     }),
   );
