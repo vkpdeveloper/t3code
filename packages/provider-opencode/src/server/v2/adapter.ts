@@ -57,6 +57,7 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as OpenCode2Client from "./OpenCode2Client.ts";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
+import { inferDefaultVariant } from "../status.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
@@ -626,16 +627,6 @@ const boundaryAfter = (
 
 const isProviderAdapterError = Schema.is(ProviderAdapter.ProviderAdapterV2Error);
 
-const modelRef = (selection: ProviderAdapter.ProviderAdapterV2TurnInput["modelSelection"]) => {
-  const parsed = OpenCodeRuntime.parseOpenCodeModelSlug(selection.model);
-  if (parsed === null) return undefined;
-  const variant = getModelSelectionStringOptionValue(selection, "variant");
-  return Model.Ref.make({
-    providerID: Provider.ID.make(parsed.providerID),
-    id: Model.ID.make(parsed.modelID),
-    ...(variant === undefined ? {} : { variant: Model.VariantID.make(variant) }),
-  });
-};
 const malformedModel = (model: string) =>
   `OpenCode model '${model}' must use provider/model format`;
 const sameModel = (left: ModelRef, right: ModelRef | undefined) =>
@@ -717,13 +708,36 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     let connection = initial.connection;
     let client = connection.client;
     const sessionScope = yield* Effect.scope;
-    // Context windows by directory, then `provider/model`: a project's own
-    // OpenCode config can change a model's limits, and this one runtime serves
+    // Model capabilities by directory, then `provider/model`: a project's own
+    // OpenCode config can change limits and variants, and this one runtime serves
     // the instance's threads in every directory.
-    const contextWindows = new Map<string, Map<string, number>>();
+    const modelsByDirectory = new Map<
+      string,
+      Map<string, { contextWindow: number; variants: ReadonlyArray<string> }>
+    >();
     const directoryOf = (cwd: string | null | undefined) => cwd ?? host.paths.cwd;
     const windowOf = (cwd: string | null | undefined, model: string) =>
-      contextWindows.get(directoryOf(cwd))?.get(model);
+      modelsByDirectory.get(directoryOf(cwd))?.get(model)?.contextWindow;
+    const modelRef = (selection: ModelSelection, cwd: string | null | undefined) => {
+      const parsed = OpenCodeRuntime.parseOpenCodeModelSlug(selection.model);
+      if (parsed === null) return undefined;
+      const selected = getModelSelectionStringOptionValue(selection, "variant");
+      const variants = modelsByDirectory.get(directoryOf(cwd))?.get(selection.model)?.variants;
+      // Saved fallback options and inherited worker selections can outlive the catalog.
+      // `default` is OpenCode's sentinel, valid even when it is absent from the variant list.
+      const variant =
+        variants === undefined ||
+        selected === "default" ||
+        (selected === undefined && parsed.providerID !== "opencode-go") ||
+        (selected !== undefined && variants.includes(selected))
+          ? selected
+          : inferDefaultVariant(parsed.providerID, variants);
+      return Model.Ref.make({
+        providerID: Provider.ID.make(parsed.providerID),
+        id: Model.ID.make(parsed.modelID),
+        ...(variant === undefined ? {} : { variant: Model.VariantID.make(variant) }),
+      });
+    };
     const now = yield* DateTime.now;
     let session: OrchestrationV2ProviderSession = {
       id: input.providerSessionId,
@@ -2763,17 +2777,17 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
 
     const readModels = (directory: string) =>
       Effect.suspend(() => {
-        const windows = contextWindows.get(directory) ?? new Map<string, number>();
-        contextWindows.set(directory, windows);
+        const inventory = new Map(modelsByDirectory.get(directory));
+        modelsByDirectory.set(directory, inventory);
         return client.model.list({ location: { directory } }).pipe(
           Effect.timeout("5 seconds"),
           Effect.tap((models) =>
             Effect.sync(() => {
               for (const model of models.data) {
-                windows.set(
-                  `${model.providerID}/${model.id}`,
-                  model.limit.input ?? model.limit.context,
-                );
+                inventory.set(`${model.providerID}/${model.id}`, {
+                  contextWindow: model.limit.input ?? model.limit.context,
+                  variants: model.variants.map((variant) => variant.id),
+                });
               }
             }),
           ),
@@ -2781,7 +2795,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         );
       });
     const readModelsOnce = (cwd: string | null | undefined) =>
-      contextWindows.has(directoryOf(cwd)) ? Effect.void : readModels(directoryOf(cwd));
+      modelsByDirectory.has(directoryOf(cwd)) ? Effect.void : readModels(directoryOf(cwd));
     yield* readModels(session.cwd);
 
     const agentRules = new Map<string, ReadonlyMap<string, ReadonlyArray<Rule>>>();
@@ -3461,7 +3475,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             });
           }
           yield* readModelsOnce(threadInput.runtimePolicy.cwd);
-          const model = modelRef(threadInput.modelSelection);
+          const model = modelRef(threadInput.modelSelection, threadInput.runtimePolicy.cwd);
           if (model === undefined) {
             return yield* new ProviderAdapter.ProviderAdapterProtocolError({
               driver: OPENCODE_PROVIDER,
@@ -3633,7 +3647,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   }),
                 });
               }
-              const model = modelRef(turnInput.modelSelection);
+              const model = modelRef(turnInput.modelSelection, turnInput.runtimePolicy.cwd);
               if (model === undefined) {
                 yield* begin;
                 return yield* finishTurn(state, {

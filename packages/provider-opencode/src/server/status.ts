@@ -147,20 +147,19 @@ function titleCaseSlug(value: string): string {
   return segments.join(" ");
 }
 
-function inferDefaultVariant(
+export function inferDefaultVariant(
   providerID: string,
   variants: ReadonlyArray<string>,
 ): string | undefined {
-  if (variants.length === 1) {
-    return variants[0];
-  }
-  if (providerID === "anthropic" || providerID.startsWith("google")) {
-    return variants.includes("high") ? "high" : undefined;
-  }
-  if (providerID === "openai" || providerID === "opencode") {
-    return variants.includes("medium") ? "medium" : variants.includes("high") ? "high" : undefined;
-  }
-  return undefined;
+  const preferred =
+    providerID === "opencode-go"
+      ? ["max", "high", "medium"]
+      : providerID === "anthropic" || providerID.startsWith("google")
+        ? ["high"]
+        : providerID === "openai" || providerID === "opencode"
+          ? ["medium", "high"]
+          : [];
+  return preferred.find((variant) => variants.includes(variant)) ?? variants[0];
 }
 
 function inferDefaultAgent(agents: ReadonlyArray<Agent>): string | undefined {
