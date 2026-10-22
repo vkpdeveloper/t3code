@@ -57,6 +57,7 @@ import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as OpenCode2Client from "./OpenCode2Client.ts";
 import * as OpenCode2Server from "./OpenCode2Server.ts";
 import * as OpenCodeRuntime from "../OpenCodeRuntime.ts";
+import { resolveModelVariant } from "../modelVariant.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { t3OrchestrationSystemPrompt } from "@t3tools/provider-core/server/orchestrationInstructions";
@@ -626,10 +627,17 @@ const boundaryAfter = (
 
 const isProviderAdapterError = Schema.is(ProviderAdapter.ProviderAdapterV2Error);
 
-const modelRef = (selection: ProviderAdapter.ProviderAdapterV2TurnInput["modelSelection"]) => {
+const modelRef = (
+  selection: ProviderAdapter.ProviderAdapterV2TurnInput["modelSelection"],
+  variants: ReadonlyArray<string> | undefined,
+) => {
   const parsed = OpenCodeRuntime.parseOpenCodeModelSlug(selection.model);
   if (parsed === null) return undefined;
-  const variant = getModelSelectionStringOptionValue(selection, "variant");
+  const variant = resolveModelVariant(
+    parsed.providerID,
+    variants,
+    getModelSelectionStringOptionValue(selection, "variant"),
+  );
   return Model.Ref.make({
     providerID: Provider.ID.make(parsed.providerID),
     id: Model.ID.make(parsed.modelID),
@@ -721,6 +729,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     // OpenCode config can change a model's limits, and this one runtime serves
     // the instance's threads in every directory.
     const contextWindows = new Map<string, Map<string, number>>();
+    const modelVariants = new Map<string, Map<string, ReadonlyArray<string>>>();
     const directoryOf = (cwd: string | null | undefined) => cwd ?? host.paths.cwd;
     const windowOf = (cwd: string | null | undefined, model: string) =>
       contextWindows.get(directoryOf(cwd))?.get(model);
@@ -2769,12 +2778,18 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           Effect.timeout("5 seconds"),
           Effect.tap((models) =>
             Effect.sync(() => {
+              const variants = new Map<string, ReadonlyArray<string>>();
               for (const model of models.data) {
                 windows.set(
                   `${model.providerID}/${model.id}`,
                   model.limit.input ?? model.limit.context,
                 );
+                variants.set(
+                  `${model.providerID}/${model.id}`,
+                  model.variants.map((variant) => variant.id),
+                );
               }
+              modelVariants.set(directory, variants);
             }),
           ),
           Effect.ignore({ log: true }),
@@ -3461,7 +3476,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             });
           }
           yield* readModelsOnce(threadInput.runtimePolicy.cwd);
-          const model = modelRef(threadInput.modelSelection);
+          const model = modelRef(
+            threadInput.modelSelection,
+            modelVariants
+              .get(directoryOf(threadInput.runtimePolicy.cwd))
+              ?.get(threadInput.modelSelection.model),
+          );
           if (model === undefined) {
             return yield* new ProviderAdapter.ProviderAdapterProtocolError({
               driver: OPENCODE_PROVIDER,
@@ -3633,7 +3653,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   }),
                 });
               }
-              const model = modelRef(turnInput.modelSelection);
+              const model = modelRef(
+                turnInput.modelSelection,
+                modelVariants
+                  .get(directoryOf(turnInput.runtimePolicy.cwd))
+                  ?.get(turnInput.modelSelection.model),
+              );
               if (model === undefined) {
                 yield* begin;
                 return yield* finishTurn(state, {
