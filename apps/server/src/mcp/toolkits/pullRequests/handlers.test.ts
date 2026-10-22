@@ -265,6 +265,76 @@ describe("pull request toolkit handlers", () => {
     }),
   );
 
+  it.effect("accepts GitHub Enterprise Cloud URLs across pull request tools", () =>
+    Effect.gen(function* () {
+      const host = "my-awesome-company.ghe.com";
+      const repository = "t3tools/t3code";
+      const url = `https://${host}/T3Tools/T3Code/pull/9`;
+      const harness = yield* makeHarness({
+        thread: makeThread([makeLink(8, { host, url: `https://${host}/${repository}/pull/8` })]),
+      });
+      expect(yield* harness.call("link_pull_request", { url })).toEqual({
+        host,
+        repository,
+        number: 9,
+        url,
+        alreadyLinked: false,
+      });
+      expect(yield* harness.call("watch_pull_request", { url })).toMatchObject({
+        host,
+        repository,
+        number: 9,
+        url,
+      });
+      const linkedUrl = `https://${host}/${repository}/pull/8`;
+      expect(yield* harness.call("unwatch_pull_request", { url: linkedUrl })).toMatchObject({
+        host,
+        repository,
+        number: 8,
+        watching: false,
+      });
+      expect(yield* harness.call("unlink_pull_request", { url: linkedUrl })).toEqual({
+        host,
+        repository,
+        number: 8,
+        wasLinked: true,
+      });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        { type: "thread.pull-request.link", host, repository, number: 9, url, source: "agent" },
+        {
+          type: "thread.pull-request.watch",
+          host,
+          repository,
+          number: 9,
+          watching: true,
+          link: { url, source: "agent" },
+        },
+        { type: "thread.pull-request.watch", host, repository, number: 8, watching: false },
+        { type: "thread.pull-request.unlink", host, repository, number: 8 },
+      ]);
+    }),
+  );
+
+  it.effect("names all explicit fields when a custom host URL is not recognised", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const target = { host: "code.acme.test", repository: "owner/repo", number: 9 };
+      const url = `https://${target.host}/${target.repository}/pull/${target.number}`;
+      const error = yield* harness.call("link_pull_request", { url }).pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "PullRequestUrlInvalidError",
+        message:
+          "This is not a recognised pull request URL. Pass host, repository and number instead.",
+      });
+      expect(yield* Ref.get(harness.commands)).toEqual([]);
+      expect(yield* harness.call("link_pull_request", target)).toEqual({
+        ...target,
+        url,
+        alreadyLinked: false,
+      });
+    }),
+  );
+
   it.effect("watching an unlinked pull request links it first", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

@@ -28,6 +28,26 @@ describe("parseChangeRequestUrl", () => {
     });
   });
 
+  it.each([
+    [
+      "https://my-awesome-company.ghe.com/Owner/Repo/pull/9",
+      "https://my-awesome-company.ghe.com/Owner/Repo/pull/9",
+    ],
+    [
+      "https://MY-AWESOME-COMPANY.GHE.COM/Owner/Repo/pull/9/files?w=1#diff-1",
+      "https://my-awesome-company.ghe.com/Owner/Repo/pull/9?w=1#diff-1",
+    ],
+  ])("reads a GitHub Enterprise Cloud pull request: %s", (url, candidate) => {
+    expect(parseChangeRequestUrl(url)).toEqual({
+      host: "my-awesome-company.ghe.com",
+      repository: "owner/repo",
+      number: 9,
+    });
+    expect(pullRequestCandidateUrlFromReferenceAutolink(url.replace("/pull/", "/issues/"))).toBe(
+      candidate,
+    );
+  });
+
   it("reads a supported GitHub host with a middle DNS label", () => {
     expect(parseChangeRequestUrl("https://code.github.example.com/acme/web/pull/42")).toEqual({
       host: "code.github.example.com",
@@ -111,6 +131,14 @@ describe("parseChangeRequestUrl", () => {
       "https://github.com/t3tools/t3code/pull/abc",
       "https://gitlab.com/t3tools/t3code/-/issues/12",
       "https://blog.example.test/2026/updates/pull/3",
+      "https://ghe.com/owner/repo/pull/9",
+      "https://notghe.com/owner/repo/pull/9",
+      "https://company.ghe.com.example.test/owner/repo/pull/9",
+      "https://ghe.example.test/owner/repo/pull/9",
+      "https://company.ghe.com/owner/repo/issues/9",
+      "https://company.ghe.com/owner/repo/pull/0",
+      "https://company.ghe.com/owner/repo/pull/9007199254740992",
+      "ftp://company.ghe.com/owner/repo/pull/9",
       "https://scm.example.test/tfs/Collection/Project/_git/Repo",
       "https://scm.example.test/tfs/Collection/Project/pullrequest/123",
       "https://scm.example.test/tfs/Collection/Project/_git/Repo/pullrequest/abc",
