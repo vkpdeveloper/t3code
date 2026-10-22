@@ -70,6 +70,12 @@ describe("pools", () => {
     resetsAt: "2026-09-06T12:00:00.000Z",
   } as const;
   const claude = ProviderDriverKind.make("claudeAgent");
+  const monthlySpend = {
+    id: "monthly_spend",
+    kind: "monthly",
+    label: "Monthly spend",
+    usedPercent: 26.43,
+  } as const;
   const source = {
     id: UsageLimitSourceId.make("hub"),
     kind: "cliproxy" as const,
@@ -131,6 +137,117 @@ describe("pools", () => {
       ],
     });
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
+  });
+
+  it("preserves Claude monthly spend for each account after a hub refresh", () => {
+    const hubWindows = [
+      { ...window, usedPercent: 55 },
+      { ...weekly, usedPercent: 30 },
+      { ...weekly, id: "seven_day_fable", label: "Weekly · Fable", usedPercent: 20 },
+    ];
+    const providers = [26.43, 1.02].map((usedPercent, i) =>
+      provider({
+        instanceId: ProviderInstanceId.make(`claude-${i}`),
+        driver: claude,
+        auth: { status: "authenticated", email: `account-${i}@example.com` },
+        usageLimits: {
+          checkedAt,
+          windows: [window, ...hubWindows.slice(1), { ...monthlySpend, usedPercent }],
+        },
+      }),
+    );
+    const hub = {
+      ...source,
+      accounts: providers.map((provider, i) => ({
+        id: `claude-${i}.json`,
+        driver: claude,
+        email: provider.auth.email,
+        usageLimits: { checkedAt: "2026-09-03T10:00:00.000Z", windows: hubWindows },
+      })),
+    };
+    const serverConfig = { providers, usageLimitSources: [hub] };
+    const input = new Map([[EnvironmentId.make("env-a"), { ...laptop, serverConfig }]]);
+    const monthlyUsage = () =>
+      collectLimitPools(collectLimitAccounts(input), now)[0]
+        ?.windows.find((window) => window.id === "monthly_spend")
+        ?.members.map((member) => member.window.usedPercent);
+
+    expect(monthlyUsage()).toEqual([26.43, 1.02]);
+    hub.accounts = hub.accounts.map((account) => ({
+      ...account,
+      usageLimits: { ...account.usageLimits, checkedAt: "2026-09-03T11:30:00.000Z" },
+    }));
+
+    expect(monthlyUsage()).toEqual([26.43, 1.02]);
+    const accounts = collectLimitAccounts(input);
+    expect(accounts).toHaveLength(2);
+    for (const [i, account] of accounts.entries()) {
+      expect(account.limits.checkedAt).toBe("2026-09-03T11:30:00.000Z");
+      expect(account.limits.windows).toEqual([
+        ...hubWindows,
+        { ...monthlySpend, usedPercent: [26.43, 1.02][i] },
+      ]);
+    }
+    expect(providers[0]?.usageLimits?.windows[0]?.usedPercent).toBe(40);
+    expect(hub.accounts[0]?.usageLimits.windows).toEqual(hubWindows);
+
+    serverConfig.providers = providers.map((provider) => ({
+      ...provider,
+      usageLimits: {
+        checkedAt: "2026-09-03T12:00:00.000Z",
+        windows: hubWindows,
+      },
+    }));
+    expect(monthlyUsage()).toBeUndefined();
+  });
+
+  it.each([
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ])("uses each window's freshest report in order %s, %s, %s", (...order) => {
+    const snapshots = [
+      { checkedAt, windows: [window, monthlySpend] },
+      {
+        checkedAt: "2026-09-03T12:00:00.000Z",
+        windows: [{ ...window, usedPercent: 60 }],
+      },
+      {
+        checkedAt: "2026-09-03T11:30:00.000Z",
+        windows: [
+          { ...window, usedPercent: 50 },
+          { ...monthlySpend, usedPercent: 30 },
+        ],
+      },
+    ];
+    const input = new Map(
+      order.map((i) => [
+        EnvironmentId.make(`env-${i}`),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [
+              provider({
+                driver: claude,
+                auth: { status: "authenticated", email: "same@example.com" },
+                usageLimits: snapshots[i]!,
+              }),
+            ],
+          },
+        },
+      ]),
+    );
+    const [account] = collectLimitAccounts(input);
+    expect(account?.limits).toMatchObject({
+      checkedAt: "2026-09-03T12:00:00.000Z",
+      windows: [
+        { ...window, usedPercent: 60 },
+        { ...monthlySpend, usedPercent: 30 },
+      ],
+    });
   });
 
   it("merges OpenCode Go limits from machines with the same API key", () => {

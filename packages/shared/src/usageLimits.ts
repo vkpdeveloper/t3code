@@ -168,7 +168,26 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
+  const windowSources = new Map<
+    string,
+    Map<string, { readonly window: ServerProviderUsageWindow; readonly checkedAt: number }>
+  >();
   const merge = (key: string, next: LimitAccount) => {
+    // Readers can omit windows (for example, a hub may not report monthly spend).
+    // Keep each window's own timestamp so a newer partial read cannot make an
+    // older window outrank a later report that actually contains it.
+    let windows = windowSources.get(key);
+    if (!windows) {
+      windows = new Map();
+      windowSources.set(key, windows);
+    }
+    const checkedAt = Date.parse(next.limits.checkedAt);
+    for (const window of next.limits.windows) {
+      const previous = windows.get(window.id);
+      if (!previous || checkedAt > previous.checkedAt) {
+        windows.set(window.id, { window, checkedAt });
+      }
+    }
     // Redeeming through a hub also clears the routing cooldown that hub holds
     // for the account. Redeeming natively against the same subscription resets
     // it upstream but leaves the hub refusing to route to the account until
@@ -217,6 +236,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
       limits: {
         ...winner.limits,
+        windows: [...windows.values()].map(({ window }) => window),
         ...(creditSource?.limits.resetCredits
           ? { resetCredits: creditSource.limits.resetCredits }
           : { resetCredits: undefined }),
