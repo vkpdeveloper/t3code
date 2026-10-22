@@ -28,18 +28,21 @@ describe("parseChangeRequestUrl", () => {
     });
   });
 
-  it("reads a supported GitHub host with a middle DNS label", () => {
-    expect(parseChangeRequestUrl("https://code.github.example.com/acme/web/pull/42")).toEqual({
-      host: "code.github.example.com",
-      repository: "acme/web",
-      number: 42,
-    });
-    expect(
-      pullRequestCandidateUrlFromReferenceAutolink(
-        "https://code.github.example.com/acme/web/issues/42",
-      ),
-    ).toBe("https://code.github.example.com/acme/web/pull/42");
-  });
+  it.each(["code.github.example.com", "my-awesome-company.ghe.com"])(
+    "reads GitHub host %s",
+    (host) => {
+      expect(
+        parseChangeRequestUrl(`https://${host.toUpperCase()}/Acme/Web/pull/42/files?w=1`),
+      ).toEqual({
+        host,
+        repository: "acme/web",
+        number: 42,
+      });
+      expect(
+        pullRequestCandidateUrlFromReferenceAutolink(`https://${host}/acme/web/issues/42`),
+      ).toBe(`https://${host}/acme/web/pull/42`);
+    },
+  );
 
   it("reads a GitLab merge request on any host, nested groups and all", () => {
     expect(
@@ -111,6 +114,14 @@ describe("parseChangeRequestUrl", () => {
       "https://github.com/t3tools/t3code/pull/abc",
       "https://gitlab.com/t3tools/t3code/-/issues/12",
       "https://blog.example.test/2026/updates/pull/3",
+      "https://ghe.com/owner/repo/pull/9",
+      "https://notghe.com/owner/repo/pull/9",
+      "https://ghe.example.com/owner/repo/pull/9",
+      "https://acme.ghe.com.example.com/owner/repo/pull/9",
+      "https://acme.ghe.com/owner/repo/pull/0",
+      "https://acme.ghe.com/owner/repo/pull/9007199254740992",
+      "https://acme.ghe.com/owner/repo/pull/9abc",
+      "ftp://acme.ghe.com/owner/repo/pull/9",
       "https://scm.example.test/tfs/Collection/Project/_git/Repo",
       "https://scm.example.test/tfs/Collection/Project/pullrequest/123",
       "https://scm.example.test/tfs/Collection/Project/_git/Repo/pullrequest/abc",
