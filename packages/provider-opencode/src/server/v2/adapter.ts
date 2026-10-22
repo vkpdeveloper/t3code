@@ -88,6 +88,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { OPENCODE_PROVIDER, openCodePermissionRequestKind } from "../adapter.ts";
 import { openCodeToolTurnItem } from "../toolItems.ts";
+import { inferDefaultVariant } from "../modelVariants.ts";
 
 const OpenCode2ProviderCapabilities = {
   sessions: {
@@ -626,10 +627,19 @@ const boundaryAfter = (
 
 const isProviderAdapterError = Schema.is(ProviderAdapter.ProviderAdapterV2Error);
 
-const modelRef = (selection: ProviderAdapter.ProviderAdapterV2TurnInput["modelSelection"]) => {
+const modelRef = (
+  selection: ProviderAdapter.ProviderAdapterV2TurnInput["modelSelection"],
+  variants: ReadonlyArray<string> | undefined,
+) => {
   const parsed = OpenCodeRuntime.parseOpenCodeModelSlug(selection.model);
   if (parsed === null) return undefined;
-  const variant = getModelSelectionStringOptionValue(selection, "variant");
+  const saved = getModelSelectionStringOptionValue(selection, "variant");
+  // Saved options can come from fallback capabilities or an inherited worker selection.
+  // Only the directory's advertised variants can validate them; an unknown model stays opaque.
+  const variant =
+    variants === undefined || (saved !== undefined && variants.includes(saved))
+      ? saved
+      : inferDefaultVariant(parsed.providerID, variants);
   return Model.Ref.make({
     providerID: Provider.ID.make(parsed.providerID),
     id: Model.ID.make(parsed.modelID),
@@ -717,13 +727,18 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     let connection = initial.connection;
     let client = connection.client;
     const sessionScope = yield* Effect.scope;
-    // Context windows by directory, then `provider/model`: a project's own
-    // OpenCode config can change a model's limits, and this one runtime serves
+    // Models by directory, then `provider/model`: a project's own
+    // OpenCode config can change limits and variants, and this one runtime serves
     // the instance's threads in every directory.
-    const contextWindows = new Map<string, Map<string, number>>();
+    const models = new Map<
+      string,
+      Map<string, { readonly contextWindow: number; readonly variants: ReadonlyArray<string> }>
+    >();
     const directoryOf = (cwd: string | null | undefined) => cwd ?? host.paths.cwd;
     const windowOf = (cwd: string | null | undefined, model: string) =>
-      contextWindows.get(directoryOf(cwd))?.get(model);
+      models.get(directoryOf(cwd))?.get(model)?.contextWindow;
+    const modelFor = (selection: ModelSelection, cwd: string | null | undefined) =>
+      modelRef(selection, models.get(directoryOf(cwd))?.get(selection.model)?.variants);
     const now = yield* DateTime.now;
     let session: OrchestrationV2ProviderSession = {
       id: input.providerSessionId,
@@ -2763,25 +2778,29 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
 
     const readModels = (directory: string) =>
       Effect.suspend(() => {
-        const windows = contextWindows.get(directory) ?? new Map<string, number>();
-        contextWindows.set(directory, windows);
         return client.model.list({ location: { directory } }).pipe(
           Effect.timeout("5 seconds"),
-          Effect.tap((models) =>
+          Effect.tap((catalog) =>
             Effect.sync(() => {
-              for (const model of models.data) {
-                windows.set(
-                  `${model.providerID}/${model.id}`,
-                  model.limit.input ?? model.limit.context,
-                );
-              }
+              models.set(
+                directory,
+                new Map(
+                  catalog.data.map((model) => [
+                    `${model.providerID}/${model.id}`,
+                    {
+                      contextWindow: model.limit.input ?? model.limit.context,
+                      variants: model.variants.map((variant) => variant.id),
+                    },
+                  ]),
+                ),
+              );
             }),
           ),
           Effect.ignore({ log: true }),
         );
       });
     const readModelsOnce = (cwd: string | null | undefined) =>
-      contextWindows.has(directoryOf(cwd)) ? Effect.void : readModels(directoryOf(cwd));
+      models.has(directoryOf(cwd)) ? Effect.void : readModels(directoryOf(cwd));
     yield* readModels(session.cwd);
 
     const agentRules = new Map<string, ReadonlyMap<string, ReadonlyArray<Rule>>>();
@@ -3461,7 +3480,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             });
           }
           yield* readModelsOnce(threadInput.runtimePolicy.cwd);
-          const model = modelRef(threadInput.modelSelection);
+          const model = modelFor(threadInput.modelSelection, threadInput.runtimePolicy.cwd);
           if (model === undefined) {
             return yield* new ProviderAdapter.ProviderAdapterProtocolError({
               driver: OPENCODE_PROVIDER,
@@ -3633,7 +3652,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   }),
                 });
               }
-              const model = modelRef(turnInput.modelSelection);
+              const model = modelFor(turnInput.modelSelection, state.directory);
               if (model === undefined) {
                 yield* begin;
                 return yield* finishTurn(state, {
