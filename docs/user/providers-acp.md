@@ -80,6 +80,12 @@ server. For example, Codex supports `codex login --device-auth`, and Grok Build 
 The model picker lists the models the agent reports. If the agent reports none, or hides some, add
 your own model IDs under **Custom models** in the instance settings.
 
+If an agent does not report its context capacity, set **Context window (tokens)** under
+**Settings → Providers** to the window supported by the models you use on that instance.
+This controls the allowance when switching back to the agent; it does not change the model's
+actual limit. Leave it empty to use reported capacity or the 128,000-token fallback. Smaller
+agent-reported limits still apply.
+
 Other settings the agent offers, such as reasoning effort or approval mode, appear in the
 composer's model options menu like they do for built-in providers. Agents with their own plan and
 build modes follow T3 Code's Plan and Build toggle. Models and options that change while an agent

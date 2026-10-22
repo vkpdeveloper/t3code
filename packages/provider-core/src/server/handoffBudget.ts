@@ -103,9 +103,13 @@ export function attachmentTokenAllowance(attachments: ReadonlyArray<ChatAttachme
   );
 }
 
-// One UTF-8 byte per token is deliberately pessimistic for byte-based tokenizers,
-// including multilingual text. It is not a tokenizer or a guarantee for arbitrary
-// custom models.
+// Three UTF-8 bytes per token leaves headroom over typical text/code ratios.
+// This is a fallback estimate: provider telemetry remains authoritative, and
+// imported history retains its separate pessimistic byte accounting below.
+export function estimateTextTokens(text: string): number {
+  return Math.ceil(Buffer.byteLength(text) / 3);
+}
+
 export function handoffBudget(input: {
   readonly tokenCap: number;
   readonly userText: string;
@@ -122,7 +126,8 @@ export function handoffBudget(input: {
   );
   const native = usage?.usedTokens ?? input.nativeContextEstimate;
   const current =
-    Buffer.byteLength(JSON.stringify(input.userText)) + attachmentTokenAllowance(input.attachments);
+    estimateTextTokens(JSON.stringify(input.userText)) +
+    attachmentTokenAllowance(input.attachments);
   return Math.max(
     0,
     Math.min(

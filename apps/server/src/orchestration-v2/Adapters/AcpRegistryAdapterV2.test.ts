@@ -49,6 +49,7 @@ import {
   makeTurnInput,
 } from "./AcpAdapterV2.testkit.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { handoffBudget } from "@t3tools/provider-core/server/handoffBudget";
 import { AcpRegistryAdapterV2Driver } from "@t3tools/provider-acp-registry/server";
 import {
   ACP_REGISTRY_PROVIDER,
@@ -200,6 +201,7 @@ const openClaudeReplaySession = Effect.fn("openClaudeReplaySession")(function* (
   entries: ReadonlyArray<unknown>,
   replayGate?: ProviderReplayGate,
   continuationEnabled = true,
+  contextWindowTokens = "",
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -240,7 +242,10 @@ const openClaudeReplaySession = Effect.fn("openClaudeReplaySession")(function* (
   const adapterOptions = {
     selfInvocation: yield* resolveSelfInvocation(),
     instanceId,
-    settings: yield* decodeAcpRegistryAdapterSettings({ agentId: "claude-acp" }),
+    settings: yield* decodeAcpRegistryAdapterSettings({
+      agentId: "claude-acp",
+      contextWindowTokens,
+    }),
     environment: {},
     ...(continuationEnabled ? { continuationRequests } : {}),
     makeRuntime: (runtimeInput: Parameters<typeof replayRuntime>[0]) => {
@@ -412,6 +417,42 @@ const claudeUnrelatedChildren = [
 ];
 
 describe("AcpRegistryAdapterV2", () => {
+  it.live.each(["", "200000"])(
+    "budgets ACP handoffs with context window setting '%s'",
+    (contextWindowTokens) =>
+      Effect.gen(function* () {
+        const session = yield* openClaudeReplaySession(
+          [...claudeFrames.open, claudeFrames.closeRequest, claudeFrames.closed],
+          undefined,
+          false,
+          contextWindowTokens,
+        );
+        const modelContextWindow = session.runtime.getModelContextWindow?.(
+          session.turnInput(1).modelSelection,
+        );
+        assert.equal(modelContextWindow, contextWindowTokens === "" ? undefined : 200_000);
+        const input = {
+          tokenCap: 16_000,
+          userText: "Continue work",
+          attachments: [],
+          providerThread: session.providerThread,
+          nativeContextEstimate: 110_000,
+          modelContextWindow,
+        };
+        assert.equal(handoffBudget(input), contextWindowTokens === "" ? 0 : 16_000);
+        assert.equal(
+          handoffBudget({
+            ...input,
+            providerThread: {
+              ...session.providerThread,
+              contextUsage: { usedTokens: 110_000, maxTokens: 128_000 },
+            },
+          }),
+          0,
+        );
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
   it("preserves and sanitizes structured ACP errors without exposing arbitrary defects", () => {
     const limit = new EffectAcpErrors.AcpRequestError({
       code: -31001,

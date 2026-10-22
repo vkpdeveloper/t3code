@@ -23,6 +23,7 @@ import {
   historyResponseItems,
   selectHistory,
   historicalMessage,
+  estimateTextTokens,
 } from "@t3tools/provider-core/server/handoffBudget";
 import { projectContextHandoffForWire } from "./WireProjection.ts";
 import { deliverContextHandoffs } from "./ContextHandoffDelivery.ts";
@@ -93,6 +94,12 @@ const handoff: OrchestrationV2ContextHandoff = {
 };
 
 describe("handoff budget", () => {
+  it("rounds UTF-8 text estimates up without dropping multilingual content", () => {
+    assert.equal(estimateTextTokens(""), 0);
+    assert.equal(estimateTextTokens("test"), 2);
+    assert.equal(estimateTextTokens("日本語 🧪"), 5);
+  });
+
   it("keeps old preview handoffs readable and delivery history off the wire", () => {
     const projected = projectContextHandoffForWire({
       ...handoff,
@@ -247,6 +254,24 @@ describe("handoff budget", () => {
       );
     }
     assert.equal(handoffBudget({ ...base, tokenCap: 2_000 }), 2_000);
+  });
+
+  it("estimates current text in tokens while preserving measured native occupancy", () => {
+    const input = {
+      tokenCap: 16_000,
+      userText: "Continue investigating the failing tests.\n".repeat(3_000),
+      attachments: [],
+      providerThread,
+      nativeContextEstimate: 10_000,
+    };
+    assert.equal(handoffBudget(input), 16_000);
+    assert.equal(
+      handoffBudget({
+        ...input,
+        providerThread: { ...providerThread, contextUsage: { usedTokens: 90_000 } },
+      }),
+      0,
+    );
   });
 
   it("keeps measured occupancy across a model change", () => {
