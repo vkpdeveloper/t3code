@@ -37,6 +37,7 @@ import {
   DEFAULT_HANDOFF_TOKEN_CAP,
   handoffTokenCapConfig,
   handoffBudget,
+  estimateTextTokens,
   attachmentTokenAllowance,
   contextUsageForHandoff,
   historicalMessage,
@@ -1063,7 +1064,7 @@ export const layer: Layer.Layer<
                   : 0;
               return (
                 sum +
-                (historical === null ? 0 : Buffer.byteLength(historical.text)) +
+                (historical === null ? 0 : estimateTextTokens(historical.text)) +
                 nativeAttachments
               );
             }, 0)

@@ -43,6 +43,24 @@ function catalogWithInspection(
 }
 
 describe("acpRegistrySnapshotReadiness", () => {
+  it("accepts an optional context window as a positive whole token count", () => {
+    expect(decodeSettings({}).contextWindowTokens).toBeUndefined();
+    expect(decodeSettings({ contextWindowTokens: " 1000000 " }).contextWindowTokens).toBe(
+      "1000000",
+    );
+    for (const contextWindowTokens of [
+      "",
+      "0",
+      "-1",
+      "1.5",
+      "128k",
+      "Infinity",
+      "9007199254740992",
+    ]) {
+      expect(() => decodeSettings({ contextWindowTokens })).toThrow();
+    }
+  });
+
   it("treats a live empty command advertisement as an authoritative replacement", () => {
     const provider = buildCheckedAcpRegistrySnapshot({
       ...identity,

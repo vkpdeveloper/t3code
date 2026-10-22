@@ -9,6 +9,21 @@ import {
 } from "./ProviderSettingsForm";
 
 describe("ProviderSettingsForm helpers", () => {
+  it.each(["registry", "local"])(
+    "allows setting and clearing the %s ACP context window",
+    (source) => {
+      const acp = providerClients.get(ProviderDriverKind.make("acpRegistry"))!;
+      const config = { source, contextWindowTokens: "1000000" };
+      const field = deriveProviderSettingsFields(acp, config).find(
+        (field) => field.key === "contextWindowTokens",
+      );
+      expect(field).toBeDefined();
+      const updated = nextProviderConfigWithFieldValue(config, field!, "200000");
+      expect(updated).toEqual({ source, contextWindowTokens: "200000" });
+      expect(nextProviderConfigWithFieldValue(updated, field!, "")).toEqual({ source });
+    },
+  );
+
   it("keeps every masked field as a stored secret", () => {
     const settingsSchema = makeProviderSettingsSchema({
       token: TrimmedString.pipe(

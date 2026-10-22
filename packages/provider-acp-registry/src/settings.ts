@@ -54,6 +54,21 @@ export const AcpRegistrySettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "auto", clearWhenEmpty: "omit" },
       }),
     ),
+    contextWindowTokens: Schema.optionalKey(
+      TrimmedString.check(
+        Schema.isPattern(/^[1-9]\d*$/),
+        Schema.makeFilter(
+          (value) => Number.isSafeInteger(Number(value)) || "Enter a positive whole token count.",
+        ),
+      ),
+    ).pipe(
+      Schema.annotateKey({
+        title: "Context window (tokens)",
+        description:
+          "Model context window used for handoffs when the agent does not report capacity. Leave empty to use the default of 128000 tokens. Applies to every model in this instance.",
+        providerSettingsForm: { placeholder: "128000", clearWhenEmpty: "omit" },
+      }),
+    ),
     distribution: AcpRegistryDistributionPreference.pipe(
       Schema.withDecodingDefault(Effect.succeed("auto")),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
@@ -64,7 +79,7 @@ export const AcpRegistrySettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["source", "agentId", "commandPath", "authMethodId"],
+    order: ["source", "agentId", "commandPath", "authMethodId", "contextWindowTokens"],
   },
 );
 export type AcpRegistrySettings = typeof AcpRegistrySettings.Type;
