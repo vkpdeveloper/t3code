@@ -201,14 +201,20 @@ describe("pools", () => {
     expect(collectLimitAccounts(input)).toHaveLength(1);
   });
 
-  it("takes windows from a fresher hub read but credits and redeem from the native instance", () => {
+  it("takes fresher hub windows without dropping native monthly spend or credits", () => {
+    const monthly = {
+      id: "monthly_spend",
+      kind: "monthly",
+      label: "Monthly spend",
+      usedPercent: 26.43,
+    } as const;
     const native = provider({
       driver: claude,
       instanceId: ProviderInstanceId.make("claude"),
       auth: { status: "authenticated", email: "same@example.com" },
       usageLimits: {
         checkedAt,
-        windows: [{ ...window, usedPercent: 40 }],
+        windows: [{ ...window, usedPercent: 40 }, monthly],
         resetCredits: { availableCount: 2 },
       },
     });
@@ -240,10 +246,73 @@ describe("pools", () => {
       ],
     ]);
     const [account] = collectLimitAccounts(input);
-    expect(account?.limits.windows[0]?.usedPercent).toBe(55);
+    expect(account?.limits.windows).toEqual([{ ...window, usedPercent: 55 }, monthly]);
+    expect(collectLimitPools(collectLimitAccounts(input), now)[0]?.windows[1]).toMatchObject({
+      id: "monthly_spend",
+      remainingPercent: 74,
+    });
     expect(account?.limits.resetCredits?.availableCount).toBe(2);
     expect(account?.redeem).toEqual({ environmentId: "env-a", input: { instanceId: "claude" } });
     expect(account?.environments).toEqual([{ environmentId: "env-a", label: "Laptop" }]);
+  });
+
+  it.each([
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ])("selects the freshest report per window with source order %i, %i, %i", (...order) => {
+    const monthly = {
+      id: "monthly_spend",
+      kind: "monthly",
+      label: "Monthly spend",
+      usedPercent: 1.02,
+    } as const;
+    const reports = [
+      { checkedAt, windows: [{ ...window, usedPercent: 10 }, monthly] },
+      { checkedAt: "2026-09-03T11:30:00.000Z", windows: [{ ...window, usedPercent: 55 }] },
+      {
+        checkedAt: "2026-09-03T11:15:00.000Z",
+        windows: [
+          { ...window, usedPercent: 40 },
+          { ...monthly, usedPercent: 26.43 },
+        ],
+      },
+    ];
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [],
+            usageLimitSources: order.map((index) => ({
+              ...source,
+              id: UsageLimitSourceId.make(`hub-${index}`),
+              accounts: [
+                {
+                  id: "claude-same@example.com.json",
+                  driver: claude,
+                  email: "same@example.com",
+                  usageLimits: reports[index]!,
+                },
+              ],
+            })),
+          },
+        },
+      ],
+    ]);
+    const accounts = collectLimitAccounts(input);
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]?.limits).toMatchObject({
+      checkedAt: "2026-09-03T11:30:00.000Z",
+      windows: [
+        { ...window, usedPercent: 55 },
+        { ...monthly, usedPercent: 26.43 },
+      ],
+    });
   });
 
   it("redeems through the hub when it holds a credit, even with a fresher native read", () => {
