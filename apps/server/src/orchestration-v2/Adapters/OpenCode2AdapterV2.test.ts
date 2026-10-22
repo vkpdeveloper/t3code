@@ -411,6 +411,166 @@ const history = {
 };
 
 it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
+  it.effect.each(
+    [
+      {
+        name: "defaults Flash to max",
+        id: "deepseek-v4.1-flash",
+        variants: ["low", "high", "max"],
+        selected: undefined,
+        expected: "max",
+      },
+      {
+        name: "repairs inherited medium",
+        id: "glm-5.3-flash",
+        variants: ["low", "high", "max"],
+        selected: "medium",
+        expected: "max",
+      },
+      {
+        name: "repairs stale xhigh",
+        id: "deepseek-v4.1-flash",
+        variants: ["low", "high", "max"],
+        selected: "xhigh",
+        expected: "max",
+      },
+      {
+        name: "preserves explicit high",
+        id: "deepseek-v4.1-flash",
+        variants: ["low", "high", "max"],
+        selected: "high",
+        expected: "high",
+      },
+      {
+        name: "defaults Muse to high",
+        id: "muse-spark-1.3-contributor",
+        variants: ["minimal", "low", "medium", "high", "xhigh"],
+        selected: undefined,
+        expected: "high",
+      },
+      {
+        name: "preserves Muse medium",
+        id: "muse-spark-1.3-contributor",
+        variants: ["minimal", "low", "medium", "high", "xhigh"],
+        selected: "medium",
+        expected: "medium",
+      },
+      {
+        name: "preserves Muse xhigh",
+        id: "muse-spark-1.3-contributor",
+        variants: ["minimal", "low", "medium", "high", "xhigh"],
+        selected: "xhigh",
+        expected: "xhigh",
+      },
+      {
+        name: "drops variants for models without reasoning",
+        id: "no-reasoning",
+        variants: [],
+        selected: "medium",
+        expected: undefined,
+      },
+      {
+        name: "repairs custom variants",
+        providerID: "custom",
+        id: "thinking",
+        variants: ["fast", "deep"],
+        selected: "medium",
+        expected: "fast",
+      },
+      {
+        name: "preserves unknown model selections",
+        id: "unknown",
+        variants: undefined,
+        selected: "custom",
+        expected: "custom",
+      },
+      {
+        name: "preserves OpenCode's explicit default sentinel",
+        id: "deepseek-v4.1-flash",
+        variants: ["low", "high", "max"],
+        selected: "default",
+        expected: "default",
+      },
+      {
+        name: "preserves other providers' native defaults",
+        providerID: "openai",
+        id: "with-max",
+        variants: ["medium", "high", "max"],
+        selected: undefined,
+        expected: undefined,
+      },
+    ].flatMap((testCase) => ["create", "switch"].map((lifecycle) => ({ ...testCase, lifecycle }))),
+  )(
+    "$name on session $lifecycle",
+    ({ providerID = "opencode-go", id, variants, selected, expected, lifecycle }) =>
+      Effect.gen(function* () {
+        const selection: ModelSelection = {
+          instanceId,
+          model: `${providerID}/${id}`,
+          ...(selected === undefined ? {} : { options: [{ id: "variant", value: selected }] }),
+        };
+        const model = {
+          providerID,
+          id,
+          ...(expected === undefined ? {} : { variant: expected }),
+        };
+        const runtime = yield* openCode2ReplayRuntimeWithInstructions([
+          out("event.subscribe"),
+          out("model.list", "<any>"),
+          reply("model.list", {
+            ...modelCatalog,
+            data:
+              variants === undefined
+                ? []
+                : [
+                    {
+                      ...modelCatalog.data[0],
+                      providerID,
+                      id,
+                      modelID: id,
+                      variants: variants.map((id) => ({ id, settings: {} })),
+                    },
+                  ],
+          }),
+          ...(lifecycle === "create"
+            ? [
+                out("session.create", {
+                  location: { directory: WORK },
+                  model,
+                  permissions: t3Rules,
+                }),
+                replyData("session.create", sessionInfo({ model })),
+              ]
+            : [
+                out("session.get", { sessionID: SESSION }),
+                replyData("session.get", sessionInfo()),
+                ...noOpenRequests,
+                out("session.switchModel", { sessionID: SESSION, model }),
+                reply("session.switchModel", null),
+              ]),
+          out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+          promptAccepted,
+          event("session.execution.succeeded", { sessionID: SESSION }),
+        ]);
+        const thread =
+          lifecycle === "create"
+            ? yield* runtime.ensureThread({
+                threadId,
+                modelSelection: selection,
+                runtimePolicy: policy(),
+              })
+            : yield* runtime.resumeThread({
+                providerThread: providerThread(yield* DateTime.now),
+                threadId,
+                modelSelection: selection,
+                runtimePolicy: policy(),
+              });
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn(turnInput(thread, selection));
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("switches the session's model and variant before a turn that changed them", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
@@ -3035,9 +3195,14 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports each directory's own limit for a model its project config changed", () =>
+  it.effect("uses each directory's configured model variants and context limit", () =>
     Effect.gen(function* () {
       const custom = "/work/opencode2-custom";
+      const selection: ModelSelection = {
+        ...bigPickle,
+        options: [{ id: "variant", value: "medium" }],
+      };
+      const model = { providerID: "opencode", id: "big-pickle", variant: "high" };
       const runtime = yield* openCode2ReplayRuntimeWithInstructions([
         ...opening,
         out("model.list", { "location[directory]": custom }),
@@ -3046,14 +3211,15 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           data: modelCatalog.data.map((model) => ({
             ...model,
             limit: { context: 64000, input: 48000, output: 8000 },
+            variants: [{ id: "high", settings: {} }],
           })),
         }),
         out("session.create", {
           location: { directory: custom },
-          model: { providerID: "opencode", id: "big-pickle" },
+          model,
           permissions: t3Rules,
         }),
-        replyData("session.create", sessionInfo({ location: { directory: custom } })),
+        replyData("session.create", sessionInfo({ location: { directory: custom }, model })),
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
         promptAccepted,
         event("session.step.ended", {
@@ -3068,12 +3234,12 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       const customPolicy = { ...policy(), cwd: custom };
       const thread = yield* runtime.ensureThread({
         threadId,
-        modelSelection: bigPickle,
+        modelSelection: selection,
         runtimePolicy: customPolicy,
       });
       assert.deepEqual(thread.nativeMetadata?.modelSelection, {
         ...bigPickle,
-        options: [{ id: "variant", value: "default" }],
+        options: [{ id: "variant", value: "high" }],
       });
       assert.equal(runtime.getModelContextWindow?.(bigPickle, WORK), 160000);
       assert.equal(runtime.getModelContextWindow?.(bigPickle, custom), 48000);
@@ -3085,7 +3251,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         Stream.runHead,
         Effect.forkScoped,
       );
-      yield* runtime.startTurn({ ...turnInput(thread), runtimePolicy: customPolicy });
+      yield* runtime.startTurn({ ...turnInput(thread, selection), runtimePolicy: customPolicy });
       const turn = Option.getOrUndefined(yield* Fiber.join(settled));
       assert.equal(
         turn?.type === "provider_turn.updated" ? turn.providerTurn.tokenUsage?.maxTokens : null,

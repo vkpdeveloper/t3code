@@ -665,6 +665,97 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
     }),
   );
 
+  it.effect("chooses advertised variant defaults without changing OpenAI or Zen defaults", () =>
+    Effect.gen(function* () {
+      runtimeMock.state.versionStdout = "opencode v2.0.20\n";
+      const cases = [
+        {
+          providerID: "opencode-go",
+          id: "deepseek-v4.1-flash",
+          variants: ["low", "high", "max"],
+          expected: "max",
+        },
+        {
+          providerID: "opencode-go",
+          id: "glm-5.3-flash",
+          variants: ["low", "high", "max"],
+          expected: "max",
+        },
+        {
+          providerID: "opencode-go",
+          id: "muse-spark-1.3-contributor",
+          variants: ["minimal", "low", "medium", "high", "xhigh"],
+          expected: "high",
+        },
+        {
+          providerID: "openai",
+          id: "with-max",
+          variants: ["medium", "high", "max"],
+          expected: "medium",
+        },
+        {
+          providerID: "opencode",
+          id: "with-max",
+          variants: ["medium", "high", "max"],
+          expected: "medium",
+        },
+        {
+          providerID: "anthropic",
+          id: "with-max",
+          variants: ["low", "high", "max"],
+          expected: "high",
+        },
+        {
+          providerID: "google-vertex",
+          id: "thinking",
+          variants: ["low", "high"],
+          expected: "high",
+        },
+        { providerID: "custom", id: "thinking", variants: ["fast", "deep"], expected: "fast" },
+        { providerID: "opencode-go", id: "single", variants: ["low"], expected: "low" },
+        { providerID: "opencode-go", id: "no-reasoning", variants: [], expected: undefined },
+      ];
+      const snapshot = yield* checkProvider(
+        makeOpenCodeSettings(),
+        process.cwd(),
+        undefined,
+        undefined,
+        Effect.succeed(
+          cases.map(({ providerID, id, variants }) => ({
+            providerID,
+            id,
+            name: id,
+            variants: variants.map((id) => ({ id })),
+          })),
+        ),
+      );
+      for (const { providerID, id, variants, expected } of cases) {
+        const slug = `${providerID}/${id}`;
+        const model = snapshot.models.find((model) => model.slug === slug);
+        NodeAssert.ok(model, slug);
+        const descriptor = model.capabilities?.optionDescriptors?.find(
+          (option) => option.id === "variant",
+        );
+        if (variants.length === 0) {
+          NodeAssert.equal(descriptor, undefined, slug);
+          continue;
+        }
+        NodeAssert.ok(descriptor?.type === "select", slug);
+        NodeAssert.equal(descriptor.currentValue, expected, slug);
+        NodeAssert.deepEqual(
+          descriptor.options.filter((option) => option.isDefault).map((option) => option.id),
+          [expected],
+          slug,
+        );
+        NodeAssert.deepEqual(
+          descriptor.options.map((option) => option.id),
+          variants,
+          slug,
+        );
+      }
+    }),
+  );
+
   it.effect("marks older releases of a family and deprecated models as legacy", () =>
     Effect.gen(function* () {
       const releases = [
