@@ -409,6 +409,8 @@ describe("orchestration v2 provider switching", () => {
     "compact-native",
     "compact-legacy",
     "large-current-input",
+    "large-native-history-known-window-native",
+    "large-native-history-unknown-window-fallback",
     "screenshot-fallback",
     "screenshot-reported-capacity-native",
     "screenshot-option-change-retry-native",
@@ -432,10 +434,14 @@ describe("orchestration v2 provider switching", () => {
         const failResumeOnce = yield* Ref.make(false);
         const generation = yield* Ref.make(0);
         const priorImages = scenario.includes("prior-images");
+        const largeNativeHistory = scenario.startsWith("large-native-history");
         const replaceNative = scenario.includes("replacement");
         const capacityScenario = modelScenario || scenario.includes("reported-capacity");
         const returning =
-          scenario === "large-current-input" || scenario.includes("-change-") || priorImages;
+          scenario === "large-current-input" ||
+          scenario.includes("-change-") ||
+          priorImages ||
+          largeNativeHistory;
         const targetSelection: ModelSelection = !modelScenario
           ? CLAUDE_MODEL_SELECTION
           : {
@@ -491,9 +497,11 @@ describe("orchestration v2 provider switching", () => {
                         ? 1_000_000
                         : 32_000,
                   }
-                : scenario === "large-current-input" || priorImages
-                  ? { getModelContextWindow: () => 32_000 }
-                  : {}),
+                : scenario.includes("known-window-native")
+                  ? { getModelContextWindow: () => 128_000 }
+                  : scenario === "large-current-input" || priorImages
+                    ? { getModelContextWindow: () => 32_000 }
+                    : {}),
             ...(scenario.endsWith("-native") || scenario === "large-current-input"
               ? { injectedHistory }
               : {}),
@@ -608,6 +616,44 @@ describe("orchestration v2 provider switching", () => {
               CLAUDE_MODEL_SELECTION,
             );
             yield* wait(2);
+            if (largeNativeHistory) {
+              const established = yield* orchestrator.getThreadProjection(threadId);
+              const targetRun = established.runs.find((run) => run.ordinal === 2)!;
+              const now = yield* DateTime.now;
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: EventId.make("large-native-command"),
+                    type: "turn-item.updated",
+                    threadId,
+                    runId: targetRun.id,
+                    occurredAt: now,
+                    payload: {
+                      id: TurnItemId.make("large-native-command"),
+                      threadId,
+                      runId: targetRun.id,
+                      nodeId: targetRun.rootNodeId,
+                      providerThreadId: targetRun.providerThreadId,
+                      providerTurnId: null,
+                      nativeItemRef: null,
+                      parentItemId: null,
+                      ordinal: 250,
+                      status: "completed",
+                      title: null,
+                      startedAt: now,
+                      completedAt: now,
+                      updatedAt: now,
+                      type: "command_execution",
+                      input: "vp test",
+                      output: "Test passed\n".repeat(
+                        scenario.includes("unknown-window") ? 50_000 : 15_000,
+                      ),
+                      exitCode: 0,
+                    },
+                  },
+                ],
+              });
+            }
             if (modelScenario && !turnUsageScenario) {
               const target = (yield* orchestrator.getThreadProjection(
                 threadId,
@@ -774,6 +820,23 @@ describe("orchestration v2 provider switching", () => {
           }
           const projection = yield* orchestrator.getThreadProjection(threadId);
           assert.equal(projection.runs.at(-1)?.status, "completed");
+          if (largeNativeHistory) {
+            const turns = yield* Ref.get(capturedTurns);
+            assert.lengthOf(turns, 4);
+            assert.equal(turns[1]!.nativeThreadId, turns[3]!.nativeThreadId);
+            const handoff = projection.contextHandoffs.at(-1)!;
+            const native = scenario.endsWith("-native");
+            assert.equal(handoff.delivery?.status, native ? "injected" : "inline");
+            assert.include(
+              native ? yield* encodeJson(yield* Ref.get(injectedHistory)) : turns[3]!.text,
+              "New source constraint",
+            );
+            assert.notInclude(
+              handoff.delivery?.itemIds ?? [],
+              TurnItemId.make("large-native-command"),
+            );
+            return;
+          }
           if (priorImages) {
             const handoff = projection.contextHandoffs.at(-1)!;
             const context = scenario.endsWith("-native")

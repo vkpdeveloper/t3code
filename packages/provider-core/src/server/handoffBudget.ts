@@ -103,9 +103,8 @@ export function attachmentTokenAllowance(attachments: ReadonlyArray<ChatAttachme
   );
 }
 
-// One UTF-8 byte per token is deliberately pessimistic for byte-based tokenizers,
-// including multilingual text. It is not a tokenizer or a guarantee for arbitrary
-// custom models.
+// Imported history and current input use conservative byte budgets. Native
+// occupancy is measured in tokens, or estimated from stored text by the caller.
 export function handoffBudget(input: {
   readonly tokenCap: number;
   readonly userText: string;
@@ -115,21 +114,24 @@ export function handoffBudget(input: {
   readonly modelContextWindow?: number | undefined;
 }): number {
   const usage = input.providerThread.contextUsage;
+  const cap = Math.max(0, Math.min(input.tokenCap, HANDOFF_BYTE_CAP));
   const window = Math.min(
-    input.modelContextWindow ?? usage?.maxTokens ?? 128_000,
+    input.modelContextWindow ?? Infinity,
     usage?.maxTokens ?? Infinity,
     usage?.autoCompactThreshold ?? Infinity,
   );
+  // An unknown window cannot justify refusing a turn. Keep the imported history
+  // bounded and let the provider enforce its context limit (including compaction).
+  if (window === Infinity) return cap;
   const native = usage?.usedTokens ?? input.nativeContextEstimate;
   const current =
     Buffer.byteLength(JSON.stringify(input.userText)) + attachmentTokenAllowance(input.attachments);
   return Math.max(
     0,
     Math.min(
-      input.tokenCap,
       // Cap only imported history. Attachment transport limits belong to adapters;
       // they may send binary/base64 data separately from the history request.
-      HANDOFF_BYTE_CAP,
+      cap,
       window - native - current - Math.max(16_000, Math.ceil(window / 4)),
     ),
   );
