@@ -265,6 +265,57 @@ describe("pull request toolkit handlers", () => {
     }),
   );
 
+  it.effect("links a GitHub Enterprise Cloud URL the same as its explicit target", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const target = { host: "my-awesome-company.ghe.com", repository: "owner/repo", number: 9 };
+      const url = `https://${target.host}/Owner/Repo/pull/9`;
+      const fromUrl = yield* harness.call("link_pull_request", { url });
+      const fromFields = yield* harness.call("link_pull_request", target);
+      expect(fromUrl).toEqual({ ...target, url, alreadyLinked: false });
+      expect(fromFields).toEqual({ ...fromUrl, url: url.toLowerCase() });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        { type: "thread.pull-request.link", threadId: THREAD_ID, ...target, url, source: "agent" },
+        { type: "thread.pull-request.link", threadId: THREAD_ID, ...target, source: "agent" },
+      ]);
+    }),
+  );
+
+  it.effect("watches, unwatches and unlinks a GitHub Enterprise Cloud URL", () =>
+    Effect.gen(function* () {
+      const target = { host: "my-awesome-company.ghe.com", repository: "owner/repo", number: 9 };
+      const url = `https://${target.host}/owner/repo/pull/9`;
+      const harness = yield* makeHarness({
+        thread: makeThread([makeLink(9, { ...target, url })]),
+      });
+      expect(yield* harness.call("watch_pull_request", { url })).toMatchObject(target);
+      expect(yield* harness.call("unwatch_pull_request", { url })).toMatchObject(target);
+      expect(yield* harness.call("unlink_pull_request", { url })).toEqual({
+        ...target,
+        wasLinked: true,
+      });
+      expect(yield* Ref.get(harness.commands)).toMatchObject([
+        { type: "thread.pull-request.watch", ...target, watching: true },
+        { type: "thread.pull-request.watch", ...target, watching: false },
+        { type: "thread.pull-request.unlink", ...target },
+      ]);
+    }),
+  );
+
+  it.effect("names every explicit target field when the URL is not recognised", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const error = yield* harness
+        .call("link_pull_request", { url: "https://scm.example.test/owner/repo/pull/9" })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "PullRequestUrlInvalidError" });
+      expect(error.message).toBe(
+        "This is not a recognised pull request URL. Pass host, repository and number instead.",
+      );
+      expect(yield* Ref.get(harness.commands)).toEqual([]);
+    }),
+  );
+
   it.effect("watching an unlinked pull request links it first", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

@@ -41,6 +41,33 @@ describe("parseChangeRequestUrl", () => {
     ).toBe("https://code.github.example.com/acme/web/pull/42");
   });
 
+  it.each(["my-awesome-company.ghe.com", "MY-AWESOME-COMPANY.GHE.COM", "code.acme.ghe.com"])(
+    "reads a GitHub Enterprise Cloud pull request on %s",
+    (host) => {
+      expect(parseChangeRequestUrl(`https://${host}/Owner/Repo/pull/9/files?w=1#diff`)).toEqual({
+        host: host.toLowerCase(),
+        repository: "owner/repo",
+        number: 9,
+      });
+    },
+  );
+
+  it("reads GitHub Enterprise Cloud reference autolinks as pull request candidates", () => {
+    expect(
+      pullRequestCandidateUrlFromReferenceAutolink("https://acme.ghe.com/owner/repo/issues/9"),
+    ).toBe("https://acme.ghe.com/owner/repo/pull/9");
+  });
+
+  it.each(["ghe.com", "notghe.com", "acme.ghe.com.example.test", "ghe.example.test"])(
+    "does not claim GitHub routes on %s",
+    (host) => {
+      expect(parseChangeRequestUrl(`https://${host}/owner/repo/pull/9`)).toBeNull();
+      expect(
+        pullRequestCandidateUrlFromReferenceAutolink(`https://${host}/owner/repo/issues/9`),
+      ).toBeNull();
+    },
+  );
+
   it("reads a GitLab merge request on any host, nested groups and all", () => {
     expect(
       parseChangeRequestUrl("https://gitlab.com/t3tools/platform/t3code/-/merge_requests/42"),
@@ -109,6 +136,10 @@ describe("parseChangeRequestUrl", () => {
       "https://github.com/t3tools/t3code/commit/0a1b2c3",
       "https://github.com/t3tools/t3code",
       "https://github.com/t3tools/t3code/pull/abc",
+      "https://acme.ghe.com/owner/repo/pull/abc",
+      "https://acme.ghe.com/owner/repo/pull/0",
+      "https://acme.ghe.com/owner/repo/pull/9007199254740992",
+      "ftp://acme.ghe.com/owner/repo/pull/9",
       "https://gitlab.com/t3tools/t3code/-/issues/12",
       "https://blog.example.test/2026/updates/pull/3",
       "https://scm.example.test/tfs/Collection/Project/_git/Repo",
