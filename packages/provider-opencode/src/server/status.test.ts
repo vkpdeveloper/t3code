@@ -462,6 +462,102 @@ const checkProvider = Effect.fn("checkProvider")(function* (
 });
 
 it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
+  it.effect.each(["1.14.19", "2.0.20"])(
+    "chooses advertised OpenCode Go defaults on %s",
+    (version) =>
+      Effect.gen(function* () {
+        const cases = [
+          {
+            providerID: "opencode-go",
+            id: "deepseek-v4.1-flash",
+            variants: ["low", "high", "max"],
+            expected: "max",
+          },
+          {
+            providerID: "opencode-go",
+            id: "glm-5.3-flash",
+            variants: ["low", "high", "max"],
+            expected: "max",
+          },
+          {
+            providerID: "opencode-go",
+            id: "muse-spark-1.3-contributor",
+            variants: ["minimal", "low", "medium", "high", "xhigh"],
+            expected: "xhigh",
+          },
+          {
+            providerID: "opencode-go",
+            id: "custom",
+            variants: ["balanced", "thorough"],
+            expected: "balanced",
+          },
+          { providerID: "opencode-go", id: "single", variants: ["low"], expected: "low" },
+          {
+            providerID: "openai",
+            id: "gpt",
+            variants: ["low", "medium", "high", "max"],
+            expected: "medium",
+          },
+          {
+            providerID: "opencode",
+            id: "zen",
+            variants: ["low", "medium", "high", "max"],
+            expected: "medium",
+          },
+        ];
+        runtimeMock.state.versionStdout = `opencode ${version}\n`;
+        runtimeMock.state.inventory = {
+          providerList: {
+            connected: ["opencode-go", "openai", "opencode"],
+            all: ["opencode-go", "openai", "opencode"].map((providerID) => ({
+              id: providerID,
+              name: providerID,
+              models: Object.fromEntries(
+                cases
+                  .filter((model) => model.providerID === providerID)
+                  .map((model) => [
+                    model.id,
+                    {
+                      id: model.id,
+                      name: model.id,
+                      variants: Object.fromEntries(model.variants.map((id) => [id, {}])),
+                    },
+                  ]),
+              ),
+            })),
+            default: {},
+          },
+          agents: [],
+        };
+        const snapshot = yield* checkProvider(
+          makeOpenCodeSettings(),
+          process.cwd(),
+          undefined,
+          undefined,
+          Effect.succeed(
+            cases.map((model) => ({
+              ...model,
+              name: model.id,
+              variants: model.variants.map((id) => ({ id })),
+            })),
+          ),
+        );
+        for (const model of cases) {
+          const slug = `${model.providerID}/${model.id}`;
+          const variant = snapshot.models
+            .find((entry) => entry.slug === slug)
+            ?.capabilities?.optionDescriptors?.find((descriptor) => descriptor.id === "variant");
+          NodeAssert.ok(variant?.type === "select", slug);
+          NodeAssert.equal(variant.currentValue, model.expected, slug);
+          NodeAssert.deepEqual(
+            variant.options.filter((option) => option.isDefault).map((option) => option.id),
+            [model.expected],
+            slug,
+          );
+        }
+      }),
+  );
+
   it.effect("emits OpenCode variant defaults so trait picker can resolve a visible selection", () =>
     Effect.gen(function* () {
       runtimeMock.state.inventory = {

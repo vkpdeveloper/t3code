@@ -411,6 +411,131 @@ const history = {
 };
 
 it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
+  it.effect.each(["create", "resume"] as const)(
+    "%ss threads with advertised variants instead of stale saved efforts",
+    (mode) =>
+      Effect.gen(function* () {
+        for (const { providerID = "opencode-go", id, variants, saved, expected } of [
+          {
+            id: "deepseek-v4.1-flash",
+            variants: ["low", "high", "max"],
+            saved: "medium",
+            expected: "max",
+          },
+          {
+            id: "glm-5.3-flash",
+            variants: ["low", "high", "max"],
+            saved: "xhigh",
+            expected: "max",
+          },
+          {
+            id: "deepseek-v4.1-flash",
+            variants: ["low", "high", "max"],
+            saved: undefined,
+            expected: "max",
+          },
+          {
+            id: "deepseek-v4.1-flash",
+            variants: ["low", "high", "max"],
+            saved: "high",
+            expected: "high",
+          },
+          {
+            id: "muse-spark-1.3-contributor",
+            variants: ["minimal", "low", "medium", "high", "xhigh"],
+            saved: "medium",
+            expected: "medium",
+          },
+          {
+            id: "muse-spark-1.3-contributor",
+            variants: ["minimal", "low", "medium", "high", "xhigh"],
+            saved: "xhigh",
+            expected: "xhigh",
+          },
+          { id: "no-reasoning", variants: [], saved: "medium", expected: undefined },
+          {
+            providerID: "custom-provider",
+            id: "custom-model",
+            variants: ["fast", "thorough"],
+            saved: "xhigh",
+            expected: undefined,
+          },
+        ]) {
+          yield* Effect.gen(function* () {
+            const model = {
+              providerID,
+              id,
+              ...(expected === undefined ? {} : { variant: expected }),
+            };
+            const selection: ModelSelection = {
+              instanceId,
+              model: `${providerID}/${id}`,
+              ...(saved === undefined ? {} : { options: [{ id: "variant", value: saved }] }),
+            };
+            const native = sessionInfo({ model });
+            const runtime = yield* openCode2ReplayRuntimeWithInstructions([
+              out("event.subscribe"),
+              out("model.list", "<any>"),
+              reply("model.list", {
+                ...modelCatalog,
+                data: [
+                  {
+                    ...modelCatalog.data[0],
+                    providerID,
+                    id,
+                    variants: variants.map((id) => ({ id, settings: {} })),
+                  },
+                ],
+              }),
+              ...(mode === "create"
+                ? [
+                    out("session.create", {
+                      location: { directory: WORK },
+                      model,
+                      permissions: t3Rules,
+                    }),
+                    replyData("session.create", native),
+                  ]
+                : [
+                    out("session.get", { sessionID: SESSION }),
+                    replyData(
+                      "session.get",
+                      sessionInfo({ model: { providerID, id, variant: "medium" } }),
+                    ),
+                    ...noOpenRequests,
+                    ...(expected === "medium"
+                      ? []
+                      : [
+                          out("session.switchModel", { sessionID: SESSION, model }),
+                          reply("session.switchModel", null),
+                        ]),
+                  ]),
+              out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+              promptAccepted,
+              event("session.execution.succeeded", { sessionID: SESSION }),
+            ]);
+            const thread =
+              mode === "create"
+                ? yield* runtime.ensureThread({
+                    threadId,
+                    modelSelection: selection,
+                    runtimePolicy: policy(),
+                  })
+                : yield* runtime.resumeThread({
+                    providerThread: providerThread(yield* DateTime.now),
+                    threadId,
+                    modelSelection: selection,
+                    runtimePolicy: policy(),
+                  });
+            const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+            yield* runtime.startTurn(turnInput(thread, selection));
+            assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+            assert.equal(selection.options?.[0]?.value, saved);
+          }).pipe(Effect.scoped);
+        }
+      }),
+  );
+
   it.effect("switches the session's model and variant before a turn that changed them", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
@@ -3035,7 +3160,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("reports each directory's own limit for a model its project config changed", () =>
+  it.effect("uses each directory's own limits and variants from its project config", () =>
     Effect.gen(function* () {
       const custom = "/work/opencode2-custom";
       const runtime = yield* openCode2ReplayRuntimeWithInstructions([
@@ -3046,14 +3171,21 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           data: modelCatalog.data.map((model) => ({
             ...model,
             limit: { context: 64000, input: 48000, output: 8000 },
+            variants: [{ id: "max", settings: {} }],
           })),
         }),
         out("session.create", {
           location: { directory: custom },
-          model: { providerID: "opencode", id: "big-pickle" },
+          model: { providerID: "opencode", id: "big-pickle", variant: "max" },
           permissions: t3Rules,
         }),
-        replyData("session.create", sessionInfo({ location: { directory: custom } })),
+        replyData(
+          "session.create",
+          sessionInfo({
+            location: { directory: custom },
+            model: { providerID: "opencode", id: "big-pickle", variant: "max" },
+          }),
+        ),
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
         promptAccepted,
         event("session.step.ended", {
@@ -3068,12 +3200,12 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       const customPolicy = { ...policy(), cwd: custom };
       const thread = yield* runtime.ensureThread({
         threadId,
-        modelSelection: bigPickle,
+        modelSelection: { ...bigPickle, options: [{ id: "variant", value: "medium" }] },
         runtimePolicy: customPolicy,
       });
       assert.deepEqual(thread.nativeMetadata?.modelSelection, {
         ...bigPickle,
-        options: [{ id: "variant", value: "default" }],
+        options: [{ id: "variant", value: "max" }],
       });
       assert.equal(runtime.getModelContextWindow?.(bigPickle, WORK), 160000);
       assert.equal(runtime.getModelContextWindow?.(bigPickle, custom), 48000);
