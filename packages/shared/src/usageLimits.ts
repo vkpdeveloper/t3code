@@ -166,9 +166,27 @@ export interface LimitAccount {
 
 export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
+  const windowSources = new Map<
+    string,
+    Map<string, { readonly checkedAt: number; readonly window: ServerProviderUsageWindow }>
+  >();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
   const merge = (key: string, next: LimitAccount) => {
+    let windows = windowSources.get(key);
+    if (!windows) {
+      windows = new Map();
+      windowSources.set(key, windows);
+    }
+    // Sources can report different windows for the same account. Keep each
+    // window's own timestamp so a partial read cannot make older data newer.
+    const checkedAt = Date.parse(next.limits.checkedAt);
+    for (const window of next.limits.windows) {
+      const previous = windows.get(window.id);
+      if (!previous || checkedAt > previous.checkedAt) {
+        windows.set(window.id, { checkedAt, window });
+      }
+    }
     // Redeeming through a hub also clears the routing cooldown that hub holds
     // for the account. Redeeming natively against the same subscription resets
     // it upstream but leaves the hub refusing to route to the account until
@@ -217,6 +235,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
       limits: {
         ...winner.limits,
+        windows: [...windows.values()].map(({ window }) => window),
         ...(creditSource?.limits.resetCredits
           ? { resetCredits: creditSource.limits.resetCredits }
           : { resetCredits: undefined }),
