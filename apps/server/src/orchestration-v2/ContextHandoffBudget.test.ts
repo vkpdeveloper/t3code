@@ -249,6 +249,39 @@ describe("handoff budget", () => {
     assert.equal(handoffBudget({ ...base, tokenCap: 2_000 }), 2_000);
   });
 
+  it("keeps bounded history available when the provider's context window is unknown", () => {
+    const input = {
+      tokenCap: 16_000,
+      userText: "Continue work",
+      attachments: [],
+      providerThread,
+      nativeContextEstimate: 200_000,
+    };
+    assert.equal(handoffBudget(input), 16_000);
+    assert.equal(handoffBudget({ ...input, tokenCap: 100_000 }), 64_000);
+    assert.equal(handoffBudget({ ...input, modelContextWindow: 128_000 }), 0);
+    assert.equal(
+      handoffBudget({
+        ...input,
+        providerThread: {
+          ...providerThread,
+          contextUsage: { usedTokens: 200_000, maxTokens: 256_000 },
+        },
+      }),
+      0,
+    );
+    assert.equal(
+      handoffBudget({
+        ...input,
+        providerThread: {
+          ...providerThread,
+          contextUsage: { usedTokens: 200_000, autoCompactThreshold: 220_000 },
+        },
+      }),
+      0,
+    );
+  });
+
   it("keeps measured occupancy across a model change", () => {
     const previous = {
       usedTokens: 37_321,
@@ -340,6 +373,7 @@ describe("handoff budget", () => {
         attachments: [],
         providerThread,
         nativeContextEstimate: 120_000,
+        modelContextWindow: 128_000,
       }),
       0,
     );
@@ -352,6 +386,7 @@ describe("handoff budget", () => {
         userText: "Compare these screenshots",
         providerThread,
         nativeContextEstimate: 0,
+        modelContextWindow: 128_000,
         attachments: Array.from({ length: count }, (_, index) => ({
           type: "image",
           id: `image-${index}`,
