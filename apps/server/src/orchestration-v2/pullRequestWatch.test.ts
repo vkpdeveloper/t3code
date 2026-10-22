@@ -58,10 +58,71 @@ const remark = (
 const noRemarks: ReadonlyArray<PullRequestComment> = [];
 
 describe("evaluatePullRequestWatch", () => {
+  it.each([true, false])("baselines already-passed checks (required: %s)", (required) => {
+    const green = detail({ checks: [{ ...check("test", "success"), required }] });
+    const baseline = evaluatePullRequestWatch(watch(), green, noRemarks);
+    assert.deepEqual(baseline.changes, []);
+    assert.equal(baseline.next.headSha, green.headSha);
+    assert.isTrue(baseline.next.passed);
+    assert.deepEqual(baseline.next.passedChecks, ["test"]);
+    assert.equal(baseline.next.wakes, 0);
+    assert.isFalse(baseline.exhausted);
+    assert.deepEqual(evaluatePullRequestWatch(baseline.next, green, noRemarks).changes, []);
+
+    const failedCheck = { ...green.checks[0]!, status: "failure" as const };
+    const failing = { ...green, checks: [failedCheck] };
+    const failed = evaluatePullRequestWatch(baseline.next, failing, noRemarks);
+    assert.deepEqual(failed.changes, [{ kind: "checks-failed", failed: [failedCheck] }]);
+    assert.deepEqual(evaluatePullRequestWatch(failed.next, failing, noRemarks).changes, []);
+
+    const nextHead = { ...green, headSha: "bbbbbbbbbb" };
+    const pushed = evaluatePullRequestWatch(baseline.next, nextHead, noRemarks);
+    assert.deepEqual(pushed.changes, [{ kind: "checks-passed", count: 1, required }]);
+    assert.deepEqual(evaluatePullRequestWatch(pushed.next, nextHead, noRemarks).changes, []);
+  });
+
+  it("baselines existing failures and conflicts", () => {
+    const failing = detail({
+      checks: [
+        check("lint", "failure"),
+        check("test", "cancelled"),
+        check("bot", "action-required"),
+      ],
+      mergeability: "conflicting",
+    });
+    const baseline = evaluatePullRequestWatch(watch(), failing, noRemarks);
+    assert.deepEqual(baseline.changes, []);
+    assert.deepEqual(baseline.next.failedChecks, ["lint", "test", "bot"]);
+    assert.isFalse(baseline.next.passed);
+    assert.isTrue(baseline.next.conflicting);
+    assert.deepEqual(evaluatePullRequestWatch(baseline.next, failing, noRemarks).changes, []);
+
+    const clean = evaluatePullRequestWatch(baseline.next, detail(), noRemarks);
+    assert.deepEqual(evaluatePullRequestWatch(clean.next, failing, noRemarks).changes, [
+      { kind: "checks-failed", failed: failing.checks },
+      { kind: "conflicting" },
+    ]);
+  });
+
+  it("reports new remarks while baselining checks and conflicts", () => {
+    const old = remark("reviewer", "2026-10-02T11:00:00Z");
+    const fresh = remark("reviewer", "2026-10-02T12:06:00Z");
+    const report = evaluatePullRequestWatch(
+      watch(),
+      detail({ checks: [check("test", "success")], mergeability: "conflicting" }),
+      [old, fresh],
+    );
+    assert.deepEqual(report.changes, [{ kind: "remarks", remarks: [fresh] }]);
+    assert.isTrue(report.next.passed);
+    assert.isTrue(report.next.conflicting);
+    assert.equal(report.next.remarksThrough, fresh.createdAt);
+    assert.equal(report.next.wakes, 1);
+  });
+
   it("reports each failure at once, even while another check never finishes", () => {
     const bot = check("CodeRabbit", "pending");
     const first = detail({ checks: [check("lint", "failure"), check("test", "pending"), bot] });
-    const lint = evaluatePullRequestWatch(watch(), first, noRemarks);
+    const lint = evaluatePullRequestWatch(watch({ headSha: "aaaaaaaaaa" }), first, noRemarks);
     assert.deepEqual(lint.changes, [{ kind: "checks-failed", failed: [check("lint", "failure")] }]);
     assert.deepEqual(evaluatePullRequestWatch(lint.next, first, noRemarks).changes, []);
 
@@ -84,7 +145,8 @@ describe("evaluatePullRequestWatch", () => {
     const green = detail({
       checks: [required("test", "success"), required("lint", "success"), check("bot", "pending")],
     });
-    const passed = evaluatePullRequestWatch(watch(), green, noRemarks);
+    const pending = evaluatePullRequestWatch(watch(), detail(), noRemarks);
+    const passed = evaluatePullRequestWatch(pending.next, green, noRemarks);
     assert.deepEqual(passed.changes, [{ kind: "checks-passed", count: 2, required: true }]);
     assert.deepEqual(evaluatePullRequestWatch(passed.next, green, noRemarks).changes, []);
 
@@ -100,7 +162,7 @@ describe("evaluatePullRequestWatch", () => {
     const tests = detail({
       checks: [required("Tests", "success"), check("Smoke Tests", "pending")],
     });
-    const first = evaluatePullRequestWatch(watch(), tests, noRemarks);
+    const first = evaluatePullRequestWatch(watch({ headSha: "aaaaaaaaaa" }), tests, noRemarks);
     assert.deepEqual(first.changes, [{ kind: "checks-passed", count: 1, required: true }]);
 
     const gated = detail({
@@ -127,7 +189,7 @@ describe("evaluatePullRequestWatch", () => {
   // regression: #16208 PR watches burned GitHub's rate limit and gave up
   it("does not report passed again for a new passed check where none is required", () => {
     const first = evaluatePullRequestWatch(
-      watch(),
+      watch({ headSha: "aaaaaaaaaa" }),
       detail({ checks: [check("test", "success")] }),
       noRemarks,
     );
@@ -186,7 +248,7 @@ describe("evaluatePullRequestWatch", () => {
 
   it("does not treat a failed check read as a rerun", () => {
     const failed = detail({ checks: [check("lint", "failure")] });
-    const reported = evaluatePullRequestWatch(watch(), failed, noRemarks);
+    const reported = evaluatePullRequestWatch(watch({ headSha: "aaaaaaaaaa" }), failed, noRemarks);
     assert.equal(reported.changes.length, 1);
     const unreadable = evaluatePullRequestWatch(reported.next, detail({ checks: [] }), noRemarks);
     assert.deepEqual(evaluatePullRequestWatch(unreadable.next, failed, noRemarks).changes, []);
@@ -216,7 +278,11 @@ describe("evaluatePullRequestWatch", () => {
 
   it("reports a conflict once, until the branch is clean again", () => {
     const conflicting = detail({ mergeability: "conflicting" });
-    const first = evaluatePullRequestWatch(watch(), conflicting, noRemarks);
+    const first = evaluatePullRequestWatch(
+      watch({ headSha: "aaaaaaaaaa" }),
+      conflicting,
+      noRemarks,
+    );
     assert.deepEqual(first.changes, [{ kind: "conflicting" }]);
     const recomputing = evaluatePullRequestWatch(
       first.next,
