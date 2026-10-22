@@ -103,6 +103,12 @@ context meter and cumulative cost metadata. Text resources and links render as a
 binary resources, images, and audio that T3 Code cannot render yet appear as explicit placeholders
 instead of disappearing.
 
+If an agent does not report its context capacity, set **Context window (tokens)** under
+**Settings → Providers** to your model's documented limit. This lets provider handoffs use that
+capacity instead of the 128,000-token fallback. The setting applies to every model in the instance;
+use the smallest limit if you switch between models. Reported smaller limits still take precedence.
+Clear the setting to return to the default.
+
 ## Permissions and terminals
 
 Registry agents read files, edit, and run commands themselves, under their own sandbox and

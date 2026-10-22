@@ -3,6 +3,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ContextHandoffId,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -13,6 +14,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  TurnItemId,
   ProjectId,
   type OrchestrationV2ThreadProjection,
   OrchestrationV2DomainEvent,
@@ -534,12 +536,11 @@ function makeLocalCommandHarness(input: {
                 } as never)
               : Effect.die("A local command must not open a native session."),
   );
-  const startRootRun = vi.fn<
-    (input: RunExecutionService.RunExecutionServiceV2StartRootRunInput) => Effect.Effect<void>
-  >(() =>
-    input.failReadsAfterRunning === true
-      ? Effect.void
-      : Effect.die("A local command must not start a native turn."),
+  const startRootRun = vi.fn<RunExecutionService.RunExecutionServiceV2["Service"]["startRootRun"]>(
+    () =>
+      input.failReadsAfterRunning === true
+        ? Effect.void
+        : Effect.die("A local command must not start a native turn."),
   );
   const failReadIfRunning = Effect.suspend(() =>
     input.failReadsAfterRunning === true &&
@@ -602,13 +603,30 @@ function makeLocalCommandHarness(input: {
       ),
     }),
   );
+  const getTurnStartHistory = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getTurnStartHistory"]>(
+    () =>
+      Effect.fail(
+        new ProjectionStore.ProjectionStoreReadError({
+          threadId,
+          cause: input.historyReadFailureAfterFallback,
+        }),
+      ),
+  );
+  const write = ({ events: incoming }: Parameters<EventSink.EventSinkV2["Service"]["write"]>[0]) =>
+    Effect.sync(() => {
+      for (const event of incoming) {
+        events.push(event);
+        projection = ProjectionStore.applyToProjection(projection, event);
+      }
+      return [];
+    });
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
           prepareProviderHandoff: () => Effect.die("history read must fail first"),
         }),
-        Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
+        Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent, write }),
         IdAllocator.layer,
         layerWorktreeLocation(input.worktreesDir),
         input.fileSystem === undefined
@@ -634,13 +652,7 @@ function makeLocalCommandHarness(input: {
                   (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
               ),
             }),
-          getTurnStartHistory: () =>
-            Effect.fail(
-              new ProjectionStore.ProjectionStoreReadError({
-                threadId,
-                cause: input.historyReadFailureAfterFallback,
-              }),
-            ),
+          getTurnStartHistory,
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ open }),
         Layer.mock(ProviderAuthService.ProviderAuthService)({ tryHandlePromptCommand }),
@@ -654,6 +666,7 @@ function makeLocalCommandHarness(input: {
   return {
     getThreadRecords,
     getTurnStartContext,
+    getTurnStartHistory,
     setProjection: (next: OrchestrationV2ThreadProjection) => {
       projection = next;
     },
@@ -680,6 +693,130 @@ function makeLocalCommandHarness(input: {
     }).pipe(Effect.provide(layer)),
   };
 }
+
+effectIt.effect.each([false, true])(
+  "budgets stored command output in tokens when resuming a handoff (measured usage: %s)",
+  (measured) =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({ text: "Continue" });
+      const projection = harness.projection();
+      const run = projection.runs[0]!;
+      const providerThread = {
+        ...projection.providerThreads[0]!,
+        nativeThreadRef: {
+          driver: ProviderDriverKind.make("codex"),
+          nativeId: "returning-native-thread",
+          strength: "strong" as const,
+        },
+        ...(measured ? { contextUsage: { usedTokens: 120_000, maxTokens: 128_000 } } : {}),
+      };
+      const now = providerThread.createdAt;
+      const history = [
+        {
+          id: TurnItemId.make("large-command-output"),
+          threadId: projection.thread.id,
+          runId: RunId.make("previous-native-run"),
+          nodeId: null,
+          providerThreadId: providerThread.id,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "completed" as const,
+          title: null,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "command_execution" as const,
+          input: "vp test",
+          output: "test passed\n".repeat(23_000),
+          exitCode: 0,
+        },
+      ];
+      harness.setProjection({
+        ...projection,
+        providerThreads: [providerThread],
+        contextHandoffs: [
+          {
+            id: ContextHandoffId.make("return-handoff"),
+            threadId: projection.thread.id,
+            targetRunId: run.id,
+            fromProviderThreadIds: [],
+            toProviderThreadId: providerThread.id,
+            coveredRunOrdinals: { from: 1, to: 1 },
+            strategy: "delta_since_target_last_seen",
+            status: "ready",
+            summaryMessageId: null,
+            summaryText: "Work from the other provider",
+            createdByProviderInstanceId: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      });
+      harness.getTurnStartHistory.mockReturnValue(Effect.succeed(history));
+      harness.tryHandlePromptCommand.mockReturnValue(Effect.succeed(false));
+      const received: string[] = [];
+      harness.open.mockReturnValue(
+        Effect.succeed({
+          driver: providerThread.driver,
+          providerSession: {
+            id: providerThread.providerSessionId,
+            driver: providerThread.driver,
+            providerInstanceId: providerThread.providerInstanceId,
+            capabilities: CodexProviderCapabilitiesV2,
+            status: "ready",
+            cwd: "/tmp/native-account-command",
+            model: run.modelSelection.model,
+            createdAt: now,
+            updatedAt: now,
+            lastError: null,
+          },
+          resumeThread: () => Effect.succeed(providerThread),
+          startTurn: (input: ProviderAdapter.ProviderAdapterV2TurnInput) =>
+            Effect.sync(() => {
+              received.push(input.message.text);
+            }),
+        }) as never,
+      );
+      harness.startRootRun.mockImplementation((input) =>
+        input.session
+          .startTurn({
+            ...input,
+            threadId: input.run.threadId,
+            runId: input.run.id,
+            runOrdinal: input.run.ordinal,
+            rootNodeId: input.rootNode.id,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RunExecutionService.RunExecutionStartError({
+                  commandId: input.commandId,
+                  runId: input.run.id,
+                  cause,
+                }),
+            ),
+          ),
+      );
+
+      if (measured) {
+        const error = yield* harness.start.pipe(Effect.flip);
+        expect(error._tag).toBe("ProviderTurnStartError");
+        expect(error.cause).toMatchObject({
+          _tag: "RunExecutionStartError",
+          cause: { cause: { _tag: "ContextHandoffBudgetError" } },
+        });
+        expect(received).toEqual([]);
+      } else {
+        yield* harness.start;
+        expect(received).toHaveLength(1);
+        expect(received[0]).toContain("Work from the other provider");
+        expect(received[0]).toContain("Continue");
+        expect(harness.projection().contextHandoffs[0]?.delivery?.status).toBe("inline");
+      }
+    }),
+);
 
 effectIt.effect.each(["cleanup-first", "startup-first"])(
   "coordinates provider startup with %s",

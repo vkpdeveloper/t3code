@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   contextUsageForHandoff,
+  estimateTextTokens,
   handoffBudget,
   historyCost,
   historyResponseItems,
@@ -93,6 +94,16 @@ const handoff: OrchestrationV2ContextHandoff = {
 };
 
 describe("handoff budget", () => {
+  it.each([
+    { text: "", tokens: 0 },
+    { text: "a", tokens: 1 },
+    { text: "test passed\n".repeat(23_000), tokens: 92_000 },
+    { text: "界".repeat(1_000), tokens: 1_000 },
+    { text: "🧪", tokens: 2 },
+  ])("estimates $tokens tokens from UTF-8 text", ({ text, tokens }) => {
+    assert.equal(estimateTextTokens(text), tokens);
+  });
+
   it("keeps old preview handoffs readable and delivery history off the wire", () => {
     const projected = projectContextHandoffForWire({
       ...handoff,
@@ -206,6 +217,7 @@ describe("handoff budget", () => {
     };
     assert.isBelow(handoffBudget(base), 16_000);
     assert.isBelow(handoffBudget({ ...base, nativeContextEstimate: 8_000 }), handoffBudget(base));
+    assert.isAbove(handoffBudget({ ...base, userText: "test passed\n".repeat(2_000) }), 6_000);
     assert.equal(handoffBudget({ ...base, userText: "界".repeat(30_000) }), 0);
     assert.equal(
       handoffBudget({
