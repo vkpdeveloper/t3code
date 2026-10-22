@@ -1063,7 +1063,9 @@ export const layer: Layer.Layer<
                   : 0;
               return (
                 sum +
-                (historical === null ? 0 : Buffer.byteLength(historical.text)) +
+                // Stored text (including command output) is not token usage. Three UTF-8
+                // bytes per token leaves headroom over the typical four for text/code.
+                (historical === null ? 0 : Math.ceil(Buffer.byteLength(historical.text) / 3)) +
                 nativeAttachments
               );
             }, 0)
