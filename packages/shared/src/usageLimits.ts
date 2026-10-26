@@ -170,6 +170,10 @@ export interface LimitAccount {
 
 export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
+  const windowSources = new Map<
+    string,
+    Map<string, { checkedAt: number; window: ServerProviderUsageWindow }>
+  >();
   const creditSources = new Map<string, LimitAccount>();
   const hubRedeems = new Map<string, LimitAccount>();
   const merge = (key: string, next: LimitAccount) => {
@@ -189,6 +193,19 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         Date.parse(next.limits.checkedAt) > Date.parse(previousCredit.limits.checkedAt))
     ) {
       creditSources.set(key, next);
+    }
+    // A hub can omit native-only windows, so freshness belongs to each window.
+    let windows = windowSources.get(key);
+    if (!windows) {
+      windows = new Map();
+      windowSources.set(key, windows);
+    }
+    const checkedAt = Date.parse(next.limits.checkedAt);
+    for (const window of next.limits.windows) {
+      const previousWindow = windows.get(window.id);
+      if (!previousWindow || checkedAt > previousWindow.checkedAt) {
+        windows.set(window.id, { checkedAt, window });
+      }
     }
     const previous = accounts.get(key);
     if (!previous) {
@@ -217,6 +234,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
       limits: {
         ...winner.limits,
+        windows: [...windows.values()].map(({ window }) => window),
         ...(creditSource?.limits.resetCredits
           ? { resetCredits: creditSource.limits.resetCredits }
           : { resetCredits: undefined }),
