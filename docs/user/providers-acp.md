@@ -85,6 +85,12 @@ composer's model options menu like they do for built-in providers. Agents with t
 build modes follow T3 Code's Plan and Build toggle. Models and options that change while an agent
 is running update the picker without waiting for another provider probe.
 
+If switching back to an agent fails with “Insufficient context allowance” and the agent does not
+report its context capacity, set **Context window (tokens)** under **Settings → Providers** on
+web or desktop. Enter the smallest context window among the models you use with that instance
+(for example, `200000` for a 200k window). This applies to turns from every connected client.
+Smaller limits reported by the agent still apply. Clear the setting to restore the 128k fallback.
+
 ## Commands and skills
 
 Slash commands the agent provides appear under **Provider** in the `/` menu while a session is

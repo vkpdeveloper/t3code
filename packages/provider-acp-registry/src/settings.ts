@@ -62,9 +62,26 @@ export const AcpRegistrySettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    contextWindowTokens: TrimmedString.check(
+      Schema.isPattern(/^(?:[1-9][0-9]*)?$/),
+      Schema.makeFilter(
+        (value) =>
+          value === "" ||
+          Number.isSafeInteger(Number(value)) ||
+          "Context window must be a positive safe integer.",
+      ),
+    ).pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Context window (tokens)",
+        description:
+          "Context capacity for provider handoffs when the agent omits it. Use the smallest window of the models used by this instance. Smaller agent-reported limits still apply.",
+        providerSettingsForm: { placeholder: "128000", clearWhenEmpty: "omit" },
+      }),
+    ),
   },
   {
-    order: ["source", "agentId", "commandPath", "authMethodId"],
+    order: ["source", "agentId", "commandPath", "authMethodId", "contextWindowTokens"],
   },
 );
 export type AcpRegistrySettings = typeof AcpRegistrySettings.Type;
