@@ -309,6 +309,12 @@ const resumed = (
   options?: {
     readonly external?: boolean;
     readonly supervised?: boolean;
+    readonly models?: ReadonlyArray<Record<string, unknown>>;
+    readonly sessionModel?: {
+      readonly providerID: string;
+      readonly id: string;
+      readonly variant: string;
+    };
     readonly replayGate?: ProviderReplayGate;
     readonly attachmentsDir?: string;
     readonly resolveExtractedTextPath?: (path: string) => Effect.Effect<string | undefined>;
@@ -319,9 +325,13 @@ const resumed = (
   Effect.gen(function* () {
     const runtime = yield* openCode2ReplayRuntime(
       withInstructions([
-        ...opening,
+        ...opening.slice(0, 2),
+        reply("model.list", { ...modelCatalog, data: options?.models ?? modelCatalog.data }),
         out("session.get", { sessionID: SESSION }),
-        replyData("session.get", sessionInfo()),
+        replyData(
+          "session.get",
+          sessionInfo(options?.sessionModel ? { model: options.sessionModel } : {}),
+        ),
         ...noOpenRequests,
         ...(options?.supervised === true
           ? [
@@ -415,6 +425,132 @@ const history = {
 };
 
 it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
+  it.effect.each([
+    {
+      id: "deepseek-v4.1-flash",
+      variants: ["low", "high", "max"],
+      selected: undefined,
+      expected: "max",
+    },
+    { id: "glm-5.3-flash", variants: ["low", "high", "max"], selected: "medium", expected: "max" },
+    {
+      id: "deepseek-v4.1-flash",
+      variants: ["low", "high", "max"],
+      selected: "xhigh",
+      expected: "max",
+    },
+    {
+      id: "deepseek-v4.1-flash",
+      variants: ["low", "high", "max"],
+      selected: "high",
+      expected: "high",
+    },
+    {
+      id: "muse-spark-1.3-contributor",
+      variants: ["minimal", "low", "medium", "high", "xhigh"],
+      selected: "medium",
+      expected: "medium",
+    },
+    {
+      id: "muse-spark-1.3-contributor",
+      variants: ["minimal", "low", "medium", "high", "xhigh"],
+      selected: "xhigh",
+      expected: "xhigh",
+    },
+    { id: "no-reasoning", variants: [], selected: "medium", expected: undefined },
+  ])(
+    "normalizes $id variant $selected when creating a thread",
+    ({ id, variants, selected, expected }) =>
+      Effect.gen(function* () {
+        const model = {
+          providerID: "opencode-go",
+          id,
+          ...(expected === undefined ? {} : { variant: expected }),
+        };
+        const runtime = yield* openCode2ReplayRuntimeWithInstructions([
+          ...opening.slice(0, 2),
+          reply("model.list", {
+            ...modelCatalog,
+            data: [
+              {
+                ...modelCatalog.data[0],
+                providerID: "opencode-go",
+                id,
+                variants: variants.map((id) => ({ id, settings: {} })),
+              },
+            ],
+          }),
+          out("session.create", { model, location: { directory: WORK } }),
+          replyData("session.create", sessionInfo({ model })),
+          out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+          promptAccepted,
+          event("session.execution.succeeded", { sessionID: SESSION }),
+        ]);
+        const selection = {
+          instanceId,
+          model: `opencode-go/${id}`,
+          ...(selected === undefined ? {} : { options: [{ id: "variant", value: selected }] }),
+        };
+        const thread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: selection,
+          runtimePolicy: policy(),
+        });
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn(turnInput(thread, selection));
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+        assert.equal(selection.options?.[0]?.value, selected);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect.each(["medium", "xhigh"])(
+    "repairs an inherited %s variant before prompting a resumed worker",
+    (selected) =>
+      Effect.gen(function* () {
+        const id = "glm-5.3-flash";
+        const { runtime, thread } = yield* resumed(
+          [
+            out("session.switchModel", {
+              sessionID: SESSION,
+              model: { providerID: "opencode-go", id, variant: "max" },
+            }),
+            reply("session.switchModel", null),
+            out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+            promptAccepted,
+            event("session.execution.succeeded", { sessionID: SESSION }),
+          ],
+          {
+            sessionModel: { providerID: "opencode-go", id, variant: selected },
+            models: [
+              {
+                ...modelCatalog.data[0],
+                providerID: "opencode-go",
+                id,
+                variants: ["low", "high", "max"].map((id) => ({ id, settings: {} })),
+              },
+            ],
+          },
+        );
+        const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+        yield* runtime.startTurn({
+          ...turnInput(thread, {
+            instanceId,
+            model: `opencode-go/${id}`,
+            options: [{ id: "variant", value: selected }],
+          }),
+          appThread: {
+            title: TITLE,
+            lineage: {
+              parentThreadId: ThreadId.make("parent"),
+              relationshipToParent: "subagent",
+              rootThreadId: ThreadId.make("parent"),
+            },
+          } as OrchestrationV2AppThread,
+        });
+        assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("switches the session's model and variant before a turn that changed them", () =>
     Effect.gen(function* () {
       const { runtime, thread } = yield* resumed([
