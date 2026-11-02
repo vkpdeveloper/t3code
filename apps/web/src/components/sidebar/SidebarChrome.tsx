@@ -1,11 +1,5 @@
 import { useAtom, useAtomValue } from "@effect/atom-react";
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  BotIcon,
-  ChartNoAxesColumnIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
@@ -24,6 +18,7 @@ import { isThreadRoutePathname } from "../../threadRoutes";
 import { usePullRequestsSupported } from "../../state/environments";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { BotAvatar } from "../bots/BotAvatar";
+import { BotFaceIcon } from "../bots/BotFaceIcon";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -264,7 +259,7 @@ function SidebarBotsItem() {
         unreadBot && !showingBots ? (
           <BotAvatar avatar={unreadBot.avatar} threadRef={unreadBot.threadRef} className="size-4" />
         ) : (
-          <BotIcon />
+          <BotFaceIcon />
         )
       }
       label={showingBots ? "Threads" : unreadBot ? `Bots, ${unreadBot.name} replied` : "Bots"}

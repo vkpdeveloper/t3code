@@ -106,7 +106,10 @@ function BotsEmpty(props: { readonly onNewBot: () => void }) {
   return (
     <View className="items-center gap-4 px-8 py-16">
       <Text className="text-center text-base text-foreground-muted">No bots yet.</Text>
-      <Button label="New bot" icon="plus" tone="primary" onPress={props.onNewBot} />
+      {/* Button sizes to its label with self-start, so this wrapper centers it. */}
+      <View>
+        <Button label="New bot" icon="plus" tone="primary" onPress={props.onNewBot} />
+      </View>
     </View>
   );
 }
