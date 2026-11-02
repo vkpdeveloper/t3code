@@ -378,6 +378,16 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  BotCreateInput,
+  BotCreateResult,
+  BotDeleteInput,
+  BotError,
+  BotGenerateAvatarInput,
+  BotGenerateAvatarResult,
+  BotMutationResult,
+  BotUpdateInput,
+} from "./bot.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -548,6 +558,11 @@ export const WS_METHODS = {
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
+
+  botsCreate: "bots.create",
+  botsUpdate: "bots.update",
+  botsDelete: "bots.delete",
+  botsGenerateAvatar: "bots.generateAvatar",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -1931,6 +1946,30 @@ const WsScheduledTasksRotateWebhookTokenRpc = Rpc.make(
   },
 );
 
+const WsBotsCreateRpc = Rpc.make(WS_METHODS.botsCreate, {
+  payload: BotCreateInput,
+  success: BotCreateResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
+const WsBotsUpdateRpc = Rpc.make(WS_METHODS.botsUpdate, {
+  payload: BotUpdateInput,
+  success: BotMutationResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
+const WsBotsDeleteRpc = Rpc.make(WS_METHODS.botsDelete, {
+  payload: BotDeleteInput,
+  success: BotMutationResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
+const WsBotsGenerateAvatarRpc = Rpc.make(WS_METHODS.botsGenerateAvatar, {
+  payload: BotGenerateAvatarInput,
+  success: BotGenerateAvatarResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
 const WsGuestShareCreateRpc = Rpc.make(WS_METHODS.guestShareCreate, {
   payload: GuestShareCreateInput,
   success: GuestShareCreateResult,
@@ -2045,6 +2084,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
+  WsBotsCreateRpc,
+  WsBotsUpdateRpc,
+  WsBotsDeleteRpc,
+  WsBotsGenerateAvatarRpc,
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
