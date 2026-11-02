@@ -1,6 +1,7 @@
 import {
   isListedThreadLineage,
   type EnvironmentId,
+  type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
@@ -13,6 +14,7 @@ import {
   type RelayAgentActivityState,
 } from "@t3tools/contracts/relay";
 import { projectThreadAwarenessV2 } from "@t3tools/shared/agentAwareness";
+import { markdownPreviewText } from "@t3tools/shared/markdownPreview";
 import { turnItemUpdateCanEndBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
@@ -196,12 +198,24 @@ function sanitizeRelayAgentActivityState(
   if (state === null) {
     return null;
   }
-  const { detail: _detail, ...rest } = state;
+  const { detail: _detail, message: _message, ...rest } = state;
   const detail = (state.phase === "failed" ? REDACTED_RELAY_AGENT_FAILURE_DETAIL : state.detail)
     ?.trim()
     .slice(0, RELAY_AGENT_ACTIVITY_DETAIL_MAX_LENGTH)
     .trim();
-  return detail ? { ...rest, detail } : rest;
+  const message = state.message?.trim().slice(0, RELAY_AGENT_ACTIVITY_DETAIL_MAX_LENGTH).trim();
+  return { ...rest, ...(detail ? { detail } : {}), ...(message ? { message } : {}) };
+}
+
+function latestReplyPreview(messages: ReadonlyArray<OrchestrationV2ConversationMessage>) {
+  const newestFirst = messages.toSorted(
+    (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
+  );
+  for (const message of newestFirst) {
+    const preview = markdownPreviewText(message.text);
+    if (preview) return preview;
+  }
+  return undefined;
 }
 
 function relayEnvironmentClient(token: string) {
@@ -523,6 +537,39 @@ export const make = Effect.gen(function* () {
       });
     });
 
+    // A bot's reply is its message; other threads alert on status alone.
+    const resolveSnapshot = Effect.fn("AgentAwarenessRelay.resolveSnapshot")(function* (input: {
+      readonly thread: Option.Option<OrchestrationV2ThreadShell>;
+      readonly project: Option.Option<Project>;
+    }) {
+      const snapshot = resolveAgentAwarenessRelayPublishSnapshot({ environmentId, ...input });
+      const latestRunId = Option.isSome(input.thread) ? input.thread.value.latestRunId : null;
+      if (
+        snapshot.state?.phase !== "completed" ||
+        Option.isNone(input.thread) ||
+        Option.isNone(input.project) ||
+        !input.project.value.bot ||
+        latestRunId == null
+      ) {
+        return snapshot;
+      }
+      const { messages } = yield* threads
+        .getThreadRecords(input.thread.value.id, ["messages"], {
+          messageRunIds: [latestRunId],
+          messageRoles: ["assistant"],
+        })
+        .pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("bot reply unavailable for agent activity", { threadId, cause }),
+          ),
+          Effect.orElseSucceed(() => ({ messages: [] })),
+        );
+      const message = latestReplyPreview(messages);
+      return message === undefined
+        ? snapshot
+        : { ...snapshot, state: sanitizeRelayAgentActivityState({ ...snapshot.state, message }) };
+    });
+
     // Read only this thread; full shell reads would make each activity event scale with all threads.
     const threadShell = yield* threads.getThreadShell(threadId);
     if (
@@ -540,11 +587,7 @@ export const make = Effect.gen(function* () {
     const project = Option.isSome(thread)
       ? yield* projects.getById(thread.value.projectId)
       : Option.none<Project>();
-    const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
-      environmentId,
-      thread,
-      project,
-    });
+    const snapshot = yield* resolveSnapshot({ thread, project });
     const publishIdentity = agentAwarenessPublishIdentity(snapshot.state);
     const publishedStateByThread = yield* Ref.get(publishedStateByThreadRef);
     if (
@@ -606,8 +649,7 @@ export const make = Effect.gen(function* () {
         heldCompletions.has(threadId) &&
         Option.isSome(thread) &&
         thread.value.settledOverride === "settled"
-          ? resolveAgentAwarenessRelayPublishSnapshot({
-              environmentId,
+          ? yield* resolveSnapshot({
               thread: Option.some({ ...thread.value, settledOverride: null }),
               project,
             })

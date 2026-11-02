@@ -9,6 +9,7 @@ import {
   type ThreadId,
   WS_METHODS,
 } from "@t3tools/contracts";
+import { markdownPreviewText } from "@t3tools/shared/markdownPreview";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import type * as EnvironmentRegistry from "../connection/registry.ts";
@@ -67,17 +68,8 @@ function hasUnreadBotReply(shell: EnvironmentThreadShell): boolean {
   return Date.parse(completedAt) > Date.parse(shell.lastVisitedAt);
 }
 
-// A one-line preview reads the text a renderer would show, not its Markdown syntax.
-function plainText(markdown: string): string {
-  return markdown
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+[.)]\s+)/gm, "")
-    .replace(/(\*\*|__|`+)(.+?)\1/g, "$2")
-    .replace(/(^|\W)[*_](\S(?:.*?\S)?)[*_](?=\W|$)/g, "$1$2");
-}
-
 function previewText(preview: BotPreview): string | null {
-  const line = plainText(preview.text).replace(/\s+/g, " ").trim();
+  const line = markdownPreviewText(preview.text);
   if (line.length === 0) return null;
   return (preview.role === "user" ? `You: ${line}` : line).slice(0, 160);
 }

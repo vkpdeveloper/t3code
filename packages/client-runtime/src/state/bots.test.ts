@@ -153,7 +153,7 @@ describe("bots", () => {
           {
             threadId: botThreadId,
             role: "assistant",
-            text: "Saved to [trip.md](/Users/me/bots/scout/artifacts/trip.md):\n- **Found**  three\n`flights`.",
+            text: "Saved to trip.md:\n  Found  three\nflights.",
             updatedAt: "2026-06-20T10:00:00.000Z",
           },
           {
