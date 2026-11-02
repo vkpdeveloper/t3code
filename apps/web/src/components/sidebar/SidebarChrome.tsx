@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -20,8 +20,10 @@ import {
 } from "../../navigationHistory";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
-import { sidebarModeAtom, unreadBotAtom } from "../../state/bots";
+import { botListAtom, sidebarModeAtom, unreadBotAtom } from "../../state/bots";
+import { isThreadRoutePathname } from "../../threadRoutes";
 import { usePullRequestsSupported } from "../../state/environments";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { BotAvatar } from "../bots/BotAvatar";
 import { T3Wordmark } from "../T3Wordmark";
 import {
@@ -233,7 +235,25 @@ function SidebarUtilityItem({
 function SidebarBotsItem() {
   const [mode, setMode] = useAtom(sidebarModeAtom);
   const unreadBot = useAtomValue(unreadBotAtom);
+  const navigate = useNavigate();
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
   const showingBots = mode === "bots";
+  const toggle = () => {
+    const { pathname } = router.state.location;
+    if (showingBots) {
+      setMode("threads");
+      const bots = appAtomRegistry.get(botListAtom);
+      const onBotPage =
+        pathname === "/bots" || bots.some((bot) => isThreadRoutePathname(pathname, bot.threadRef));
+      if (onBotPage) void navigate({ to: "/" });
+      return;
+    }
+    setMode("bots");
+    // With no bots the create form is the whole page, so the sheet would only cover it.
+    if (isMobile && appAtomRegistry.get(botListAtom).length === 0) setOpenMobile(false);
+    void navigate({ to: "/bots" });
+  };
   return (
     <SidebarUtilityItem
       icon={
@@ -245,7 +265,7 @@ function SidebarBotsItem() {
       }
       label={showingBots ? "Threads" : unreadBot ? `Bots, ${unreadBot.name} replied` : "Bots"}
       isActive={showingBots}
-      onClick={() => setMode(showingBots ? "threads" : "bots")}
+      onClick={toggle}
     />
   );
 }

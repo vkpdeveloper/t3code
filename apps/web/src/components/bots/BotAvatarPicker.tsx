@@ -22,13 +22,12 @@ export function BotAvatarPicker({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <div role="radiogroup" aria-label="Shape" className="grid grid-cols-7 gap-1.5">
+      <div role="group" aria-label="Shape" className="grid grid-cols-7 gap-1.5">
         {BOT_AVATAR_SHAPES.map((option) => (
           <button
             key={option}
             type="button"
-            role="radio"
-            aria-checked={option === shape}
+            aria-pressed={option === shape}
             aria-label={option}
             disabled={disabled}
             onClick={() => onChange({ shape: option, color })}
@@ -41,13 +40,12 @@ export function BotAvatarPicker({
           </button>
         ))}
       </div>
-      <div role="radiogroup" aria-label="Color" className="flex flex-wrap gap-2">
+      <div role="group" aria-label="Color" className="flex flex-wrap gap-2">
         {BOT_AVATAR_COLORS.map((option) => (
           <button
             key={option}
             type="button"
-            role="radio"
-            aria-checked={option === color}
+            aria-pressed={option === color}
             aria-label={option}
             disabled={disabled}
             onClick={() => onChange({ shape, color: option })}

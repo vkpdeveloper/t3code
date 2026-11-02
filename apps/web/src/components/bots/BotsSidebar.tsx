@@ -92,13 +92,7 @@ export default function BotsSidebar() {
       >
         <SidebarGroup>
           {bots.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              <span>No bots yet</span>
-              <Button size="compact" variant="outline" onClick={() => setCreating(true)}>
-                <PlusIcon />
-                New bot
-              </Button>
-            </div>
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">No bots yet</p>
           ) : (
             <ul className="flex flex-col gap-0.5">
               {bots.map((bot) => (

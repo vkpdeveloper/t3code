@@ -278,7 +278,7 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
       reportFailure("Could not delete bot", result);
       return;
     }
-    void navigate({ to: "/" });
+    void navigate({ to: "/bots" });
   };
   const rows: Array<[string, string]> = [
     ["Computer", presentation?.entry.target.label ?? "Unknown"],
