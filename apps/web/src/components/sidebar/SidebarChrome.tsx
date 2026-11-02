@@ -1,4 +1,11 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { useAtom, useAtomValue } from "@effect/atom-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BotIcon,
+  ChartNoAxesColumnIcon,
+  SettingsIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -13,7 +20,9 @@ import {
 } from "../../navigationHistory";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
+import { sidebarModeAtom, unreadBotAtom } from "../../state/bots";
 import { usePullRequestsSupported } from "../../state/environments";
+import { BotAvatar } from "../bots/BotAvatar";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -196,10 +205,12 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
+  isActive = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  isActive?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -207,7 +218,7 @@ function SidebarUtilityItem({
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton aria-label={label} isActive={isActive} onClick={onClick} size="icon">
               {icon}
             </SidebarMenuButton>
           }
@@ -215,6 +226,27 @@ function SidebarUtilityItem({
         <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
+  );
+}
+
+/** Switches the sidebar between threads and bots; shows a bot's avatar while it has an unread reply. */
+function SidebarBotsItem() {
+  const [mode, setMode] = useAtom(sidebarModeAtom);
+  const unreadBot = useAtomValue(unreadBotAtom);
+  const showingBots = mode === "bots";
+  return (
+    <SidebarUtilityItem
+      icon={
+        unreadBot && !showingBots ? (
+          <BotAvatar avatar={unreadBot.avatar} threadRef={unreadBot.threadRef} className="size-4" />
+        ) : (
+          <BotIcon />
+        )
+      }
+      label={showingBots ? "Threads" : unreadBot ? `Bots, ${unreadBot.name} replied` : "Bots"}
+      isActive={showingBots}
+      onClick={() => setMode(showingBots ? "threads" : "bots")}
+    />
   );
 }
 
@@ -283,6 +315,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
+          <SidebarBotsItem />
         </>
       )}
       <SidebarThreadUndoNotice />
