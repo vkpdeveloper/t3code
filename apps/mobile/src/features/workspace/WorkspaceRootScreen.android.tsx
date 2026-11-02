@@ -50,11 +50,7 @@ export function WorkspaceRootScreen() {
         ) : null}
         <SafeAreaInsetsContext
           value={
-            layout.usesSplitView
-              ? insets
-              : floatingTabsEnabled
-                ? insets
-                : { ...insets, bottom: 0 }
+            layout.usesSplitView ? insets : floatingTabsEnabled ? insets : { ...insets, bottom: 0 }
           }
         >
           {enabled.length === 0 ? (

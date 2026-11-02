@@ -153,4 +153,3 @@ describe("workspace root navigation", () => {
     expect(workspaceTabForNativeSlot(order, "removed")).toBeNull();
   });
 });
-
