@@ -87,7 +87,8 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
-  const bot = activeProject?.bot ?? null;
+  // Subagents share their parent's project, so only the bot's own thread gets the bot header.
+  const bot = activeProject?.bot?.threadId === activeThreadId ? activeProject.bot : null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
   const [collapseParentTitle, setCollapseParentTitle] = useState(false);

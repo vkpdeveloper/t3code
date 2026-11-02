@@ -11,6 +11,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { formatModelSlugName } from "@t3tools/shared/model";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { FileIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -364,6 +365,7 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
   const navigate = useNavigate();
   const { presentation } = useEnvironmentPresentation(project.environmentId);
   const deleteBot = useOrchestrationCommand(serverEnvironment.deleteBot, { reportFailure: false });
+  const canDelete = useAtomValue(serverEnvironment.deleteBot.permissionAtom(project.environmentId));
   const [confirming, setConfirming] = useState(false);
   const remove = async () => {
     const result = await deleteBot({
@@ -395,6 +397,7 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
         <Button
           variant="destructive-outline"
           className="w-full"
+          disabled={!canDelete}
           onClick={() => setConfirming(true)}
         >
           <Trash2Icon />
