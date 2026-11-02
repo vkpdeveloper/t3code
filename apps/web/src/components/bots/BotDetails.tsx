@@ -13,10 +13,13 @@ import {
 import { formatModelSlugName } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
+import { DownloadIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { saveUrlAsFile, useAssetUrlRefresh } from "~/assets/assetUrls";
 import { useTheme } from "~/hooks/useTheme";
+import { cn } from "~/lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentProviders } from "../../state/environments";
 import { useQuietThreadShell, useThreadShell } from "../../state/entities";
@@ -291,7 +294,6 @@ function ArtifactEntries({
   entries,
   ...props
 }: ArtifactFolderProps & { entries: ReadonlyArray<ProjectEntry> }) {
-  const { resolvedTheme } = useTheme();
   return (
     <ul className="flex flex-col">
       {entries.map((entry) => {
@@ -299,25 +301,65 @@ function ArtifactEntries({
         return entry.kind === "directory" ? (
           <ArtifactDirectory key={entry.path} {...props} directoryPath={entry.path} name={name} />
         ) : (
-          <li key={entry.path}>
-            <button
-              type="button"
-              onClick={() => useRightPanelStore.getState().openFile(props.threadRef, entry.path)}
-              className={ARTIFACT_ROW_CLASS}
-              style={artifactRowIndent(props.depth)}
-            >
-              <PierreEntryIcon
-                pathValue={name}
-                kind="file"
-                theme={resolvedTheme}
-                className="shrink-0"
-              />
-              <span className="truncate">{name}</span>
-            </button>
-          </li>
+          <ArtifactFile key={entry.path} {...props} path={entry.path} name={name} />
         );
       })}
     </ul>
+  );
+}
+
+function ArtifactFile({
+  path,
+  name,
+  ...props
+}: ArtifactFolderProps & { path: string; name: string }) {
+  const { resolvedTheme } = useTheme();
+  const [saving, setSaving] = useState(false);
+  const prepareDownload = useAssetUrlRefresh(props.project.environmentId, {
+    _tag: "media-file",
+    threadId: props.threadRef.threadId,
+    path: resolvePathLinkTarget(path, props.project.workspaceRoot),
+    disposition: "attachment",
+  });
+  const download = async () => {
+    setSaving(true);
+    try {
+      const url = await prepareDownload();
+      if (!url) throw new Error("Reconnect to the computer and try again.");
+      await saveUrlAsFile(url, name);
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not download file",
+        description: cause instanceof Error ? cause.message : "Try again.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <li className="group relative">
+      <button
+        type="button"
+        onClick={() => useRightPanelStore.getState().openFile(props.threadRef, path)}
+        className={cn(ARTIFACT_ROW_CLASS, "pr-9")}
+        style={artifactRowIndent(props.depth)}
+      >
+        <PierreEntryIcon pathValue={name} kind="file" theme={resolvedTheme} className="shrink-0" />
+        <span className="truncate">{name}</span>
+      </button>
+      <span className="absolute inset-y-0 right-1 flex items-center opacity-0 pointer-coarse:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100">
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-label={`Download ${name}`}
+          disabled={saving}
+          onClick={() => void download()}
+        >
+          <DownloadIcon aria-hidden />
+        </Button>
+      </span>
+    </li>
   );
 }
 

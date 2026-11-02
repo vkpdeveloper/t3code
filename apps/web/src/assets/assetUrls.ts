@@ -116,6 +116,23 @@ export function useAssetUrlState(
   };
 }
 
+/** Saves `blob` as `fileName`. A blob URL keeps desktop's app scheme from opening a browser. */
+export function saveBlobAsFile(blob: Blob, fileName: string) {
+  const downloadUrl = URL.createObjectURL(blob);
+  // Scheduled before the click so the URL is revoked even if the click throws.
+  setTimeout(() => URL.revokeObjectURL(downloadUrl), 30_000);
+  const anchor = document.createElement("a");
+  anchor.href = downloadUrl;
+  anchor.download = fileName;
+  anchor.click();
+}
+
+export async function saveUrlAsFile(url: string, fileName: string) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("The file could not be loaded. Try again.");
+  saveBlobAsFile(await response.blob(), fileName);
+}
+
 export function useAssetUrlRefresh(
   environmentId: EnvironmentId | null,
   resource: AssetResource | null,
