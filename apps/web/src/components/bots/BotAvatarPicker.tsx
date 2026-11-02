@@ -43,9 +43,8 @@ export function BotAvatarPicker({
       <div
         role="group"
         aria-label="Color"
-        className="grid gap-1.5"
-        // One row that spans the shape grid, so no swatch wraps alone on a phone.
-        style={{ gridTemplateColumns: `repeat(${BOT_AVATAR_COLORS.length}, minmax(0, 1fr))` }}
+        // Fills one row where it fits, and wraps instead of shrinking swatches below 24px.
+        className="grid grid-cols-[repeat(auto-fit,minmax(1.5rem,1fr))] gap-1.5"
       >
         {BOT_AVATAR_COLORS.map((option) => (
           <button
