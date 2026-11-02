@@ -81,52 +81,59 @@ export default function BotsSidebar() {
     });
   };
 
+  const newBotButton = (
+    <Button
+      size="icon-lg"
+      variant={isMobile ? "ghost" : "glass"}
+      aria-label="New bot"
+      onClick={() => setCreating(true)}
+    >
+      <PlusIcon />
+    </Button>
+  );
+  // On phones the chat header's controls float over the sheet's top row, so actions sit below it.
+  const searchRow =
+    isMobile || query !== null ? (
+      <SidebarGroup>
+        <div className="flex items-center gap-1">
+          <Input
+            autoFocus={!isMobile}
+            type="search"
+            aria-label="Search bots"
+            placeholder="Search"
+            value={query ?? ""}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setQuery(null);
+            }}
+          />
+          {isMobile ? newBotButton : null}
+        </div>
+      </SidebarGroup>
+    ) : null;
+
   return (
     <>
       <SidebarChromeHeader
         isElectron={isElectron}
         actions={
-          <>
-            <Button
-              size="icon-lg"
-              variant="glass"
-              aria-label="Search bots"
-              aria-pressed={query !== null}
-              onClick={() => setQuery((current) => (current === null ? "" : null))}
-            >
-              <SearchIcon />
-            </Button>
-            <Button
-              size="icon-lg"
-              variant="glass"
-              aria-label="New bot"
-              onClick={() => setCreating(true)}
-            >
-              <PlusIcon />
-            </Button>
-          </>
-        }
-      />
-      <SidebarContent
-        className="min-h-full"
-        fixedHeader={
-          query === null ? null : (
-            <SidebarGroup>
-              <Input
-                autoFocus
-                type="search"
+          isMobile ? null : (
+            <>
+              <Button
+                size="icon-lg"
+                variant="glass"
                 aria-label="Search bots"
-                placeholder="Search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setQuery(null);
-                }}
-              />
-            </SidebarGroup>
+                aria-pressed={query !== null}
+                onClick={() => setQuery((current) => (current === null ? "" : null))}
+              >
+                <SearchIcon />
+              </Button>
+              {newBotButton}
+            </>
           )
         }
-      >
+      />
+      <SidebarContent className="min-h-full" fixedHeader={searchRow}>
         <SidebarGroup>
           {visibleBots.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">

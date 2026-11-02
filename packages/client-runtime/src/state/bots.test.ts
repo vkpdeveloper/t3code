@@ -153,7 +153,7 @@ describe("bots", () => {
           {
             threadId: botThreadId,
             role: "assistant",
-            text: "Found  three\nflights.",
+            text: "Saved to [trip.md](/Users/me/bots/scout/artifacts/trip.md):\n- **Found**  three\n`flights`.",
             updatedAt: "2026-06-20T10:00:00.000Z",
           },
           {
@@ -167,7 +167,11 @@ describe("bots", () => {
     );
 
     const [first, second] = registry.get(bots);
-    expect(first).toMatchObject({ name: "Scout", unread: true, preview: "Found three flights." });
+    expect(first).toMatchObject({
+      name: "Scout",
+      unread: true,
+      preview: "Saved to trip.md: Found three flights.",
+    });
     expect(second).toMatchObject({ name: "Quiet", unread: false, preview: "You: Thanks" });
 
     const visited = registry.get(snapshotAtom(environmentId))!;
