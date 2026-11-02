@@ -63,7 +63,11 @@ function makeHarness(snapshot: OrchestrationV2ShellSnapshot) {
     ]),
   });
   const projects = createEnvironmentProjectAtoms({ catalogValueAtom, snapshotAtom });
-  const threads = createEnvironmentThreadShellAtoms({ catalogValueAtom, snapshotAtom });
+  const threads = createEnvironmentThreadShellAtoms({
+    catalogValueAtom,
+    snapshotAtom,
+    hiddenThreadTagsAtom: () => Atom.make(null),
+  });
   const bots = createBotListAtom({
     botsAtom: projects.botsAtom,
     quietThreadShellAtom: threads.quietThreadShellAtom,

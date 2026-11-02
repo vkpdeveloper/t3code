@@ -54,7 +54,7 @@ export interface BotSummary {
 }
 
 /** A reply the user has not opened yet. Opening the thread moves `lastVisitedAt` past it. */
-export function hasUnreadBotReply(shell: EnvironmentThreadShell): boolean {
+function hasUnreadBotReply(shell: EnvironmentThreadShell): boolean {
   const message = shell.source.latestVisibleMessage;
   if (message === null || message.role !== "assistant") return false;
   if (shell.lastVisitedAt == null) return true;
@@ -66,7 +66,7 @@ function previewText(text: string): string | null {
   return line.length === 0 ? null : line.slice(0, 160);
 }
 
-export function summarizeBot(
+function summarizeBot(
   project: EnvironmentProject,
   shell: EnvironmentThreadShell | null,
 ): BotSummary | null {
@@ -95,7 +95,7 @@ export function summarizeBot(
 }
 
 /** Like a chat list: the most recent activity first. */
-export function compareBots(left: BotSummary, right: BotSummary): number {
+function compareBots(left: BotSummary, right: BotSummary): number {
   const byActivity = Date.parse(right.activityAt) - Date.parse(left.activityAt);
   if (byActivity !== 0 && !Number.isNaN(byActivity)) return byActivity;
   return left.name.localeCompare(right.name);

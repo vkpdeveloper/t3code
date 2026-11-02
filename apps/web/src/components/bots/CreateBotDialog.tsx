@@ -23,11 +23,9 @@ import {
   resolveEffectiveDefaultModelSelection,
 } from "../../modelSelection";
 import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
+  providerInstanceEntriesFor,
   type ProviderInstanceEntry,
   resolveDefaultProviderModelSelection,
-  sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { sidebarModeAtom } from "../../state/bots";
 import {
@@ -38,8 +36,13 @@ import {
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import {
+  ComposerEffortColumn,
+  ComposerPickerFooter,
+  describeComposerEffort,
+} from "../chat/ComposerModelEffort";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
+import type { TraitsSelectionInput } from "../chat/TraitsPicker";
 import { isConnectedWithConfig } from "../settings/scopedSettings";
 import { Button } from "../ui/button";
 import {
@@ -211,9 +214,7 @@ function MachineBotForm({
   const providers =
     (environmentId ? providersByEnvironment.get(environmentId) : undefined) ??
     EMPTY_SERVER_PROVIDERS;
-  const entries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings, null),
-  );
+  const entries = providerInstanceEntriesFor(providers, settings, null);
   const [chosenModel, setChosenModel] = useState<ModelSelection | null>(null);
   const model =
     chosenModel &&
@@ -221,6 +222,21 @@ function MachineBotForm({
       ? chosenModel
       : defaultBotModel(settings, entries);
   const activeEntry = entries.find((entry) => entry.instanceId === model?.instanceId);
+  const traits: TraitsSelectionInput | null =
+    model && activeEntry
+      ? {
+          provider: activeEntry.driverKind,
+          instanceId: model.instanceId,
+          models: activeEntry.models,
+          model: model.model,
+          modelOptions: model.options ?? [],
+          allowPromptInjectedEffort: false,
+          planModeEnabled: settings.planModeEnabled,
+          onModelOptionsChange: (options) =>
+            setChosenModel(createModelSelection(model.instanceId, model.model, options)),
+        }
+      : null;
+  const effort = describeComposerEffort(traits, settings.effortDisplay, "sm");
   // One command id per attempt, so a retry after a lost reply returns the same bot.
   const [commandId, setCommandId] = useState(() => CommandId.make(randomUUID()));
   const trimmedName = name.trim();
@@ -283,7 +299,7 @@ function MachineBotForm({
           {model === null ? (
             <p className="text-sm text-muted-foreground">No providers on this computer</p>
           ) : (
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <div className="flex min-w-0">
               <ProviderModelPicker
                 environmentId={environmentId}
                 disabled={pending}
@@ -298,24 +314,15 @@ function MachineBotForm({
                   model.model,
                 )}
                 isComposerOwned={false}
+                popupAlign="start"
+                triggerSuffix={effort.suffix}
+                triggerDetail={effort.detail}
+                effortColumn={<ComposerEffortColumn traits={traits} />}
+                footer={<ComposerPickerFooter traits={traits} />}
                 onInstanceModelChange={(instanceId, slug) =>
                   setChosenModel(createModelSelection(instanceId, slug))
                 }
               />
-              {activeEntry ? (
-                <TraitsPicker
-                  provider={activeEntry.driverKind}
-                  models={activeEntry.models}
-                  model={model.model}
-                  modelOptions={model.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  planModeEnabled={settings.planModeEnabled}
-                  disabled={pending}
-                  onModelOptionsChange={(options) =>
-                    setChosenModel(createModelSelection(model.instanceId, model.model, options))
-                  }
-                />
-              ) : null}
             </div>
           )}
         </div>

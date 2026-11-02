@@ -1,7 +1,7 @@
 import type { BotAvatarColor, BotAvatarShape } from "@t3tools/contracts";
 
 /** SVG path data on a 100x100 view box. Overlapping subpaths fill with the nonzero rule. */
-export const BOT_AVATAR_SHAPE_PATHS: Record<BotAvatarShape, string> = {
+const BOT_AVATAR_SHAPE_PATHS: Record<BotAvatarShape, string> = {
   circle: "M8.0 50.0a42 42 0 1 0 84 0a42 42 0 1 0 -84 0Z",
   cloud:
     "M12.0 58.0a22 22 0 1 0 44 0a22 22 0 1 0 -44 0ZM30.0 44.0a26 26 0 1 0 52 0a26 26 0 1 0 -52 0ZM54.0 62.0a18 18 0 1 0 36 0a18 18 0 1 0 -36 0ZM34 62V80H72V62Z",
