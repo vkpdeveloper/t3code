@@ -6,6 +6,8 @@ import {
   type BotGenerateAvatarInput,
   type BotGenerateAvatarResult,
   type BotMutationResult,
+  BotPreview,
+  type BotPreviewsResult,
   type BotUpdateInput,
   CommandId,
   type ModelSelection,
@@ -26,10 +28,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/sql/SqlClient";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as ServerConfig from "../config.ts";
+import { indexedMessageCondition } from "../orchestration-v2/messageSearchIndex.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -56,6 +61,7 @@ export class BotService extends Context.Service<
     readonly updateProfile: (
       input: BotProfileUpdateInput,
     ) => Effect.Effect<BotMutationResult, BotError>;
+    readonly previews: () => Effect.Effect<BotPreviewsResult, BotError>;
   }
 >()("t3/bots/BotService") {}
 
@@ -110,6 +116,7 @@ const make = Effect.gen(function* () {
   const providers = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   const settings = yield* ServerSettings.ServerSettingsService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const sql = yield* SqlClient.SqlClient;
 
   // Bot edits read the stored record and write it back whole; serialize them.
   const mutations = yield* Semaphore.make(1);
@@ -507,7 +514,48 @@ const make = Effect.gen(function* () {
     return { imagePath };
   });
 
-  return BotService.of({ create, update, delete: remove, generateAvatar, updateProfile });
+  const decodePreviews = Schema.decodeUnknownEffect(Schema.Array(BotPreview));
+
+  // One indexed lookup per bot walks its thread backwards to the newest visible message,
+  // so the cost stays flat as a bot's chat grows. Text is cut short; the list shows a line.
+  const previews: BotService["Service"]["previews"] = Effect.fn("BotService.previews")(
+    function* () {
+      const rows = yield* sql`
+        SELECT
+          messages.thread_id AS "threadId",
+          messages.role AS "role",
+          substr(json_extract(messages.payload_json, '$.text'), 1, 400) AS "text",
+          messages.updated_at AS "updatedAt"
+        FROM orchestration_v2_projection_messages AS messages
+        WHERE messages.message_id IN (
+          SELECT (
+            SELECT latest.message_id
+            FROM orchestration_v2_projection_messages AS latest
+            WHERE latest.thread_id = bots.thread_id
+              AND ${indexedMessageCondition(sql, "latest")}
+            ORDER BY latest.created_at DESC, latest.message_id DESC
+            LIMIT 1
+          )
+          FROM (
+            SELECT json_extract(bot_json, '$.threadId') AS thread_id
+            FROM projection_projects
+            WHERE bot_json IS NOT NULL AND deleted_at IS NULL
+          ) AS bots
+        )
+      `;
+      return { previews: yield* decodePreviews(rows) };
+    },
+    Effect.mapError(fail("Could not read bot messages.")),
+  );
+
+  return BotService.of({
+    create,
+    update,
+    delete: remove,
+    generateAvatar,
+    updateProfile,
+    previews,
+  });
 });
 
 export const layer = Layer.effect(BotService, make);

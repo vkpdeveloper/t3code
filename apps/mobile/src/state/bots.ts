@@ -1,15 +1,20 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { createBotListAtom } from "@t3tools/client-runtime/state/bots";
+import { createBotListAtom, createBotPreviewsAtomFamily } from "@t3tools/client-runtime/state/bots";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 
 import { appAtomRegistry } from "./atom-registry";
+import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentProjects } from "./projects";
 import { environmentThreadShells } from "./threads";
 
 const botListAtom = createBotListAtom({
   botsAtom: environmentProjects.botsAtom,
   quietThreadShellAtom: environmentThreadShells.quietThreadShellAtom,
+  previewsAtom: createBotPreviewsAtomFamily(connectionAtomRuntime, {
+    botsAtom: environmentProjects.botsAtom,
+    quietThreadShellAtom: environmentThreadShells.quietThreadShellAtom,
+  }),
 });
 
 export function useBotList() {

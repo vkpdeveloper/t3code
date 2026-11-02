@@ -1,13 +1,14 @@
 import {
+  type BotPreviewsResult,
   EnvironmentId,
-  MessageId,
   ProjectId,
+  RunId,
   ThreadId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
@@ -33,14 +34,17 @@ const botProject = {
   },
 };
 
-const reply = (at: string) => ({
-  id: MessageId.make(`reply-${at}`),
-  role: "assistant" as const,
-  text: "Found  three\nflights.",
-  updatedAt: DateTime.makeUnsafe(at),
+// A finished run, as the shell reports it. Message text comes from the previews query.
+const ranUntil = (at: string) => ({
+  latestRunId: RunId.make(`run-${at}`),
+  status: "completed" as const,
+  latestRunCompletedAt: DateTime.makeUnsafe(at),
 });
 
-function makeHarness(snapshot: OrchestrationV2ShellSnapshot) {
+function makeHarness(
+  snapshot: OrchestrationV2ShellSnapshot,
+  previews: BotPreviewsResult = { previews: [] },
+) {
   const snapshotAtom = Atom.family((_environmentId: EnvironmentId) =>
     Atom.make<OrchestrationV2ShellSnapshot | null>(snapshot),
   );
@@ -71,6 +75,7 @@ function makeHarness(snapshot: OrchestrationV2ShellSnapshot) {
   const bots = createBotListAtom({
     botsAtom: projects.botsAtom,
     quietThreadShellAtom: threads.quietThreadShellAtom,
+    previewsAtom: () => Atom.make(AsyncResult.success(previews)),
   });
   return { registry: AtomRegistry.make(), snapshotAtom, projects, threads, bots };
 }
@@ -113,39 +118,57 @@ describe("bots", () => {
     registry.dispose();
   });
 
-  it("marks a reply unread until the thread is visited after it, newest activity first", () => {
-    const { registry, snapshotAtom, bots } = makeHarness({
-      ...v2ShellSnapshot,
-      projects: [
-        botProject,
-        {
-          ...botProject,
-          id: ProjectId.make("quiet"),
-          title: "Quiet",
-          bot: { ...botProject.bot, threadId: ThreadId.make("quiet-thread") },
-        },
-      ],
-      threads: [
-        {
-          ...v2ThreadShell,
-          id: botThreadId,
-          projectId: botProjectId,
-          latestVisibleMessage: reply("2026-06-20T10:00:00.000Z"),
-          lastVisitedAt: DateTime.makeUnsafe("2026-06-20T09:00:00.000Z"),
-        },
-        {
-          ...v2ThreadShell,
-          id: ThreadId.make("quiet-thread"),
-          projectId: ProjectId.make("quiet"),
-          latestVisibleMessage: reply("2026-06-20T08:00:00.000Z"),
-          lastVisitedAt: DateTime.makeUnsafe("2026-06-20T08:30:00.000Z"),
-        },
-      ],
-    });
+  it("marks a finished run unread until the thread is visited after it, newest activity first", () => {
+    const { registry, snapshotAtom, bots } = makeHarness(
+      {
+        ...v2ShellSnapshot,
+        projects: [
+          botProject,
+          {
+            ...botProject,
+            id: ProjectId.make("quiet"),
+            title: "Quiet",
+            bot: { ...botProject.bot, threadId: ThreadId.make("quiet-thread") },
+          },
+        ],
+        threads: [
+          {
+            ...v2ThreadShell,
+            id: botThreadId,
+            projectId: botProjectId,
+            ...ranUntil("2026-06-20T10:00:00.000Z"),
+            lastVisitedAt: DateTime.makeUnsafe("2026-06-20T09:00:00.000Z"),
+          },
+          {
+            ...v2ThreadShell,
+            id: ThreadId.make("quiet-thread"),
+            projectId: ProjectId.make("quiet"),
+            ...ranUntil("2026-06-20T08:00:00.000Z"),
+            lastVisitedAt: DateTime.makeUnsafe("2026-06-20T08:30:00.000Z"),
+          },
+        ],
+      },
+      {
+        previews: [
+          {
+            threadId: botThreadId,
+            role: "assistant",
+            text: "Found  three\nflights.",
+            updatedAt: "2026-06-20T10:00:00.000Z",
+          },
+          {
+            threadId: ThreadId.make("quiet-thread"),
+            role: "user",
+            text: "Thanks",
+            updatedAt: "2026-06-20T07:59:00.000Z",
+          },
+        ],
+      },
+    );
 
     const [first, second] = registry.get(bots);
     expect(first).toMatchObject({ name: "Scout", unread: true, preview: "Found three flights." });
-    expect(second).toMatchObject({ name: "Quiet", unread: false });
+    expect(second).toMatchObject({ name: "Quiet", unread: false, preview: "You: Thanks" });
 
     const visited = registry.get(snapshotAtom(environmentId))!;
     registry.set(snapshotAtom(environmentId), {

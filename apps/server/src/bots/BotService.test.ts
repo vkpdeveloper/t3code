@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as GitManager from "../git/GitManager.ts";
@@ -147,7 +148,11 @@ const withBots = <A, E>(
   ) => Effect.Effect<
     A,
     E,
-    BotService.BotService | ProjectService.ProjectService | NodeServices.NodeServices | Scope.Scope
+    | BotService.BotService
+    | ProjectService.ProjectService
+    | SqlClient.SqlClient
+    | NodeServices.NodeServices
+    | Scope.Scope
   >,
 ) =>
   Effect.gen(function* () {
@@ -318,6 +323,42 @@ it.effect("lets only the bot's own session edit its profile", () =>
       const rename = harness.commands.find((command) => command.type === "thread.metadata.update");
       assert.equal(rename?.threadId, threadId);
       assert.equal(rename?.type === "thread.metadata.update" ? rename.title : null, "Flight Scout");
+    }),
+  ),
+);
+
+it.effect("previews show each bot's newest visible message", () =>
+  withBots(() =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const chatty = yield* createBot("Chatty", "bot-chatty");
+      yield* createBot("Quiet", "bot-quiet");
+      const message = (
+        id: string,
+        role: string,
+        at: string,
+        payload: Record<string, unknown>,
+        streaming = 0,
+      ) => sql`
+        INSERT INTO orchestration_v2_projection_messages
+          (message_id, thread_id, role, streaming, created_at, updated_at, payload_json)
+        VALUES (${id}, ${chatty.threadId}, ${role}, ${streaming}, ${at}, ${at}, ${JSON.stringify(payload)})
+      `;
+      yield* message("m1", "assistant", "2026-01-01T00:00:01Z", { text: "Earlier reply" });
+      yield* message("m2", "user", "2026-01-01T00:00:02Z", { text: "Find me flights" });
+      // Newer, but a notice and a reply still streaming are not what the list shows.
+      yield* message("m3", "user", "2026-01-01T00:00:03Z", { text: "notice", createdBy: "system" });
+      yield* message("m4", "assistant", "2026-01-01T00:00:04Z", { text: "Look" }, 1);
+
+      const bots = yield* BotService.BotService;
+      assert.deepEqual((yield* bots.previews()).previews, [
+        {
+          threadId: chatty.threadId,
+          role: "user",
+          text: "Find me flights",
+          updatedAt: "2026-01-01T00:00:02Z",
+        },
+      ]);
     }),
   ),
 );

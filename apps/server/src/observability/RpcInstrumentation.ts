@@ -91,6 +91,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.botsCreate]: "bots",
   [WS_METHODS.botsUpdate]: "bots",
   [WS_METHODS.botsDelete]: "bots",
+  [WS_METHODS.botsPreviews]: "bots",
   [WS_METHODS.botsGenerateAvatar]: "bots",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",

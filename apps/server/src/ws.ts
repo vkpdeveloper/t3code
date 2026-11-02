@@ -2241,6 +2241,7 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "project.id": input.projectId }).pipe(
             Effect.andThen(bots.generateAvatar(input)),
           ),
+        [WS_METHODS.botsPreviews]: () => bots.previews(),
         [WS_METHODS.guestShareCreate]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(guestShares.create(input)),

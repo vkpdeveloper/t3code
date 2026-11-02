@@ -385,6 +385,8 @@ import {
   BotGenerateAvatarInput,
   BotGenerateAvatarResult,
   BotMutationResult,
+  BotPreviewsInput,
+  BotPreviewsResult,
   BotUpdateInput,
 } from "./bot.ts";
 import {
@@ -563,6 +565,7 @@ export const WS_METHODS = {
   botsUpdate: "bots.update",
   botsDelete: "bots.delete",
   botsGenerateAvatar: "bots.generateAvatar",
+  botsPreviews: "bots.previews",
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -1970,6 +1973,12 @@ const WsBotsGenerateAvatarRpc = Rpc.make(WS_METHODS.botsGenerateAvatar, {
   error: Schema.Union([BotError, EnvironmentAuthorizationError]),
 });
 
+const WsBotsPreviewsRpc = Rpc.make(WS_METHODS.botsPreviews, {
+  payload: BotPreviewsInput,
+  success: BotPreviewsResult,
+  error: Schema.Union([BotError, EnvironmentAuthorizationError]),
+});
+
 const WsGuestShareCreateRpc = Rpc.make(WS_METHODS.guestShareCreate, {
   payload: GuestShareCreateInput,
   success: GuestShareCreateResult,
@@ -2088,6 +2097,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsBotsUpdateRpc,
   WsBotsDeleteRpc,
   WsBotsGenerateAvatarRpc,
+  WsBotsPreviewsRpc,
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,

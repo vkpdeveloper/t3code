@@ -122,6 +122,21 @@ export const BotGenerateAvatarResult = Schema.Struct({
 });
 export type BotGenerateAvatarResult = typeof BotGenerateAvatarResult.Type;
 
+/** Each bot's latest visible message, for the bots list. Thread shells carry no message text. */
+export const BotPreviewsInput = Schema.Struct({});
+export type BotPreviewsInput = typeof BotPreviewsInput.Type;
+
+export const BotPreview = Schema.Struct({
+  threadId: ThreadId,
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  updatedAt: Schema.String,
+});
+export type BotPreview = typeof BotPreview.Type;
+
+export const BotPreviewsResult = Schema.Struct({ previews: Schema.Array(BotPreview) });
+export type BotPreviewsResult = typeof BotPreviewsResult.Type;
+
 export class BotError extends Schema.TaggedError<BotError>()("BotError", {
   message: Schema.String,
   projectId: Schema.optional(ProjectId),
