@@ -36,7 +36,7 @@ export function BotAvatarPicker({
               option === shape && "bg-muted ring-2 ring-foreground/70 ring-inset",
             )}
           >
-            <BotAvatarShapeGlyph shape={option} color={color} className="size-[62%]" />
+            <BotAvatarShapeGlyph shape={option} color={color} pose="side" className="size-[62%]" />
           </button>
         ))}
       </div>

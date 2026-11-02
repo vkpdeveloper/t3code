@@ -110,7 +110,7 @@ function AvatarEditor({
           />
         }
       >
-        <BotAvatar avatar={bot.avatar} threadRef={threadRef} className="size-14" />
+        <BotAvatar avatar={bot.avatar} threadRef={threadRef} animateChanges className="size-14" />
       </PopoverTrigger>
       <PopoverPopup side="bottom" align="start" className="w-72">
         <div className="flex flex-col gap-3">

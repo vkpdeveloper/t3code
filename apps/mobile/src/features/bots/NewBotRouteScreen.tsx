@@ -142,7 +142,7 @@ function NewBotForm(props: {
       contentContainerClassName="gap-6 px-5 pb-10 pt-4"
     >
       <View className="items-center">
-        <BotAvatar avatar={{ shape: draft.shape, color: draft.color }} size={88} />
+        <BotAvatar avatar={{ shape: draft.shape, color: draft.color }} size={88} animateChanges />
       </View>
       <SettingsSection>
         <View className="gap-2 p-4">

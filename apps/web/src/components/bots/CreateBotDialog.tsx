@@ -274,7 +274,12 @@ function MachineBotForm({
     <fieldset disabled={pending} className="flex flex-col gap-5">
       <div className="flex justify-center">
         <span className="flex size-20 items-center justify-center rounded-full bg-muted">
-          <BotAvatarShapeGlyph shape={avatar.shape} color={avatar.color} className="size-14" />
+          <BotAvatarShapeGlyph
+            shape={avatar.shape}
+            color={avatar.color}
+            animateChanges
+            className="size-14"
+          />
         </span>
       </div>
       <BotAvatarPicker shape={avatar.shape} color={avatar.color} onChange={onAvatarChange} />

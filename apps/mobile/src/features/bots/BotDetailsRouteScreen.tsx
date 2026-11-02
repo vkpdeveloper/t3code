@@ -81,7 +81,7 @@ function BotDetails(props: { readonly project: BotProject }) {
       contentContainerClassName="gap-6 px-5 pb-10 pt-4"
     >
       <View className="items-center gap-3">
-        <BotAvatar avatar={project.bot.avatar} size={88} source={source} />
+        <BotAvatar avatar={project.bot.avatar} size={88} source={source} animateChanges />
         <Text className="text-center text-xl font-t3-bold text-foreground" numberOfLines={2}>
           {project.title}
         </Text>

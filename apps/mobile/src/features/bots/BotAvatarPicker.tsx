@@ -35,7 +35,11 @@ export function BotAvatarPicker(props: {
               shape === props.shape ? "border-primary" : "border-transparent",
             )}
           >
-            <BotAvatar avatar={{ shape, color: props.color }} size={40} />
+            <BotAvatar
+              avatar={{ shape, color: props.color }}
+              size={40}
+              pose={shape === props.shape ? "front" : "side"}
+            />
           </Pressable>
         ))}
       </View>
