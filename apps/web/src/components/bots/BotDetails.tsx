@@ -7,17 +7,18 @@ import {
   type BotAvatarColor,
   type BotAvatarShape,
   type ProjectBot,
+  type ProjectEntry,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { formatModelSlugName } from "@t3tools/shared/model";
 import { useNavigate } from "@tanstack/react-router";
-import { FileIcon, SparklesIcon, Trash2Icon } from "lucide-react";
-import { useState } from "react";
+import { FileIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "../../confirmDialog";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentProviders } from "../../state/environments";
-import { useThreadShell } from "../../state/entities";
+import { useQuietThreadShell, useThreadShell } from "../../state/entities";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
@@ -53,6 +54,8 @@ function knownColor(value: string): BotAvatarColor {
   return BOT_AVATAR_COLORS.find((color) => color === value) ?? "gray";
 }
 
+type AvatarChange = { shape: BotAvatarShape; color: BotAvatarColor; imagePath?: null };
+
 function AvatarEditor({
   project,
   bot,
@@ -68,23 +71,27 @@ function AvatarEditor({
   });
   const providers = useEnvironmentProviders().get(project.environmentId) ?? EMPTY_SERVER_PROVIDERS;
   const canGenerate = providers.some(
-    (provider) => provider.driver === "codex" && provider.enabled && provider.installed,
+    (provider) => provider.driver === "codex" && provider.enabled && provider.status === "ready",
   );
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
-  const shape = knownShape(bot.avatar.shape);
-  const color = knownColor(bot.avatar.color);
-  const imagePath = bot.avatar.imagePath ?? null;
+  // The newest unconfirmed pick, so quick picks build on each other instead of the stale server avatar.
+  const [pending, setPending] = useState<AvatarChange | null>(null);
+  const latestSave = useRef(0);
+  const avatar = pending === null ? bot.avatar : { ...bot.avatar, ...pending };
+  const shape = knownShape(avatar.shape);
+  const color = knownColor(avatar.color);
+  const imagePath = avatar.imagePath ?? null;
 
-  const saveAvatar = async (next: {
-    shape: BotAvatarShape;
-    color: BotAvatarColor;
-    imagePath?: null;
-  }) => {
+  const saveAvatar = async (next: AvatarChange) => {
+    const save = ++latestSave.current;
+    setPending(next);
     const result = await updateBot({
       environmentId: project.environmentId,
       input: { projectId: project.id, avatar: next },
     });
+    if (save !== latestSave.current) return;
+    setPending(null);
     if (result._tag === "Failure") reportFailure("Could not update avatar", result);
   };
 
@@ -110,7 +117,7 @@ function AvatarEditor({
           />
         }
       >
-        <BotAvatar avatar={bot.avatar} threadRef={threadRef} animateChanges className="size-14" />
+        <BotAvatar avatar={avatar} threadRef={threadRef} animateChanges className="size-14" />
       </PopoverTrigger>
       <PopoverPopup side="bottom" align="start" className="w-72">
         <div className="flex flex-col gap-3">
@@ -218,6 +225,104 @@ function BotModel({ threadRef }: { threadRef: ScopedThreadRef }) {
   );
 }
 
+type ArtifactFolderProps = {
+  project: EnvironmentProject;
+  threadRef: ScopedThreadRef;
+  directoryPath: string;
+  depth: number;
+  runCompletedAt: string | null;
+};
+
+const ARTIFACT_ROW_CLASS =
+  "flex w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2.5 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
+
+function artifactRowIndent(depth: number) {
+  return { paddingLeft: `${0.625 + depth}rem` };
+}
+
+function useArtifactEntries({
+  project,
+  directoryPath,
+  runCompletedAt,
+}: Pick<ArtifactFolderProps, "project" | "directoryPath" | "runCompletedAt">) {
+  const query = useEnvironmentQuery(
+    projectEnvironment.listEntries({
+      environmentId: project.environmentId,
+      input: { cwd: project.workspaceRoot, directoryPath },
+    }),
+  );
+  const seenRun = useRef(runCompletedAt);
+  const { refresh } = query;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- re-reads the folder from disk after a run, since the agent may have written files
+  useEffect(() => {
+    if (seenRun.current === runCompletedAt) return;
+    seenRun.current = runCompletedAt;
+    if (runCompletedAt !== null) refresh();
+  }, [runCompletedAt, refresh]);
+  const entries = (query.data?.entries ?? []).toSorted(
+    (left, right) =>
+      (left.kind === "directory" ? 0 : 1) - (right.kind === "directory" ? 0 : 1) ||
+      left.path.localeCompare(right.path),
+  );
+  return { entries, loading: query.isPending && query.data === null };
+}
+
+function ArtifactEntries({
+  entries,
+  ...props
+}: ArtifactFolderProps & { entries: ReadonlyArray<ProjectEntry> }) {
+  return (
+    <ul className="flex flex-col">
+      {entries.map((entry) => {
+        const name = entry.path.slice(entry.path.lastIndexOf("/") + 1);
+        return entry.kind === "directory" ? (
+          <ArtifactDirectory key={entry.path} {...props} directoryPath={entry.path} name={name} />
+        ) : (
+          <li key={entry.path}>
+            <button
+              type="button"
+              onClick={() => useRightPanelStore.getState().openFile(props.threadRef, entry.path)}
+              className={ARTIFACT_ROW_CLASS}
+              style={artifactRowIndent(props.depth)}
+            >
+              <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{name}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ArtifactFolder(props: ArtifactFolderProps) {
+  const { entries } = useArtifactEntries(props);
+  return <ArtifactEntries {...props} entries={entries} />;
+}
+
+function ArtifactDirectory({ name, ...props }: ArtifactFolderProps & { name: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className={ARTIFACT_ROW_CLASS}
+        style={artifactRowIndent(props.depth)}
+      >
+        {expanded ? (
+          <FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="truncate">{name}</span>
+      </button>
+      {expanded ? <ArtifactFolder {...props} depth={props.depth + 1} /> : null}
+    </li>
+  );
+}
+
 function BotArtifacts({
   project,
   threadRef,
@@ -225,38 +330,17 @@ function BotArtifacts({
   project: EnvironmentProject;
   threadRef: ScopedThreadRef;
 }) {
-  const query = useEnvironmentQuery(
-    projectEnvironment.listEntries({
-      environmentId: project.environmentId,
-      input: { cwd: project.workspaceRoot, directoryPath: "artifacts" },
-    }),
-  );
-  const files = (query.data?.entries ?? [])
-    .filter((entry) => entry.kind === "file")
-    .toSorted((left, right) => left.path.localeCompare(right.path));
-  if (files.length === 0) {
+  const runCompletedAt = useQuietThreadShell(threadRef)?.latestRun?.completedAt ?? null;
+  const props = { project, threadRef, directoryPath: "artifacts", depth: 0, runCompletedAt };
+  const { entries, loading } = useArtifactEntries(props);
+  if (entries.length === 0) {
     return (
       <p className="px-2.5 py-2 text-sm text-muted-foreground">
-        {query.isPending && query.data === null ? "Loading" : "No artifacts yet"}
+        {loading ? "Loading" : "No artifacts yet"}
       </p>
     );
   }
-  return (
-    <ul className="flex flex-col">
-      {files.map((file) => (
-        <li key={file.path}>
-          <button
-            type="button"
-            onClick={() => useRightPanelStore.getState().openFile(threadRef, file.path)}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          >
-            <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-            <span className="truncate">{file.path.replace(/^artifacts\//, "")}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
+  return <ArtifactEntries {...props} entries={entries} />;
 }
 
 function BotComputer({ project }: { project: EnvironmentProject }) {
