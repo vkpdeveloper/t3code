@@ -126,6 +126,7 @@ import { SettingsProjectGroupingRouteScreen } from "./features/settings/Settings
 import { SettingsProjectOverviewRouteScreen } from "./features/settings/SettingsProjectOverviewRouteScreen";
 import { NewBotRouteScreen } from "./features/bots/NewBotRouteScreen";
 import { BotModelPickerRouteScreen } from "./features/bots/BotModelPickerRouteScreen";
+import { BotDetailsRouteScreen } from "./features/bots/BotDetailsRouteScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
@@ -742,6 +743,10 @@ const RootStackConfig = createWorkspaceStackNavigator({
           ? { presentation: "card" as const }
           : THREAD_SETTINGS_SHEET_OPTIONS),
       },
+    }),
+    BotDetails: createNativeStackScreen({
+      screen: BotDetailsRouteScreen,
+      options: { ...SETTINGS_PAGE_OPTIONS, title: "Bot" },
     }),
     NewTaskProject: createNativeStackScreen({
       screen: NewTaskRouteScreen,

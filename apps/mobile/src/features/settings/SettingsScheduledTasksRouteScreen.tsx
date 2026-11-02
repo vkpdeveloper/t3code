@@ -89,8 +89,13 @@ import {
 } from "./scheduled-task-editor-state";
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
+  SCHEDULE_DAYS as DAYS,
+  describeSchedule,
   formatNextScheduledTaskRun,
-  formatScheduledTaskInterval,
+  formatRunAtDate,
+  formatRunAtTime,
+  formatScheduleTime as formatTime,
+  repeatLabel,
 } from "./scheduledTaskPresentation";
 
 type ScheduledTaskRoutes = {
@@ -99,43 +104,6 @@ type ScheduledTaskRoutes = {
   SettingsScheduledTaskModel: undefined;
   SettingsScheduledTaskBranch: undefined;
 };
-
-const DAYS = [
-  { index: 1, label: "Mon" },
-  { index: 2, label: "Tue" },
-  { index: 3, label: "Wed" },
-  { index: 4, label: "Thu" },
-  { index: 5, label: "Fri" },
-  { index: 6, label: "Sat" },
-  { index: 0, label: "Sun" },
-] as const;
-
-function describeSchedule(task: ScheduledTask): string {
-  if (task.schedule.type === "webhook") return "On webhook";
-  if (task.schedule.type === "once") {
-    const runAt = new Date(task.schedule.runAt);
-    return `Once, ${formatRunAtDate(runAt)} at ${formatRunAtTime(runAt)}`;
-  }
-  if (task.schedule.type === "interval") return formatScheduledTaskInterval(task.schedule.everyMs);
-  const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
-  return `${days} at ${formatTime(task.schedule.timeOfDay)}`;
-}
-
-function formatTime(value: string): string {
-  const [hours, minutes] = value.split(":").map(Number);
-  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return value;
-  const time = new Date();
-  time.setHours(hours ?? 9, minutes ?? 0, 0, 0);
-  return time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function formatRunAtDate(value: Date): string {
-  return value.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-}
-
-function formatRunAtTime(value: Date): string {
-  return value.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
 
 function timePickerValue(value: string): Date {
   const [hours, minutes] = value.split(":").map(Number);
@@ -147,17 +115,6 @@ function timePickerValue(value: string): Date {
     0,
   );
   return time;
-}
-
-function repeatLabel(weekdays: ReadonlyArray<number>): string {
-  const days = new Set(weekdays);
-  if (days.size === 7) return "Every day";
-  if (days.size === 5 && [1, 2, 3, 4, 5].every((day) => days.has(day))) return "Weekdays";
-  return (
-    DAYS.filter((day) => days.has(day.index))
-      .map((day) => day.label)
-      .join(", ") || "Choose days"
-  );
 }
 
 function FormField(props: {

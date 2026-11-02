@@ -62,6 +62,7 @@ import {
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useBotProjectForThread } from "../../state/bots";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import {
   buildTerminalMenuSessions,
@@ -245,10 +246,14 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
 }
 
 function LiveThreadRouteController(props: ThreadRouteScreenProps) {
-  useAndroidWorkspaceBack("threads");
+  const { selectedThread } = useThreadSelection();
+  const botProject = useBotProjectForThread(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
+  useAndroidWorkspaceBack(botProject ? "bots" : "threads");
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
-  const { selectedThread } = useThreadSelection();
   const params = props.route.params ?? {};
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const threadIdRaw = firstRouteParam(params.threadId);
@@ -365,6 +370,10 @@ function ThreadRouteContent(
     selectedEnvironmentConnection,
   } = useThreadSelection();
   useRememberThreadProject(selectedThreadProject);
+  const botProject = useBotProjectForThread(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
   const canOperateThread = useEnvironmentScope(
     selectedThread?.environmentId ?? null,
     AuthOrchestrationOperateScope,
@@ -1023,6 +1032,15 @@ function ThreadRouteContent(
                 onOpenGitInspector={handleOpenGitInspector}
                 onOpenFilesInspector={handleOpenFilesInspector}
                 onReturnToThread={props.onReturnToThread}
+                onOpenBotDetails={
+                  botProject
+                    ? () =>
+                        navigation.navigate("BotDetails", {
+                          environmentId: botProject.environmentId,
+                          projectId: botProject.id,
+                        })
+                    : undefined
+                }
               />
             )
           }

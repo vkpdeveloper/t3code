@@ -19,13 +19,20 @@ export function ThreadHeader(
     readonly onOpenFilesInspector: () => void;
   },
 ) {
-  const goBack = useWorkspaceBackNavigation("threads");
+  const goBack = useWorkspaceBackNavigation(props.onOpenBotDetails ? "bots" : "threads");
   const { layout, panes, toggleAuxiliaryPane, composerKeyboardActive } =
     useAdaptiveWorkspaceLayout();
   const { onOpenTerminal, onMergeBack } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const androidHeaderActions = useMemo<ReadonlyArray<AppBarAction>>(() => {
     const actions: AppBarAction[] = [];
+    if (props.onOpenBotDetails) {
+      actions.push({
+        accessibilityLabel: "Bot details",
+        icon: "info.circle",
+        onPress: props.onOpenBotDetails,
+      });
+    }
     if (props.onReturnToThread) {
       actions.push({
         accessibilityLabel: "Return to chat",
@@ -71,6 +78,7 @@ export function ThreadHeader(
     props.onOpenGitInspector,
     toggleAuxiliaryPane,
     props.onReturnToThread,
+    props.onOpenBotDetails,
     props.hasThreadCwd,
     props.hasWorkspaceRoot,
     props.gitControls.canOpenTerminal,
