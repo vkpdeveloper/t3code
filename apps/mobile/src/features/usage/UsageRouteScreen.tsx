@@ -77,15 +77,12 @@ const MAX_CONTENT_WIDTH = 1080;
 const providerLabel = (provider: UsageProviderKind) => PROVIDER_LABEL[provider];
 const CURSOR_KEYCHAIN_COPY = "Requires access to your Cursor login in macOS Keychain.";
 
-export function UsageRouteScreen(props: { readonly workspace?: boolean }) {
+export function UsageRouteScreen() {
   const route = useRoute<RouteProp<{ Usage: { tab?: string } | undefined }, "Usage">>();
-  return <UsageScreen workspace={props.workspace} tabParam={route.params?.tab} />;
+  return <UsageScreen tabParam={route.params?.tab} />;
 }
 
-function UsageScreen(props: {
-  readonly workspace?: boolean;
-  readonly tabParam: string | undefined;
-}) {
+function UsageScreen(props: { readonly tabParam: string | undefined }) {
   const insets = useSafeAreaInsets();
   const [selection, setSelection] = useState(() => ({
     params: props.tabParam,
@@ -248,7 +245,7 @@ function UsageScreen(props: {
   ) : null;
 
   return (
-    <SettingsScreen title="Usage" trailing={environmentFilter} workspaceRoot={props.workspace}>
+    <SettingsScreen title="Usage" trailing={environmentFilter}>
       {Platform.OS === "ios" ? (
         <NativeStackScreenOptions
           optionsVersion={JSON.stringify({ showEnvironmentFilter, filterIcon, environmentActions })}

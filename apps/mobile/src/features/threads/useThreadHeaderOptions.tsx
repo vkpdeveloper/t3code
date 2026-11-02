@@ -22,6 +22,8 @@ export function useThreadHeaderOptions(props: {
   readonly usesNativeHeaderGlass: boolean;
   readonly gitControls: Parameters<typeof ThreadGitControls>[0];
   readonly onReturnToThread?: () => void;
+  /** Set for a bot's chat, whose details open from the header. */
+  readonly onOpenBotDetails?: () => void;
   readonly draft?: boolean;
 }) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
@@ -31,7 +33,20 @@ export function useThreadHeaderOptions(props: {
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const sidebarHeaderItem = useWorkspaceSidebarHeaderItem();
   const threadCenterHeaderItems = useThreadGitCenterHeaderItems(props.gitControls);
-  const compactRightHeaderItems = useThreadGitRightHeaderItems(props.gitControls);
+  const gitRightHeaderItems = useThreadGitRightHeaderItems(props.gitControls);
+  const botHeaderItems: NativeHeaderItems = props.onOpenBotDetails
+    ? [
+        withNativeGlassHeaderItem({
+          accessibilityLabel: "Bot details",
+          icon: { name: "info.circle", type: "sfSymbol" as const },
+          identifier: "thread-right-bot-details",
+          onPress: props.onOpenBotDetails,
+          type: "button" as const,
+        }),
+      ]
+    : [];
+  const centerHeaderItems = [...botHeaderItems, ...threadCenterHeaderItems];
+  const compactRightHeaderItems = [...botHeaderItems, ...gitRightHeaderItems];
   const splitLeftHeaderItems: NativeHeaderItems = [
     ...(!usesDuoHeader
       ? [
@@ -53,7 +68,7 @@ export function useThreadHeaderOptions(props: {
         ]
       : []),
     sidebarHeaderItem,
-    ...(!usesDuoHeader && !props.draft
+    ...(!usesDuoHeader && !props.draft && !props.onOpenBotDetails
       ? [
           withNativeGlassHeaderItem({
             accessibilityLabel: "New task",
@@ -89,7 +104,7 @@ export function useThreadHeaderOptions(props: {
         : () => compactHomeHeaderItems,
     // The workspace navigator adds compose to the Duo detail column's bar.
     unstable_headerRightItems: () =>
-      usesDuoHeader || layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems,
+      usesDuoHeader || layout.usesSplitView ? centerHeaderItems : compactRightHeaderItems,
     unstable_headerToolbarItems: () => [],
     unstable_headerSubtitle: props.usesNativeHeaderGlass ? props.subtitle : undefined,
     contentStyle: undefined,
@@ -100,7 +115,7 @@ export function useThreadHeaderOptions(props: {
     // Factories re-read only on version changes; include displayed items and hidden callback state such as default refs.
     optionsVersion: [
       splitLeftHeaderItems,
-      threadCenterHeaderItems,
+      centerHeaderItems,
       compactRightHeaderItems,
       usesDuoHeader,
       environmentId,

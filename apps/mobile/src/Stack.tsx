@@ -124,6 +124,9 @@ import {
 } from "./features/settings/SettingsOpenSourceLicensesRouteScreen";
 import { SettingsProjectGroupingRouteScreen } from "./features/settings/SettingsProjectGroupingRouteScreen";
 import { SettingsProjectOverviewRouteScreen } from "./features/settings/SettingsProjectOverviewRouteScreen";
+import { NewBotRouteScreen } from "./features/bots/NewBotRouteScreen";
+import { BotModelPickerRouteScreen } from "./features/bots/BotModelPickerRouteScreen";
+import { BotDetailsRouteScreen } from "./features/bots/BotDetailsRouteScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
@@ -725,6 +728,25 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: ThreadRouteScreen,
       linking: { path: "threads/:environmentId?/:threadId?", alias: ["new/draft"] },
       options: THREAD_HEADER_OPTIONS,
+    }),
+    BotNew: createNativeStackScreen({
+      screen: NewBotRouteScreen,
+      linking: "bots/new",
+      options: { ...SETTINGS_PAGE_OPTIONS, title: "New bot" },
+    }),
+    BotModel: createNativeStackScreen({
+      screen: BotModelPickerRouteScreen,
+      options: {
+        gestureEnabled: true,
+        headerShown: false,
+        ...(Platform.OS === "android"
+          ? { presentation: "card" as const }
+          : THREAD_SETTINGS_SHEET_OPTIONS),
+      },
+    }),
+    BotDetails: createNativeStackScreen({
+      screen: BotDetailsRouteScreen,
+      options: { ...SETTINGS_PAGE_OPTIONS, title: "Bot" },
     }),
     NewTaskProject: createNativeStackScreen({
       screen: NewTaskRouteScreen,

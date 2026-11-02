@@ -112,6 +112,8 @@ type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly terminalSessions: ReadonlyArray<TerminalMenuSession>;
   readonly showActionControls?: boolean;
   readonly showDirectFileControl?: boolean;
+  /** Off for a bot's chat, which has no branch to manage. */
+  readonly showGitMenu?: boolean;
   readonly onOpenTerminal: (terminalId?: string | null) => void;
   readonly onOpenNewTerminal: () => void;
   readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
@@ -419,12 +421,16 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
 
 export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
-  return [actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems;
+  return props.showGitMenu === false
+    ? [actionItems.files, actionItems.terminal]
+    : [actionItems.git, actionItems.files, actionItems.terminal];
 }
 
 export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): HeaderItems {
   const actionItems = useThreadGitHeaderActionItems(props);
-  return [actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems;
+  return props.showGitMenu === false
+    ? [actionItems.files, actionItems.terminal]
+    : [actionItems.files, actionItems.git, actionItems.terminal];
 }
 
 export function ThreadGitControls(props: ThreadGitControlsProps) {
@@ -511,7 +517,9 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
           separateBackground
         />
       ) : null}
-      {showActionControls ? createNativeHeaderMenu(threadGitMenuDefinition(props, model)) : null}
+      {showActionControls && props.showGitMenu !== false
+        ? createNativeHeaderMenu(threadGitMenuDefinition(props, model))
+        : null}
     </Toolbar>
   );
 }

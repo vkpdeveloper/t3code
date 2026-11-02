@@ -15,9 +15,11 @@ import { OrchestratorRuntimeModeAboveCeilingError } from "../../../orchestration
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
+import * as Bots from "../../../bots/BotService.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import { mutateProjectWithClone } from "../../../project/ProjectMutation.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -27,7 +29,6 @@ import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
-import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
@@ -371,6 +372,21 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         type: "project.delete",
         commandId: yield* newCommandId(),
       }).pipe(Effect.mapError(projectFailure));
+    }),
+  ),
+  t3_bot_update: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const { thread } = yield* McpInvocationContext.requireThreadScope(scope, "t3_bot_update");
+      const bots = yield* Bots.BotService;
+      return yield* bots
+        .updateProfile({ threadId: thread.threadId, ...input })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+          ),
+        );
     }),
   ),
   t3_project_clone: McpToolAccess.writesEnvironment(

@@ -11,7 +11,6 @@ import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import {
   NATIVE_WORKSPACE_TAB_SLOTS,
   workspaceTabForNativeSlot,
-  workspaceUsesColumns,
   type WorkspaceTab,
 } from "./workspace-tabs-state";
 import {
@@ -30,6 +29,8 @@ import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 
 const PULL_REQUEST_ICON = require("../../../assets/icons/pull-request.png");
+const BOT_ICON = require("../../../assets/icons/bot-face.png");
+const BOT_SELECTED_ICON = require("../../../assets/icons/bot-face-fill.png");
 
 /** Retain each native controller tree; removing its root can leave RNS's stack empty. */
 function RetainedWorkspaceTab(props: {
@@ -131,11 +132,16 @@ export function WorkspaceNativeTabs(props: {
                   ? { type: "sfSymbol", name: "gearshape" }
                   : tab === "pullRequests"
                     ? { type: "templateSource", templateSource: PULL_REQUEST_ICON }
-                    : { type: "sfSymbol", name: NAVIGATION_TAB_ICONS[tab] },
-                selectedIcon:
-                  !settings && tab === "threads"
+                    : tab === "bots"
+                      ? { type: "templateSource", templateSource: BOT_ICON }
+                      : { type: "sfSymbol", name: NAVIGATION_TAB_ICONS[tab] },
+                selectedIcon: settings
+                  ? undefined
+                  : tab === "threads"
                     ? { type: "sfSymbol", name: "text.bubble.fill" }
-                    : undefined,
+                    : tab === "bots"
+                      ? { type: "templateSource", templateSource: BOT_SELECTED_ICON }
+                      : undefined,
                 overrideScrollViewContentInsetAdjustmentBehavior: false,
               }}
             >
@@ -149,11 +155,7 @@ export function WorkspaceNativeTabs(props: {
           );
         })}
       </Tabs.Host>
-      {(deviceType === "pad" ||
-        compactTabs ||
-        (layout.primarySidebarOverlaysContent &&
-          !workspaceUsesColumns(selectedTab, workspace.settingsOpen))) &&
-      !props.hidden ? (
+      {(deviceType === "pad" || compactTabs) && !props.hidden ? (
         <View
           pointerEvents="box-none"
           style={{

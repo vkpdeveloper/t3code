@@ -97,6 +97,17 @@ export type ReviewGuideGenerationResult = Omit<
   "headSha" | "generatedAt" | "modelSelection"
 >;
 
+export interface ImageGenerationInput {
+  cwd: string;
+  prompt: string;
+  modelSelection: ModelSelection;
+}
+
+export interface ImageGenerationResult {
+  /** Where the provider saved the image. Model output: validate before reading it. */
+  imagePath: string;
+}
+
 export interface ProviderTextGeneration {
   readonly generateCommitMessage: (
     input: CommitMessageGenerationInput,
@@ -117,4 +128,9 @@ export interface ProviderTextGeneration {
   readonly generateReviewGuide: (
     input: ReviewGuideGenerationInput,
   ) => Effect.Effect<ReviewGuideGenerationResult, TextGenerationError>;
+
+  /** Only providers with a hosted image tool implement this. */
+  readonly generateImage?: (
+    input: ImageGenerationInput,
+  ) => Effect.Effect<ImageGenerationResult, TextGenerationError>;
 }

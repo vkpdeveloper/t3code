@@ -1,6 +1,7 @@
 import { WorkspaceNoTabs } from "./WorkspaceNoTabs";
 import { WORKSPACE_TAB_LABELS, useEnabledNavigationTabs } from "./navigation-tabs";
-import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
+import { BotsScreen, useOpenNewBot } from "../bots/BotsScreen";
+import { Toolbar } from "../../components/ui/Toolbar";
 import { SettingsRouteScreen } from "../settings/SettingsRouteScreen";
 import { WorkspaceSectionToolbar } from "./WorkspaceSectionToolbar";
 import { useNavigation } from "@react-navigation/native";
@@ -97,6 +98,7 @@ function WorkspaceRootContent() {
   const keyboardHeight = useKeyboardState((keyboard) => keyboard.height);
   const workspace = useWorkspaceTabs()!;
   const { state } = workspace;
+  const openNewBot = useOpenNewBot();
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const renderHeaderTitle = () => (
@@ -107,23 +109,21 @@ function WorkspaceRootContent() {
   );
   const tab = state.tabs[settingsOpen ? "settings" : state.selectedTab];
   const bottomClearance =
-    layout.primarySidebarOverlaysContent && state.selectedTab === "usage"
-      ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
-      : Platform.OS === "ios" && isDuoDevice(deviceType)
-        ? // The column's safe area already holds the Duo's search toolbar and keyboard.
-          Math.max(insets.bottom, keyboardHeight) + 16
-        : compactTabs || deviceType === "pad"
-          ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
-          : Platform.OS === "ios"
-            ? Math.max(insets.bottom, keyboardHeight) +
-              (systemTabBar || sidebarTabs || tab.searchMode !== "resting"
-                ? sidebarPicker
-                  ? 80
-                  : 16
-                : WORKSPACE_DOCK.height + WORKSPACE_DOCK.bottomGap + 16)
-            : keyboardHeight > 0 && tab.searchMode !== "resting"
-              ? keyboardHeight + 64
-              : Math.max(insets.bottom, 12) + workspaceToolbarHeight(tab.searchMode) + 16;
+    Platform.OS === "ios" && isDuoDevice(deviceType)
+      ? // The column's safe area already holds the Duo's search toolbar and keyboard.
+        Math.max(insets.bottom, keyboardHeight) + 16
+      : compactTabs || deviceType === "pad"
+        ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
+        : Platform.OS === "ios"
+          ? Math.max(insets.bottom, keyboardHeight) +
+            (systemTabBar || sidebarTabs || tab.searchMode !== "resting"
+              ? sidebarPicker
+                ? 80
+                : 16
+              : WORKSPACE_DOCK.height + WORKSPACE_DOCK.bottomGap + 16)
+          : keyboardHeight > 0 && tab.searchMode !== "resting"
+            ? keyboardHeight + 64
+            : Math.max(insets.bottom, 12) + workspaceToolbarHeight(tab.searchMode) + 16;
   const context = { ...workspace, bottomClearance };
 
   return (
@@ -157,10 +157,7 @@ function WorkspaceRootContent() {
               unstable_headerLeftItems: () => [],
               // Beside a detail column the tab bar names the tab and the detail header the page,
               // so the sidebar keeps the brand.
-              headerTitle:
-                sidebarNavigation || (!settingsOpen && state.selectedTab !== "usage")
-                  ? renderHeaderTitle
-                  : undefined,
+              headerTitle: sidebarNavigation || !settingsOpen ? renderHeaderTitle : undefined,
             }}
           />
         ) : (
@@ -198,7 +195,7 @@ function WorkspaceRootContent() {
           ) : state.selectedTab === "pullRequests" ? (
             <PullRequestsScreen />
           ) : (
-            <WorkspaceExtraTab tab={state.selectedTab} />
+            <BotsScreen />
           )}
         </SafeAreaInsetsContext>
         {deviceType !== "pad" && deviceType !== "phone" && sidebarPicker ? (
@@ -211,6 +208,13 @@ function WorkspaceRootContent() {
               : state.selectedTab === "threads" || state.selectedTab === "pullRequests"
           ) ? (
           <WorkspaceToolbar sidebar={sidebarNavigation} onNewTask={startNewTask} />
+        ) : !settingsOpen && state.selectedTab === "bots" ? (
+          <>
+            <Toolbar placement="right">
+              <Toolbar.Button accessibilityLabel="New bot" icon="plus" onPress={openNewBot} />
+            </Toolbar>
+            <WorkspaceSectionToolbar onNewTask={startNewTask} showCompose={false} />
+          </>
         ) : (
           <WorkspaceSectionToolbar onNewTask={startNewTask} showCompose={false} />
         )}

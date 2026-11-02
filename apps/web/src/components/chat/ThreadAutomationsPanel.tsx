@@ -60,6 +60,9 @@ function taskScheduleLine(task: ScheduledTask) {
 export function ThreadAutomationsPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly title?: string;
+  /** Shown instead of hiding the section when the thread has no tasks. */
+  readonly emptyText?: string;
 }) {
   const canOperate = useAtomValue(
     serverEnvironment.runScheduledTaskNow.permissionAtom(props.environmentId),
@@ -80,7 +83,8 @@ export function ThreadAutomationsPanel(props: {
     (task) => task.threadId === props.threadId,
   );
 
-  if (tasksQuery.error === null && boundTasks.length === 0) return null;
+  if (tasksQuery.error === null && boundTasks.length === 0 && props.emptyText === undefined)
+    return null;
 
   const reportFailure = (title: string, error: unknown) => {
     toastManager.add(
@@ -129,7 +133,7 @@ export function ThreadAutomationsPanel(props: {
   return (
     <ThreadDetailsSection
       headingId="thread-details-automations-heading"
-      title="Automations"
+      title={props.title ?? "Automations"}
       data-thread-automations-panel
       actions={
         <Tooltip>
@@ -155,6 +159,10 @@ export function ThreadAutomationsPanel(props: {
         </Tooltip>
       }
     >
+      {boundTasks.length === 0 && tasksQuery.error === null ? (
+        <p className="px-2.5 py-1.5 text-sm text-muted-foreground">{props.emptyText}</p>
+      ) : null}
+
       <ul className="m-0 max-h-[13.5rem] list-none overflow-y-auto p-0">
         {boundTasks.map((task) => (
           <li

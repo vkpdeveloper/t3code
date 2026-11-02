@@ -39,6 +39,8 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { BotDetails } from "../bots/BotDetails";
+import { useProject } from "../../state/entities";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -94,6 +96,8 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
+  const project = useProject({ environmentId: props.environmentId, projectId: props.projectId });
+  const bot = project?.bot ?? null;
   const branchToolbarProps = {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
@@ -148,6 +152,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       }}
     >
       {(density) => {
+        if (project !== null && bot !== null && bot.threadId === props.threadId) {
+          return <BotDetails project={project} bot={bot} threadRef={activeThreadRef} />;
+        }
         // Section flags follow the rows that will render, so no empty section steals the divider rule.
         const show = {
           environment: density === "full" && visible.environment,

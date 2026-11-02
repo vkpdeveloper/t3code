@@ -50,7 +50,7 @@ import * as Schema from "effect/Schema";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
-import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
+import { saveUrlAsFile, useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "~/components/media/MediaActions";
@@ -1640,14 +1640,7 @@ export function WorkspaceLargeTextPreview(props: {
             void (async () => {
               const url = await refreshAssetUrl();
               if (!url) throw new Error("Reconnect to the environment and try again.");
-              const response = await fetch(url);
-              if (!response.ok) throw new Error("The file could not be loaded. Try again.");
-              const downloadUrl = URL.createObjectURL(await response.blob());
-              setTimeout(() => URL.revokeObjectURL(downloadUrl), 30_000);
-              const anchor = document.createElement("a");
-              anchor.href = downloadUrl;
-              anchor.download = props.name.split(/[\\/]/).at(-1) || props.name;
-              anchor.click();
+              await saveUrlAsFile(url, props.name.split(/[\\/]/).at(-1) || props.name);
             })()
               .catch(showError)
               .finally(() => setSaving(false));

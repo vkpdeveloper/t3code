@@ -5,6 +5,7 @@ import {
   EventId,
   MessageId,
   NodeId,
+  type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
@@ -92,6 +93,53 @@ function shell(overrides: Partial<OrchestrationV2ThreadShell> = {}): Orchestrati
   };
 }
 
+type Reply = {
+  readonly message: OrchestrationV2ConversationMessage;
+  readonly item: OrchestrationV2TurnItem;
+};
+
+function reply(text: string, createdAt: string, ordinal: number): Reply {
+  const runId = RunId.make("run:reply");
+  const at = DateTime.makeUnsafe(createdAt);
+  const id = MessageId.make(`message:reply:${ordinal}`);
+  return {
+    message: {
+      id,
+      threadId: THREAD_ID,
+      runId,
+      nodeId: null,
+      role: "assistant",
+      text,
+      attachments: [],
+      streaming: false,
+      createdBy: "agent",
+      creationSource: "provider",
+      createdAt: at,
+      updatedAt: at,
+    },
+    item: {
+      id: TurnItemId.make(`item:reply:${ordinal}`),
+      threadId: THREAD_ID,
+      runId,
+      nodeId: NodeId.make("node:reply"),
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal,
+      title: null,
+      startedAt: at,
+      completedAt: at,
+      updatedAt: at,
+      type: "assistant_message",
+      messageId: id,
+      text,
+      streaming: false,
+      status: "completed",
+    },
+  };
+}
+
 const PublishPayload = Schema.Struct({ state: Schema.NullOr(RelayAgentActivityState) });
 const decodePublishPayload = Schema.decodeUnknownSync(Schema.fromJsonString(PublishPayload));
 const unused = () => Effect.die("Unexpected test dependency call");
@@ -144,6 +192,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly linked?: boolean;
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
+    readonly bot?: boolean;
+    readonly replies?: ReadonlyArray<Reply>;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -202,7 +252,13 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getTimelinePage: () => Effect.die("Unused timeline read"),
     getMessageCount: () => Effect.die("unused message count"),
     getTurnItem: () => Effect.die("unused turn item read"),
-    getThreadRecords: () => Effect.die("unused record read"),
+    getThreadRecords: () =>
+      options.replies === undefined
+        ? Effect.die("unused record read")
+        : Effect.succeed({
+            messages: options.replies.map((entry) => entry.message),
+            turnItems: options.replies.map((entry) => entry.item),
+          } as never),
     getThreadProjection: unused,
     getCheckpointContext: unused,
     getThreadSnapshot: unused,
@@ -281,6 +337,15 @@ const makeTestRelay = Effect.fnUntraced(function* (
           workspaceRoot: "/workspace",
           defaultModelSelection: null,
           scripts: [],
+          ...(options.bot
+            ? {
+                bot: {
+                  threadId: THREAD_ID,
+                  avatar: { shape: "round", color: "blue" },
+                  description: null,
+                },
+              }
+            : {}),
           createdAt: NOW,
           updatedAt: NOW,
           deletedAt: null,
@@ -354,6 +419,63 @@ describe("AgentAwarenessRelay", () => {
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, 2);
       assert.equal(publications[1]?.state?.threadTitle, "Renamed thread");
+    }),
+  );
+
+  it.effect.each([{ bot: true }, { bot: false }])(
+    "attaches a reply preview to a completed thread only for a bot ($bot)",
+    ({ bot }) =>
+      Effect.gen(function* () {
+        const { relay, currentShell, publications } = yield* makeTestRelay({
+          bot,
+          replies: [
+            // Providers can finalize several messages with one timestamp; turn order decides.
+            reply("I am checking the flights", "2026-09-04T12:00:02Z", 2),
+            reply(
+              "# Newer\nSaved to [trip.md](/tmp/trip.md): **three** flights.",
+              "2026-09-04T12:00:02Z",
+              3,
+            ),
+            reply("Older reply", "2026-09-04T12:00:01Z", 1),
+            reply("   ", "2026-09-04T12:00:03Z", 4),
+          ],
+        });
+        yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("run:reply") }));
+        yield* relay.publishThread(THREAD_ID);
+        yield* Ref.set(
+          currentShell,
+          shell({ status: "completed", latestRunId: RunId.make("run:reply") }),
+        );
+        yield* relay.publishThread(THREAD_ID);
+        yield* TestClock.adjust("5 seconds");
+        yield* relay.drain;
+        assert.deepEqual(
+          publications.map((publication) => publication.state?.phase),
+          ["running", "completed"],
+        );
+        assert.isUndefined(publications[0]?.state?.message);
+        assert.equal(
+          publications[1]?.state?.message,
+          bot ? "Newer Saved to trip.md: three flights." : undefined,
+        );
+      }),
+  );
+
+  it.effect("caps a long bot reply preview", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        bot: true,
+        replies: [reply("word ".repeat(100), "2026-09-04T12:00:01Z", 1)],
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(
+        currentShell,
+        shell({ status: "completed", latestRunId: RunId.make("run:reply") }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications[1]?.state?.message, "word ".repeat(31) + "word");
     }),
   );
 

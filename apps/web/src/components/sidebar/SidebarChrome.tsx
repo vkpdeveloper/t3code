@@ -1,9 +1,9 @@
+import { useAtom, useAtomValue } from "@effect/atom-react";
 import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 
-import { useAtomValue } from "@effect/atom-react";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
 import {
@@ -13,7 +13,12 @@ import {
 } from "../../navigationHistory";
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
+import { botListAtom, sidebarModeAtom, unreadBotAtom } from "../../state/bots";
+import { isThreadRoutePathname } from "../../threadRoutes";
 import { usePullRequestsSupported } from "../../state/environments";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { BotAvatar } from "../bots/BotAvatar";
+import { BotFaceIcon } from "../bots/BotFaceIcon";
 import { T3Wordmark } from "../T3Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -42,8 +47,10 @@ import { observeResize } from "~/lib/observeResize";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
+  actions,
 }: {
   isElectron: boolean;
+  actions?: ReactNode;
 }) {
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
@@ -89,6 +96,9 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           </div>
         ) : null}
       </div>
+      {actions ? (
+        <div className="relative z-10 flex shrink-0 items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 });
@@ -196,10 +206,12 @@ function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
 function SidebarUtilityItem({
   icon,
   label,
+  isActive = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
+  isActive?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -207,7 +219,7 @@ function SidebarUtilityItem({
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton aria-label={label} isActive={isActive} onClick={onClick} size="icon">
               {icon}
             </SidebarMenuButton>
           }
@@ -215,6 +227,45 @@ function SidebarUtilityItem({
         <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
     </SidebarMenuItem>
+  );
+}
+
+/** Switches the sidebar between threads and bots; shows a bot's avatar while it has an unread reply. */
+function SidebarBotsItem() {
+  const [mode, setMode] = useAtom(sidebarModeAtom);
+  const unreadBot = useAtomValue(unreadBotAtom);
+  const navigate = useNavigate();
+  const router = useRouter();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const showingBots = mode === "bots";
+  const toggle = () => {
+    const { pathname } = router.state.location;
+    if (showingBots) {
+      setMode("threads");
+      const bots = appAtomRegistry.get(botListAtom);
+      const onBotPage =
+        pathname === "/bots" || bots.some((bot) => isThreadRoutePathname(pathname, bot.threadRef));
+      if (onBotPage) void navigate({ to: "/" });
+      return;
+    }
+    setMode("bots");
+    // With no bots the create form is the whole page, so the sheet would only cover it.
+    if (isMobile && appAtomRegistry.get(botListAtom).length === 0) setOpenMobile(false);
+    void navigate({ to: "/bots" });
+  };
+  return (
+    <SidebarUtilityItem
+      icon={
+        unreadBot && !showingBots ? (
+          <BotAvatar avatar={unreadBot.avatar} threadRef={unreadBot.threadRef} className="size-4" />
+        ) : (
+          <BotFaceIcon />
+        )
+      }
+      label={showingBots ? "Threads" : unreadBot ? `Bots, ${unreadBot.name} replied` : "Bots"}
+      isActive={showingBots}
+      onClick={toggle}
+    />
   );
 }
 
@@ -283,6 +334,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
+          <SidebarBotsItem />
         </>
       )}
       <SidebarThreadUndoNotice />

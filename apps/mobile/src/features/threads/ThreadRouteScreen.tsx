@@ -62,6 +62,7 @@ import {
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useBotProjectForThread } from "../../state/bots";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import {
   buildTerminalMenuSessions,
@@ -245,10 +246,14 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
 }
 
 function LiveThreadRouteController(props: ThreadRouteScreenProps) {
-  useAndroidWorkspaceBack("threads");
+  const { selectedThread } = useThreadSelection();
+  const botProject = useBotProjectForThread(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
+  useAndroidWorkspaceBack(botProject ? "bots" : "threads");
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
-  const { selectedThread } = useThreadSelection();
   const params = props.route.params ?? {};
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const threadIdRaw = firstRouteParam(params.threadId);
@@ -365,6 +370,10 @@ function ThreadRouteContent(
     selectedEnvironmentConnection,
   } = useThreadSelection();
   useRememberThreadProject(selectedThreadProject);
+  const botProject = useBotProjectForThread(
+    selectedThread?.environmentId ?? null,
+    selectedThread?.id ?? null,
+  );
   const canOperateThread = useEnvironmentScope(
     selectedThread?.environmentId ?? null,
     AuthOrchestrationOperateScope,
@@ -534,7 +543,8 @@ function ThreadRouteContent(
   // The title it had at delegation, until this client sees the parent itself.
   const delegatedFromThread = useThreadShell(delegatedFromRef);
   const headerSubtitle = [
-    selectedThreadProject?.title ?? null,
+    // A bot's thread already carries the bot's name as its title.
+    botProject ? null : (selectedThreadProject?.title ?? null),
     selectedEnvironmentConnection?.environmentLabel ?? null,
     // A linked environment's delegated task names its parent; other linked work its origin.
     delegatedFrom !== null
@@ -850,6 +860,7 @@ function ThreadRouteContent(
       : [],
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
+    showGitMenu: botProject === null,
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
@@ -1010,7 +1021,7 @@ function ThreadRouteContent(
           header={
             props.inspectorPresentation ? null : (
               <ThreadHeader
-                title={selectedThread.title}
+                title={botProject?.title ?? selectedThread.title}
                 subtitle={headerSubtitle}
                 headerColor={headerColor}
                 usesNativeHeaderGlass={usesNativeHeaderGlass}
@@ -1023,6 +1034,15 @@ function ThreadRouteContent(
                 onOpenGitInspector={handleOpenGitInspector}
                 onOpenFilesInspector={handleOpenFilesInspector}
                 onReturnToThread={props.onReturnToThread}
+                onOpenBotDetails={
+                  botProject
+                    ? () =>
+                        navigation.navigate("BotDetails", {
+                          environmentId: botProject.environmentId,
+                          projectId: botProject.id,
+                        })
+                    : undefined
+                }
               />
             )
           }

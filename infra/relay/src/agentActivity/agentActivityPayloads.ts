@@ -72,6 +72,9 @@ function sanitizeAgentActivityAggregateRow(
     threadTitle: truncateText(row.threadTitle, MAX_SUMMARY_TEXT_LENGTH),
     modelTitle: truncateText(row.modelTitle, MAX_SUMMARY_TEXT_LENGTH),
     status: truncateText(row.status, MAX_STATUS_TEXT_LENGTH),
+    ...(row.message === undefined
+      ? {}
+      : { message: truncateText(row.message, MAX_SUMMARY_TEXT_LENGTH) }),
     deepLink: sanitizeDeepLink(row.deepLink),
   };
 }
@@ -100,13 +103,18 @@ export function sanitizeApnsNotificationPayload(
   };
 }
 
+/** A bot's reply reads as the message; every other alert names the status and project. */
+export function alertBodyForActivity(row: RelayAgentActivityAggregateRow): string {
+  return row.message ?? `${row.status}: ${row.projectTitle}`;
+}
+
 export function notificationForActivity(
   row: RelayAgentActivityAggregateRow,
 ): ApnsNotificationPayload {
   const activity = sanitizeAgentActivityAggregateRow(row);
   return sanitizeApnsNotificationPayload({
     title: activity.threadTitle,
-    body: `${activity.status}: ${activity.projectTitle}`,
+    body: alertBodyForActivity(activity),
     environmentId: activity.environmentId,
     threadId: activity.threadId,
     deepLink: activity.deepLink,

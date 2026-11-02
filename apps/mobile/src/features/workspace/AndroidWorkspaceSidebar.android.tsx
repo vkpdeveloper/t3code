@@ -7,6 +7,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { FLOATING_TABS } from "./floating-workspace-tabs";
 import { View } from "react-native";
+import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { BotsScreen, useOpenNewBot } from "../bots/BotsScreen";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
 import { PullRequestToolbar } from "../pull-requests/PullRequestToolbar.android";
@@ -27,6 +29,7 @@ export function AndroidWorkspaceSidebar(props: {
     ? insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
     : 16;
   const context = { ...workspace, bottomClearance };
+  const openNewBot = useOpenNewBot();
   if (enabled.length === 0) return <WorkspaceNoTabs />;
   return (
     <WorkspaceTabPanes
@@ -35,8 +38,18 @@ export function AndroidWorkspaceSidebar(props: {
       renderTab={(tab) =>
         tab === "threads" ? (
           props.children
-        ) : tab !== "pullRequests" ? (
-          <View className="flex-1 bg-screen" />
+        ) : tab === "bots" ? (
+          <WorkspaceTabsContext value={context}>
+            <View className="flex-1 bg-header">
+              <AndroidScreenHeader
+                title="Bots"
+                actions={[{ accessibilityLabel: "New bot", icon: "plus", onPress: openNewBot }]}
+              />
+              <ScreenContent insetHorizontal>
+                <BotsScreen sidebar />
+              </ScreenContent>
+            </View>
+          </WorkspaceTabsContext>
         ) : (
           <WorkspaceTabsContext value={context}>
             <PullRequestsScreen

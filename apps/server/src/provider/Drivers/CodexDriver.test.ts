@@ -337,7 +337,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
   );
 
   it.effect.skipIf(windowsHost)(
-    "runs the standalone updater against the shared home, not the shadow home",
+    "runs the standalone updater against the shared home and reports both homes",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -371,6 +371,9 @@ it.layer(layerTest)("CodexDriver", (it) => {
           lockKey: "codex-native",
           env: { CODEX_HOME: sharedHome },
         });
+        // Generated images land under these homes, so the snapshot must name both.
+        const snapshot = yield* instance.snapshot.getSnapshot;
+        expect(snapshot.runtimePaths).toEqual({ homePath: sharedHome, shadowHomePath: shadowHome });
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
         Effect.scoped,

@@ -7,6 +7,8 @@ import { SymbolView, type AppSymbolName } from "./AppSymbol";
 
 export interface ListRowContentProps {
   readonly icon?: AppSymbolName;
+  /** Replaces `icon` when the row needs a non-symbol glyph, such as a file-type icon. */
+  readonly leading?: ReactNode;
   readonly label: string;
   readonly description?: string;
   readonly detail?: string;
@@ -15,6 +17,7 @@ export interface ListRowContentProps {
 
 export function ListRowLayout({
   icon,
+  leading,
   label,
   description,
   detail,
@@ -32,7 +35,9 @@ export function ListRowLayout({
         disabled && "opacity-45",
       )}
     >
-      {icon ? (
+      {leading ? (
+        <View className="size-6 items-center justify-center">{leading}</View>
+      ) : icon ? (
         <View className="size-6 items-center justify-center">
           <SymbolView
             name={icon}
