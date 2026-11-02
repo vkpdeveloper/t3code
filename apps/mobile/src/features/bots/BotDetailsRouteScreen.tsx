@@ -366,12 +366,17 @@ function BotDeleteSection(props: { readonly project: BotProject }) {
   });
   const [deleting, setDeleting] = useState(false);
   const confirmDelete = () =>
-    Dialog.confirm({
+    Dialog.prompt({
       title: `Delete ${project.title}?`,
-      message: "Its chat, files and routines are removed for good.",
+      message: `Its chat and routines stop for good. Files in its folder stay on disk. Type ${project.title} to confirm.`,
+      placeholder: project.title,
+      initialValue: "",
       confirmText: "Delete",
-      destructive: true,
-      onConfirm: () => {
+      onConfirm: (typed) => {
+        if (typed.trim() !== project.title) {
+          Dialog.alert("Name didn't match", "The bot was not deleted.");
+          return;
+        }
         setDeleting(true);
         void deleteBot({
           environmentId: project.environmentId,

@@ -15,7 +15,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { FileIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { requestConfirmDialog } from "../../confirmDialog";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentProviders } from "../../state/environments";
 import { useQuietThreadShell, useThreadShell } from "../../state/entities";
@@ -34,6 +33,7 @@ import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { toastManager } from "../ui/toast";
 import { BotAvatar } from "./BotAvatar";
 import { BotAvatarPicker } from "./BotAvatarPicker";
+import { DeleteBotDialog } from "./DeleteBotDialog";
 
 type BotTab = "details" | "artifacts" | "computer";
 
@@ -364,13 +364,8 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
   const navigate = useNavigate();
   const { presentation } = useEnvironmentPresentation(project.environmentId);
   const deleteBot = useOrchestrationCommand(serverEnvironment.deleteBot, { reportFailure: false });
+  const [confirming, setConfirming] = useState(false);
   const remove = async () => {
-    const confirmed =
-      (await requestConfirmDialog(
-        `Delete ${project.title}?\nIts chat and routines stop. Files in its folder stay on disk.`,
-        { variant: "destructive" },
-      )) ?? window.confirm(`Delete ${project.title}?`);
-    if (!confirmed) return;
     const result = await deleteBot({
       environmentId: project.environmentId,
       input: { projectId: project.id },
@@ -379,15 +374,15 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
       reportFailure("Could not delete bot", result);
       return;
     }
+    setConfirming(false);
     void navigate({ to: "/bots" });
   };
   const rows: Array<[string, string]> = [
     ["Computer", presentation?.entry.target.label ?? "Unknown"],
     ["Status", presentation?.connection.phase === "connected" ? "Connected" : "Offline"],
-    ["Folder", project.workspaceRoot],
   ];
   return (
-    <div className="flex flex-col gap-3 px-2.5 py-1">
+    <div className="flex flex-col gap-4 px-2.5 py-1">
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
@@ -396,10 +391,22 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
           </div>
         ))}
       </dl>
-      <Button size="sm" variant="destructive-outline" className="self-start" onClick={remove}>
-        <Trash2Icon />
-        Delete bot
-      </Button>
+      <div className="border-t pt-4">
+        <Button
+          variant="destructive-outline"
+          className="w-full"
+          onClick={() => setConfirming(true)}
+        >
+          <Trash2Icon />
+          Delete bot
+        </Button>
+      </div>
+      <DeleteBotDialog
+        name={project.title}
+        open={confirming}
+        onOpenChange={setConfirming}
+        onDelete={remove}
+      />
     </div>
   );
 }
