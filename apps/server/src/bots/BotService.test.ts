@@ -45,6 +45,7 @@ interface Harness {
   generatedImagePath: string;
   /** The project the fake calling thread belongs to. */
   threadProjectId: ProjectId | undefined;
+  failLaunch: boolean;
 }
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
@@ -72,14 +73,23 @@ const layerFakes = (harness: Harness) =>
   Layer.mergeAll(
     Layer.mock(ThreadLaunch.ThreadLaunchService)({
       launch: (input) =>
-        Effect.sync(() => {
-          harness.launches.push(input);
-          return {
-            threadId: input.threadId ?? ThreadId.make("unused"),
-            projection: {} as ThreadLaunch.ThreadLaunchResult["projection"],
-            resumed: false,
-          };
-        }),
+        harness.failLaunch
+          ? Effect.fail(
+              new ThreadLaunch.ThreadLaunchError({
+                operation: "create-thread",
+                commandId: input.commandId,
+                projectId: input.projectId,
+                cause: "provider disabled",
+              }),
+            )
+          : Effect.sync(() => {
+              harness.launches.push(input);
+              return {
+                threadId: input.threadId ?? ThreadId.make("unused"),
+                projection: {} as ThreadLaunch.ThreadLaunchResult["projection"],
+                resumed: false,
+              };
+            }),
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       dispatch: (command) =>
@@ -103,7 +113,12 @@ const layerFakes = (harness: Harness) =>
           instanceId: ProviderInstanceId.make("codex"),
           driverKind: ProviderDriverKind.make("codex"),
           enabled: true,
-          snapshot: { getSnapshot: Effect.succeed({ models: [{ slug: "gpt-test" }] }) },
+          snapshot: {
+            getSnapshot: Effect.succeed({
+              models: [{ slug: "gpt-test" }],
+              runtimePaths: { homePath: `${harness.baseDir}/codex`, shadowHomePath: null },
+            }),
+          },
           textGeneration: {
             generateImage: () => Effect.sync(() => ({ imagePath: harness.generatedImagePath })),
           },
@@ -143,6 +158,7 @@ const withBots = <A, E>(
       commands: [],
       generatedImagePath: "",
       threadProjectId: undefined,
+      failLaunch: false,
     };
     return yield* body(harness).pipe(Effect.provide(layer(harness)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
@@ -205,6 +221,29 @@ it.effect("creates a bot as a project in its own folder with one always-on sessi
   ),
 );
 
+it.effect(
+  "a retried create returns the existing bot and a failed launch leaves nothing behind",
+  () =>
+    withBots((harness) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const created = yield* createBot("Helper", "bot-retry");
+        harness.failLaunch = true;
+        assert.deepEqual(yield* createBot("Helper", "bot-retry"), created);
+        assert.equal((yield* readProject(created.projectId)).deletedAt, null);
+
+        const failed = yield* Effect.flip(createBot("Helper", "bot-broken"));
+        assert.equal(failed.message, "Could not start the bot's session.");
+        assert.isFalse(yield* fileSystem.exists(path.resolve(harness.baseDir, "bots", "helper-2")));
+        const projects = yield* ProjectService.ProjectService;
+        assert.isTrue(
+          Option.isNone(yield* projects.getById(failed.projectId ?? created.projectId)),
+        );
+      }),
+    ),
+);
+
 it.effect("keeps a generated avatar when only the shape changes", () =>
   withBots((harness) =>
     Effect.gen(function* () {
@@ -243,7 +282,9 @@ it.effect("refuses a generated image path outside Codex's generated images", () 
       const path = yield* Path.Path;
       const bots = yield* BotService.BotService;
       const { projectId } = yield* createBot("Painter", "bot-escape");
-      harness.generatedImagePath = path.join(harness.baseDir, "secret.png");
+      const elsewhere = path.join(harness.baseDir, "private", "generated_images");
+      yield* fileSystem.makeDirectory(elsewhere, { recursive: true });
+      harness.generatedImagePath = path.join(elsewhere, "photo.png");
       yield* fileSystem.writeFile(harness.generatedImagePath, PNG_BYTES);
 
       const error = yield* Effect.flip(bots.generateAvatar({ projectId }));

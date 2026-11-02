@@ -21,6 +21,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -195,72 +196,98 @@ const make = Effect.gen(function* () {
   });
 
   const create: BotService["Service"]["create"] = Effect.fn("BotService.create")(function* (input) {
-    const folder = yield* claimFolder(input.name);
-    const removeFolder = fileSystem.remove(folder, { recursive: true }).pipe(Effect.ignore);
-    yield* scaffoldFolder(folder, input.name).pipe(
-      Effect.mapError(fail("Could not set up the bot's folder.")),
-      Effect.tapError(() => removeFolder),
-    );
-    // Its own repository keeps checkpoints out of any checkout the data dir lives in.
-    yield* git
-      .execute({
-        operation: "BotService.init",
-        cwd: folder,
-        args: ["init", "--quiet"],
-        timeoutMs: 10_000,
-      })
-      .pipe(Effect.ignore);
-
     const projectId = ProjectId.make(input.commandId);
     const threadId = ThreadId.make(input.commandId);
-    yield* projects
-      .create({
-        commandId: CommandId.make(`${input.commandId}:project`),
-        projectId,
-        title: input.name,
-        workspaceRoot: folder,
-        bot: {
-          threadId,
-          avatar: { shape: input.avatar.shape, color: input.avatar.color, imagePath: null },
-          description: null,
-        },
-      })
-      .pipe(
-        Effect.mapError((error) => fail(error.message)(error)),
-        Effect.tapError(() => removeFolder),
-      );
+    // A retried create returns the bot it already made instead of building a second one.
+    const existing = yield* projects
+      .getById(projectId, { includeDeleted: true })
+      .pipe(Effect.mapError(fail("Could not read the bot.", projectId)));
+    if (Option.isSome(existing)) {
+      const bot = existing.value.bot;
+      if (existing.value.deletedAt !== null || bot == null) {
+        return yield* new BotError({ message: "This request was already used.", projectId });
+      }
+      return { projectId, threadId: bot.threadId };
+    }
 
-    const deleteProject = projects
-      .delete({ commandId: CommandId.make(`${input.commandId}:rollback`), projectId, force: true })
-      .pipe(Effect.ignore);
-    yield* launches
-      .launch({
-        commandId: CommandId.make(`${input.commandId}:thread`),
-        threadId,
-        projectId,
-        title: input.name,
-        modelSelection: input.modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        workspaceStrategy: { type: "root" },
-        initialMessage: { text: kickoffMessage(input.name), attachments: [] },
-        createdBy: "user",
-        creationSource: "server",
-      })
-      .pipe(
-        Effect.mapError((error) => fail("Could not start the bot's session.", projectId)(error)),
-        Effect.tapError(() => deleteProject),
+    const folder = yield* claimFolder(input.name);
+    // The folder was claimed by this attempt, so only this attempt's project can own it.
+    const rollback = Effect.gen(function* () {
+      const owner = yield* projects.getByWorkspaceRoot(folder).pipe(
+        Effect.map(Option.getOrUndefined),
+        Effect.orElseSucceed(() => undefined),
       );
-    // Settled threads drop out of shell snapshots; a bot's session stays in view.
-    yield* threads
-      .dispatch({
-        type: "thread.auto-settle.set",
-        commandId: CommandId.make(`${input.commandId}:auto-settle`),
-        threadId,
-        enabled: false,
-      })
-      .pipe(Effect.ignore);
-    return { projectId, threadId };
+      if (owner !== undefined) {
+        if (owner.id !== projectId) return;
+        const deleted = yield* projects
+          .delete({
+            commandId: CommandId.make(`${input.commandId}:rollback`),
+            projectId,
+            force: true,
+          })
+          .pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          );
+        if (!deleted) return;
+      }
+      yield* fileSystem.remove(folder, { recursive: true }).pipe(Effect.ignore);
+    });
+
+    return yield* Effect.gen(function* () {
+      yield* scaffoldFolder(folder, input.name).pipe(
+        Effect.mapError(fail("Could not set up the bot's folder.")),
+      );
+      // Its own repository keeps checkpoints out of any checkout the data dir lives in.
+      yield* git
+        .execute({
+          operation: "BotService.init",
+          cwd: folder,
+          args: ["init", "--quiet"],
+          timeoutMs: 10_000,
+        })
+        .pipe(Effect.mapError(fail("Could not create the bot's repository.")));
+      yield* projects
+        .create({
+          commandId: CommandId.make(`${input.commandId}:project`),
+          projectId,
+          title: input.name,
+          workspaceRoot: folder,
+          bot: {
+            threadId,
+            avatar: { shape: input.avatar.shape, color: input.avatar.color, imagePath: null },
+            description: null,
+          },
+        })
+        .pipe(Effect.mapError((error) => fail(error.message)(error)));
+      yield* launches
+        .launch({
+          commandId: CommandId.make(`${input.commandId}:thread`),
+          threadId,
+          projectId,
+          title: input.name,
+          modelSelection: input.modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          workspaceStrategy: { type: "root" },
+          initialMessage: { text: kickoffMessage(input.name), attachments: [] },
+          createdBy: "user",
+          creationSource: "server",
+        })
+        .pipe(
+          Effect.mapError((error) => fail("Could not start the bot's session.", projectId)(error)),
+        );
+      // Settled threads drop out of shell snapshots; a bot's session stays in view.
+      yield* threads
+        .dispatch({
+          type: "thread.auto-settle.set",
+          commandId: CommandId.make(`${input.commandId}:auto-settle`),
+          threadId,
+          enabled: false,
+        })
+        .pipe(Effect.ignore);
+      return { projectId, threadId };
+    }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? rollback : Effect.void)));
   });
 
   const update: BotService["Service"]["update"] = Effect.fn("BotService.update")(function* (input) {
@@ -347,21 +374,24 @@ const make = Effect.gen(function* () {
     if (instance === undefined || generateImage === undefined) {
       return yield* new BotError({ message: "Avatar generation needs Codex." });
     }
-    let model = preferred?.instanceId === instance.instanceId ? preferred.model : undefined;
-    if (model === undefined) {
-      const snapshot = yield* instance.snapshot.getSnapshot;
-      model = snapshot.models[0]?.slug;
-    }
+    const snapshot = yield* instance.snapshot.getSnapshot;
+    const model =
+      preferred?.instanceId === instance.instanceId ? preferred.model : snapshot.models[0]?.slug;
     if (model === undefined) {
       return yield* new BotError({ message: "Codex has no model available." });
     }
+    // Codex saves images under <CODEX_HOME>/generated_images; the shadow home is the one it runs with.
+    const imageRoots = [snapshot.runtimePaths?.homePath, snapshot.runtimePaths?.shadowHomePath]
+      .filter((home): home is string => typeof home === "string")
+      .map((home) => path.join(home, "generated_images"));
     const modelSelection: ModelSelection = { instanceId: instance.instanceId, model };
-    return { generateImage, modelSelection };
+    return { generateImage, modelSelection, imageRoots };
   });
 
   // The path comes from model output: accept only an image Codex saved itself.
   const readGeneratedImage = Effect.fn("BotService.readGeneratedImage")(function* (
     imagePath: string,
+    imageRoots: ReadonlyArray<string>,
     projectId: ProjectId,
   ) {
     const invalid = new BotError({
@@ -370,9 +400,15 @@ const make = Effect.gen(function* () {
     });
     if (!path.isAbsolute(imagePath)) return yield* invalid;
     const real = yield* fileSystem.realPath(imagePath).pipe(Effect.mapError(() => invalid));
-    if (!real.split(path.sep).includes("generated_images") || !/\.(png|jpe?g|webp)$/i.test(real)) {
-      return yield* invalid;
-    }
+    const realRoots = yield* Effect.forEach(imageRoots, (root) =>
+      fileSystem.realPath(root).pipe(Effect.option),
+    );
+    const contained = realRoots.some((root) => {
+      if (Option.isNone(root)) return false;
+      const relative = path.relative(root.value, real);
+      return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+    });
+    if (!contained || !/\.(png|jpe?g|webp)$/i.test(real)) return yield* invalid;
     const info = yield* fileSystem.stat(real).pipe(Effect.mapError(() => invalid));
     if (info.type !== "File" || Number(info.size) > MAX_GENERATED_IMAGE_BYTES) {
       return yield* invalid;
@@ -386,7 +422,7 @@ const make = Effect.gen(function* () {
     "BotService.generateAvatar",
   )(function* (input) {
     const { project } = yield* readBot(input.projectId);
-    const { generateImage, modelSelection } = yield* resolveImageGenerator();
+    const { generateImage, modelSelection, imageRoots } = yield* resolveImageGenerator();
     const prompt = [
       `Use your image generation tool to create one square avatar image for a personal assistant bot named "${project.title}".`,
       input.prompt === undefined
@@ -400,7 +436,7 @@ const make = Effect.gen(function* () {
       prompt,
       modelSelection,
     }).pipe(Effect.mapError((error) => fail(error.message, input.projectId)(error)));
-    const image = yield* readGeneratedImage(generated.imagePath, input.projectId);
+    const image = yield* readGeneratedImage(generated.imagePath, imageRoots, input.projectId);
 
     const avatarsDir = path.join(project.workspaceRoot, "avatars");
     const stamp = DateTime.formatIso(yield* DateTime.now).replace(/[^0-9]/g, "");
