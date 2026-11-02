@@ -96,14 +96,19 @@ export function CreateBotDialog({
 }
 
 /** The create form on its own, for the Bots page when there are no bots yet. */
-export function CreateBotPanel() {
-  const [pending, setPending] = useState(false);
+export function CreateBotPanel({
+  pending,
+  onPendingChange,
+}: {
+  pending: boolean;
+  onPendingChange: (pending: boolean) => void;
+}) {
   return (
     <div className="w-full max-w-md rounded-2xl border bg-card shadow-xs">
       <CreateBotForm
         layout="page"
         pending={pending}
-        onPendingChange={setPending}
+        onPendingChange={onPendingChange}
         onCancel={null}
         onDone={() => {}}
       />
