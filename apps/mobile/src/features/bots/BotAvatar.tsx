@@ -1,18 +1,36 @@
-import { resolveBotAvatar } from "@t3tools/client-runtime/bot-avatar";
+import { BOT_AVATAR_EYE_COLOR, resolveBotAvatar } from "@t3tools/client-runtime/bot-avatar";
 import type { BotAvatar as BotAvatarValue, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Image } from "expo-image";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import { useReducedMotion } from "react-native-reanimated";
+import Svg, { Ellipse, G, Path } from "react-native-svg";
+
+import { registerBotBlink } from "./botBlink";
 
 import { useAssetUrlState } from "../../state/assets";
 
 function BotAvatarShape(props: { readonly avatar: BotAvatarValue; readonly size: number }) {
-  const { path, color } = resolveBotAvatar(props.avatar);
+  const { path, color, eyes } = resolveBotAvatar(props.avatar);
   const inset = props.size * 0.18;
+  const reducedMotion = useReducedMotion();
+  const [closed, setClosed] = useState(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- joins the shared blink timer
+  useEffect(() => (reducedMotion ? undefined : registerBotBlink(setClosed)), [reducedMotion]);
   return (
     <Svg width={props.size - inset * 2} height={props.size - inset * 2} viewBox="0 0 100 100">
       <Path d={path} fill={color} fillRule="nonzero" />
+      <G fill={BOT_AVATAR_EYE_COLOR}>
+        {eyes.map((eye) => (
+          <Ellipse
+            key={eye.cx}
+            cx={eye.cx}
+            cy={eye.cy}
+            rx={eye.rx}
+            ry={closed ? eye.ry * 0.12 : eye.ry}
+          />
+        ))}
+      </G>
     </Svg>
   );
 }
