@@ -533,6 +533,26 @@ const make = Effect.gen(function* () {
             FROM orchestration_v2_projection_messages AS latest
             WHERE latest.thread_id = bots.thread_id
               AND ${indexedMessageCondition(sql, "latest")}
+              -- The transcript hides rolled-back runs and cancelled queued messages.
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_runs AS run
+                WHERE run.run_id = latest.run_id
+                  AND (
+                    run.status = 'rolled_back'
+                    OR (
+                      run.status = 'cancelled'
+                      AND latest.role = 'user'
+                      AND EXISTS (
+                        SELECT 1 FROM orchestration_v2_projection_turn_items AS item
+                        WHERE item.thread_id = latest.thread_id
+                          AND item.run_id = latest.run_id
+                          AND item.type = 'user_message'
+                          AND json_extract(item.payload_json, '$.messageId') = latest.message_id
+                          AND json_extract(item.payload_json, '$.inputIntent') = 'queued_turn'
+                      )
+                    )
+                  )
+              )
             ORDER BY latest.created_at DESC, latest.message_id DESC
             LIMIT 1
           )

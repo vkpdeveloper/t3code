@@ -349,6 +349,30 @@ it.effect("previews show each bot's newest visible message", () =>
       // Newer, but a notice and a reply still streaming are not what the list shows.
       yield* message("m3", "user", "2026-01-01T00:00:03Z", { text: "notice", createdBy: "system" });
       yield* message("m4", "assistant", "2026-01-01T00:00:04Z", { text: "Look" }, 1);
+      // Neither is in the transcript: a restored checkpoint and a queued message the user cancelled.
+      const hiddenRun = (runId: string, ordinal: number, status: string, messageId: string) =>
+        Effect.all([
+          sql`
+            INSERT INTO orchestration_v2_projection_runs
+              (run_id, thread_id, ordinal, provider, status, requested_at, payload_json)
+            VALUES (${runId}, ${chatty.threadId}, ${ordinal}, 'codex', ${status}, '2026-01-01T00:00:05Z', '{}')
+          `,
+          sql`
+            INSERT INTO orchestration_v2_projection_turn_items
+              (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+            VALUES (${`item-${messageId}`}, ${chatty.threadId}, ${runId}, ${ordinal}, 'user_message',
+              'completed', '2026-01-01T00:00:05Z',
+              ${JSON.stringify({ messageId, inputIntent: "queued_turn" })})
+          `,
+          sql`
+            INSERT INTO orchestration_v2_projection_messages
+              (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
+            VALUES (${messageId}, ${chatty.threadId}, ${runId}, 'user', 0, '2026-01-01T00:00:05Z',
+              '2026-01-01T00:00:05Z', ${JSON.stringify({ text: "Discarded" })})
+          `,
+        ]);
+      yield* hiddenRun("run-rolled-back", 1, "rolled_back", "m5");
+      yield* hiddenRun("run-cancelled", 2, "cancelled", "m6");
 
       const bots = yield* BotService.BotService;
       assert.deepEqual((yield* bots.previews()).previews, [
