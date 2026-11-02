@@ -23,6 +23,7 @@ import { View } from "react-native";
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
+import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { ListToggleRow } from "../../components/ui/ListToggleRow";
@@ -289,7 +290,7 @@ function BotArtifactsSection(props: { readonly project: BotProject }) {
         files.map((file) => (
           <ListRow
             key={file.path}
-            icon="doc"
+            leading={<PierreEntryIcon path={file.path} kind="file" size={22} />}
             label={file.path.slice(ARTIFACTS_DIRECTORY.length + 1)}
             onPress={() =>
               navigation.navigate("ThreadFile", {

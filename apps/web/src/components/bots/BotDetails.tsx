@@ -13,9 +13,10 @@ import {
 import { formatModelSlugName } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
-import { FileIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { useTheme } from "~/hooks/useTheme";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentProviders } from "../../state/environments";
 import { useQuietThreadShell, useThreadShell } from "../../state/entities";
@@ -24,6 +25,7 @@ import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import { getDisplayModelName } from "../chat/providerIconUtils";
 import { ThreadAutomationsPanel } from "../chat/ThreadAutomationsPanel";
 import { ThreadDetailsSection } from "../chat/ThreadDetailsSection";
@@ -289,6 +291,7 @@ function ArtifactEntries({
   entries,
   ...props
 }: ArtifactFolderProps & { entries: ReadonlyArray<ProjectEntry> }) {
+  const { resolvedTheme } = useTheme();
   return (
     <ul className="flex flex-col">
       {entries.map((entry) => {
@@ -303,7 +306,12 @@ function ArtifactEntries({
               className={ARTIFACT_ROW_CLASS}
               style={artifactRowIndent(props.depth)}
             >
-              <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+              <PierreEntryIcon
+                pathValue={name}
+                kind="file"
+                theme={resolvedTheme}
+                className="shrink-0"
+              />
               <span className="truncate">{name}</span>
             </button>
           </li>
