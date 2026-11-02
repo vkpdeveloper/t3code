@@ -21,25 +21,23 @@ function moveOne() {
   if (document.hidden || reducedMotion?.matches || avatars.size === 0) return;
   const pick = [...avatars][Math.floor(Math.random() * avatars.size)];
   if (!pick || pick.hasAttribute("data-motion") || pick.hasAttribute("data-enter")) return;
-  if (Math.random() < 0.5) {
-    pick.setAttribute("data-motion", "blink");
-    return;
-  }
   const look = BOT_AVATAR_LOOKS[Math.floor(Math.random() * BOT_AVATAR_LOOKS.length)];
-  if (!look) return;
-  for (const [name, value] of Object.entries(botLookStyle(look))) {
-    pick.style.setProperty(name, String(value));
+  const motion = Math.random() < 0.5 || !look ? "blink" : "look";
+  if (motion === "look" && look) {
+    for (const [name, value] of Object.entries(botLookStyle(look))) {
+      pick.style.setProperty(name, String(value));
+    }
   }
-  pick.setAttribute("data-motion", "look");
+  pick.setAttribute("data-motion", motion);
+  // Cleared on a timer, not animationend: a blink set while hover already runs the same
+  // animation never restarts, so it would never end. Durations match index.css.
+  window.setTimeout(() => pick.removeAttribute("data-motion"), motion === "blink" ? 220 : 1420);
 }
 
-// Child animations bubble here; only the one that defines each motion's end clears it,
-// and clearing the entrance keeps a later look from restarting it.
+// Clearing the entrance keeps a later look from restarting it.
 function endMotion(event: AnimationEvent) {
-  const element = event.currentTarget as SVGSVGElement;
-  if (event.animationName === "bot-enter-face") element.removeAttribute("data-enter");
-  if (event.animationName === `bot-${element.getAttribute("data-motion")}`) {
-    element.removeAttribute("data-motion");
+  if (event.animationName === "bot-enter-face") {
+    (event.currentTarget as SVGSVGElement).removeAttribute("data-enter");
   }
 }
 
