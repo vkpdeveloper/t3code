@@ -32,7 +32,7 @@ export function BotAvatarPicker({
             disabled={disabled}
             onClick={() => onChange({ shape: option, color })}
             className={cn(
-              "flex aspect-square cursor-pointer items-center justify-center rounded-lg bg-muted/60 outline-hidden ring-ring hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
+              "group/bot flex aspect-square cursor-pointer items-center justify-center rounded-lg bg-muted/60 outline-hidden ring-ring hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
               option === shape && "bg-muted ring-2 ring-foreground/70 ring-inset",
             )}
           >

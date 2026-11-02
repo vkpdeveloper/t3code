@@ -1,7 +1,7 @@
 import type { BotSummary } from "@t3tools/client-runtime/state/bots";
 import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, SearchIcon } from "lucide-react";
 import { memo, useState } from "react";
 
 import { isElectron } from "../../env";
@@ -10,6 +10,7 @@ import { botListAtom } from "../../state/bots";
 import { buildThreadRouteParams, isThreadRoutePathname } from "../../threadRoutes";
 import { SidebarChromeFooter, SidebarChromeHeader } from "../sidebar/SidebarChrome";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { SidebarContent, SidebarGroup, useSidebar } from "../ui/sidebar";
 import { BotAvatar } from "./BotAvatar";
 import { CreateBotDialog } from "./CreateBotDialog";
@@ -30,21 +31,26 @@ const BotRow = memo(function BotRow({
         aria-current={active ? "page" : undefined}
         onClick={() => onOpen(bot)}
         className={cn(
-          "flex w-full cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-left outline-hidden ring-ring hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset",
+          "group/bot flex w-full cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2.5 text-left outline-hidden ring-ring hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset",
           active && "bg-sidebar-row-hover",
         )}
       >
-        <BotAvatar avatar={bot.avatar} threadRef={bot.threadRef} className="size-9" />
-        <span className="flex min-w-0 flex-1 flex-col">
+        <BotAvatar avatar={bot.avatar} threadRef={bot.threadRef} className="size-10" />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span
             className={cn(
-              "truncate text-sm text-sidebar-foreground",
+              "truncate text-base leading-5 text-sidebar-foreground",
               bot.unread ? "font-semibold" : "font-medium",
             )}
           >
             {bot.name}
           </span>
-          <span className="truncate text-xs text-sidebar-muted-foreground">
+          <span
+            className={cn(
+              "truncate text-sm leading-5",
+              bot.unread ? "text-sidebar-foreground" : "text-sidebar-muted-foreground",
+            )}
+          >
             {bot.working ? "Working" : (bot.preview ?? "No messages yet")}
           </span>
         </span>
@@ -62,6 +68,10 @@ export default function BotsSidebar() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { isMobile, setOpenMobile } = useSidebar();
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState<string | null>(null);
+  const needle = query?.trim().toLowerCase() ?? "";
+  const visibleBots =
+    needle.length === 0 ? bots : bots.filter((bot) => bot.name.toLowerCase().includes(needle));
 
   const openBot = (bot: BotSummary) => {
     if (isMobile) setOpenMobile(false);
@@ -73,29 +83,58 @@ export default function BotsSidebar() {
 
   return (
     <>
-      <SidebarChromeHeader isElectron={isElectron} />
-      <SidebarContent
-        className="min-h-full"
-        fixedHeader={
-          <SidebarGroup className="flex-row items-center justify-between">
-            <span className="px-2 text-sm font-medium text-sidebar-foreground">Bots</span>
+      <SidebarChromeHeader
+        isElectron={isElectron}
+        actions={
+          <>
             <Button
-              size="icon-sm"
-              variant="ghost"
+              size="icon-lg"
+              variant="glass"
+              aria-label="Search bots"
+              aria-pressed={query !== null}
+              onClick={() => setQuery((current) => (current === null ? "" : null))}
+            >
+              <SearchIcon />
+            </Button>
+            <Button
+              size="icon-lg"
+              variant="glass"
               aria-label="New bot"
               onClick={() => setCreating(true)}
             >
               <PlusIcon />
             </Button>
-          </SidebarGroup>
+          </>
+        }
+      />
+      <SidebarContent
+        className="min-h-full"
+        fixedHeader={
+          query === null ? null : (
+            <SidebarGroup>
+              <Input
+                autoFocus
+                type="search"
+                aria-label="Search bots"
+                placeholder="Search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setQuery(null);
+                }}
+              />
+            </SidebarGroup>
+          )
         }
       >
         <SidebarGroup>
-          {bots.length === 0 ? (
-            <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">No bots yet</p>
+          {visibleBots.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground/60">
+              {bots.length === 0 ? "No bots yet" : "No matching bots"}
+            </p>
           ) : (
             <ul className="flex flex-col gap-0.5">
-              {bots.map((bot) => (
+              {visibleBots.map((bot) => (
                 <BotRow
                   key={bot.key}
                   bot={bot}

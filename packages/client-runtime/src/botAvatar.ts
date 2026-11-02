@@ -23,6 +23,28 @@ export const BOT_AVATAR_SHAPE_PATHS: Record<BotAvatarShape, string> = {
     "M10.0 60.0a23 30 0 1 0 46 0a23 30 0 1 0 -46 0ZM44.0 60.0a23 30 0 1 0 46 0a23 30 0 1 0 -46 0ZM28.0 60.0a22 32 0 1 0 44 0a22 32 0 1 0 -44 0ZM46 12V30H54V12Z",
 };
 
+/** Where each shape's face sits: eye center line and half the distance between the eyes. */
+const BOT_AVATAR_FACES: Record<BotAvatarShape, { x: number; y: number; gap: number }> = {
+  circle: { x: 50, y: 48, gap: 13 },
+  cloud: { x: 52, y: 56, gap: 10 },
+  diamond: { x: 50, y: 48, gap: 10 },
+  star: { x: 50, y: 56, gap: 8 },
+  flower: { x: 50, y: 50, gap: 9 },
+  heart: { x: 50, y: 42, gap: 12 },
+  gear: { x: 50, y: 50, gap: 11 },
+  drop: { x: 50, y: 64, gap: 11 },
+  pill: { x: 50, y: 50, gap: 14 },
+  triangle: { x: 50, y: 66, gap: 10 },
+  shield: { x: 50, y: 44, gap: 11 },
+  burst: { x: 50, y: 50, gap: 10 },
+  hexagon: { x: 50, y: 50, gap: 13 },
+  pumpkin: { x: 50, y: 62, gap: 11 },
+};
+
+export const BOT_AVATAR_EYE_COLOR = "#18181B";
+const EYE_RX = 5.5;
+const EYE_RY = 9;
+
 export const BOT_AVATAR_COLOR_HEX: Record<BotAvatarColor, string> = {
   white: "#F4F4F5",
   brown: "#92643F",
@@ -41,8 +63,16 @@ export const BOT_AVATAR_COLOR_HEX: Record<BotAvatarColor, string> = {
 export function resolveBotAvatar(avatar: { readonly shape: string; readonly color: string }) {
   const path = (BOT_AVATAR_SHAPE_PATHS as Record<string, string | undefined>)[avatar.shape];
   const color = (BOT_AVATAR_COLOR_HEX as Record<string, string | undefined>)[avatar.color];
+  const face =
+    (BOT_AVATAR_FACES as Record<string, (typeof BOT_AVATAR_FACES)[BotAvatarShape] | undefined>)[
+      avatar.shape
+    ] ?? BOT_AVATAR_FACES.circle;
   return {
     path: path ?? BOT_AVATAR_SHAPE_PATHS.circle,
     color: color ?? BOT_AVATAR_COLOR_HEX.gray,
+    eyes: [
+      { cx: face.x - face.gap, cy: face.y, rx: EYE_RX, ry: EYE_RY },
+      { cx: face.x + face.gap, cy: face.y, rx: EYE_RX, ry: EYE_RY },
+    ] as const,
   };
 }

@@ -361,6 +361,31 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+@keyframes bot-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* Eyes blink once on hover or when the shared blink clock picks them; never on a loop. */
+@utility bot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+
+  &[data-blink],
+  :where(.group\/bot):hover & {
+    animation: bot-blink 200ms ease-in-out 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none !important;
+  }
+}
+
 @utility surface-glass {
   background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
