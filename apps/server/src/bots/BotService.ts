@@ -113,6 +113,8 @@ const make = Effect.gen(function* () {
 
   // Bot edits read the stored record and write it back whole; serialize them.
   const mutations = yield* Semaphore.make(1);
+  // Creation is rare; one at a time keeps a retry from racing its original.
+  const creations = yield* Semaphore.make(1);
   const botsRoot = path.resolve(config.baseDir, "bots");
 
   const fail = (message: string, projectId?: ProjectId) => (cause: unknown) =>
@@ -195,9 +197,8 @@ const make = Effect.gen(function* () {
     yield* fileSystem.writeFileString(path.join(folder, "CLAUDE.md"), "@AGENTS.md\n");
   });
 
-  const create: BotService["Service"]["create"] = Effect.fn("BotService.create")(function* (input) {
+  const createOnce = Effect.fn("BotService.createOnce")(function* (input: BotCreateInput) {
     const projectId = ProjectId.make(input.commandId);
-    const threadId = ThreadId.make(input.commandId);
     // A retried create returns the bot it already made instead of building a second one.
     const existing = yield* projects
       .getById(projectId, { includeDeleted: true })
@@ -210,85 +211,103 @@ const make = Effect.gen(function* () {
       return { projectId, threadId: bot.threadId };
     }
 
-    const folder = yield* claimFolder(input.name);
-    // The folder was claimed by this attempt, so only this attempt's project can own it.
-    const rollback = Effect.gen(function* () {
-      const owner = yield* projects.getByWorkspaceRoot(folder).pipe(
-        Effect.map(Option.getOrUndefined),
-        Effect.orElseSucceed(() => undefined),
-      );
-      if (owner !== undefined) {
-        if (owner.id !== projectId) return;
-        const deleted = yield* projects
-          .delete({
-            commandId: CommandId.make(`${input.commandId}:rollback`),
-            projectId,
-            force: true,
-          })
-          .pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
-          );
-        if (!deleted) return;
-      }
-      yield* fileSystem.remove(folder, { recursive: true }).pipe(Effect.ignore);
-    });
+    // Claim the folder and arm its cleanup together, so an interrupt between them cannot leak it.
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const folder = yield* claimFolder(input.name);
+        return yield* restore(setUp(input, folder)).pipe(
+          Effect.onExit((exit) => (Exit.isFailure(exit) ? rollback(input, folder) : Effect.void)),
+        );
+      }),
+    );
+  });
 
-    return yield* Effect.gen(function* () {
-      yield* scaffoldFolder(folder, input.name).pipe(
-        Effect.mapError(fail("Could not set up the bot's folder.")),
-      );
-      // Its own repository keeps checkpoints out of any checkout the data dir lives in.
-      yield* git
-        .execute({
-          operation: "BotService.init",
-          cwd: folder,
-          args: ["init", "--quiet"],
-          timeoutMs: 10_000,
-        })
-        .pipe(Effect.mapError(fail("Could not create the bot's repository.")));
-      yield* projects
-        .create({
-          commandId: CommandId.make(`${input.commandId}:project`),
+  // The folder was claimed by this attempt, so only this attempt's project can own it.
+  const rollback = Effect.fn("BotService.rollback")(function* (
+    input: BotCreateInput,
+    folder: string,
+  ) {
+    const projectId = ProjectId.make(input.commandId);
+    const owner = yield* projects.getByWorkspaceRoot(folder).pipe(
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
+    if (owner !== undefined) {
+      if (owner.id !== projectId) return;
+      const deleted = yield* projects
+        .delete({
+          commandId: CommandId.make(`${input.commandId}:rollback`),
           projectId,
-          title: input.name,
-          workspaceRoot: folder,
-          bot: {
-            threadId,
-            avatar: { shape: input.avatar.shape, color: input.avatar.color, imagePath: null },
-            description: null,
-          },
-        })
-        .pipe(Effect.mapError((error) => fail(error.message)(error)));
-      yield* launches
-        .launch({
-          commandId: CommandId.make(`${input.commandId}:thread`),
-          threadId,
-          projectId,
-          title: input.name,
-          modelSelection: input.modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          workspaceStrategy: { type: "root" },
-          initialMessage: { text: kickoffMessage(input.name), attachments: [] },
-          createdBy: "user",
-          creationSource: "server",
+          force: true,
         })
         .pipe(
-          Effect.mapError((error) => fail("Could not start the bot's session.", projectId)(error)),
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
         );
-      // Settled threads drop out of shell snapshots; a bot's session stays in view.
-      yield* threads
-        .dispatch({
-          type: "thread.auto-settle.set",
-          commandId: CommandId.make(`${input.commandId}:auto-settle`),
-          threadId,
-          enabled: false,
-        })
-        .pipe(Effect.ignore);
-      return { projectId, threadId };
-    }).pipe(Effect.onExit((exit) => (Exit.isFailure(exit) ? rollback : Effect.void)));
+      if (!deleted) return;
+    }
+    yield* fileSystem.remove(folder, { recursive: true }).pipe(Effect.ignore);
   });
+
+  const setUp = Effect.fn("BotService.setUp")(function* (input: BotCreateInput, folder: string) {
+    const projectId = ProjectId.make(input.commandId);
+    const threadId = ThreadId.make(input.commandId);
+    yield* scaffoldFolder(folder, input.name).pipe(
+      Effect.mapError(fail("Could not set up the bot's folder.")),
+    );
+    // Its own repository keeps checkpoints out of any checkout the data dir lives in.
+    yield* git
+      .execute({
+        operation: "BotService.init",
+        cwd: folder,
+        args: ["init", "--quiet"],
+        timeoutMs: 10_000,
+      })
+      .pipe(Effect.mapError(fail("Could not create the bot's repository.")));
+    yield* projects
+      .create({
+        commandId: CommandId.make(`${input.commandId}:project`),
+        projectId,
+        title: input.name,
+        workspaceRoot: folder,
+        bot: {
+          threadId,
+          avatar: { shape: input.avatar.shape, color: input.avatar.color, imagePath: null },
+          description: null,
+        },
+      })
+      .pipe(Effect.mapError((error) => fail(error.message)(error)));
+    yield* launches
+      .launch({
+        commandId: CommandId.make(`${input.commandId}:thread`),
+        threadId,
+        projectId,
+        title: input.name,
+        modelSelection: input.modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        workspaceStrategy: { type: "root" },
+        initialMessage: { text: kickoffMessage(input.name), attachments: [] },
+        createdBy: "user",
+        creationSource: "server",
+      })
+      .pipe(
+        Effect.mapError((error) => fail("Could not start the bot's session.", projectId)(error)),
+      );
+    // Settled threads drop out of shell snapshots; a bot's session stays in view.
+    yield* threads
+      .dispatch({
+        type: "thread.auto-settle.set",
+        commandId: CommandId.make(`${input.commandId}:auto-settle`),
+        threadId,
+        enabled: false,
+      })
+      .pipe(Effect.ignore);
+    return { projectId, threadId };
+  });
+
+  const create: BotService["Service"]["create"] = (input) =>
+    creations.withPermits(1)(createOnce(input));
 
   const update: BotService["Service"]["update"] = Effect.fn("BotService.update")(function* (input) {
     return yield* mutations.withPermits(1)(

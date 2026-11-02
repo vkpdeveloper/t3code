@@ -222,13 +222,18 @@ it.effect("creates a bot as a project in its own folder with one always-on sessi
 );
 
 it.effect(
-  "a retried create returns the existing bot and a failed launch leaves nothing behind",
+  "retried creates, even concurrent ones, return one bot and a failed launch leaves nothing",
   () =>
     withBots((harness) =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const created = yield* createBot("Helper", "bot-retry");
+        const [created, concurrent] = yield* Effect.all(
+          [createBot("Helper", "bot-retry"), createBot("Helper", "bot-retry")],
+          { concurrency: "unbounded" },
+        );
+        assert.deepEqual(concurrent, created);
+        assert.equal(harness.launches.length, 1);
         harness.failLaunch = true;
         assert.deepEqual(yield* createBot("Helper", "bot-retry"), created);
         assert.equal((yield* readProject(created.projectId)).deletedAt, null);
