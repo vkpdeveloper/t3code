@@ -11,7 +11,6 @@ import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import {
   NATIVE_WORKSPACE_TAB_SLOTS,
   workspaceTabForNativeSlot,
-  workspaceUsesColumns,
   type WorkspaceTab,
 } from "./workspace-tabs-state";
 import {
@@ -132,10 +131,13 @@ export function WorkspaceNativeTabs(props: {
                   : tab === "pullRequests"
                     ? { type: "templateSource", templateSource: PULL_REQUEST_ICON }
                     : { type: "sfSymbol", name: NAVIGATION_TAB_ICONS[tab] },
-                selectedIcon:
-                  !settings && tab === "threads"
+                selectedIcon: settings
+                  ? undefined
+                  : tab === "threads"
                     ? { type: "sfSymbol", name: "text.bubble.fill" }
-                    : undefined,
+                    : tab === "bots"
+                      ? { type: "sfSymbol", name: "face.smiling.inverse" }
+                      : undefined,
                 overrideScrollViewContentInsetAdjustmentBehavior: false,
               }}
             >
@@ -149,11 +151,7 @@ export function WorkspaceNativeTabs(props: {
           );
         })}
       </Tabs.Host>
-      {(deviceType === "pad" ||
-        compactTabs ||
-        (layout.primarySidebarOverlaysContent &&
-          !workspaceUsesColumns(selectedTab, workspace.settingsOpen))) &&
-      !props.hidden ? (
+      {(deviceType === "pad" || compactTabs) && !props.hidden ? (
         <View
           pointerEvents="box-none"
           style={{

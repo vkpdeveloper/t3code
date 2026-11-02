@@ -2,7 +2,6 @@ import { useAndroidFloatingTabs } from "../settings/appearance/AppearancePrefere
 import { WorkspaceNoTabs } from "./WorkspaceNoTabs";
 import { useEnabledNavigationTabs } from "./navigation-tabs";
 import { NAVIGATION_TAB_ORDER } from "./navigation-tab-order";
-import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
 import { View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -11,6 +10,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
+import { BotsScreen, useOpenNewBot } from "../bots/BotsScreen";
 import { PullRequestsScreen } from "../pull-requests/PullRequestsScreen";
 import { PullRequestToolbar } from "../pull-requests/PullRequestToolbar.android";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
@@ -40,6 +40,7 @@ export function WorkspaceRootScreen() {
           : 16,
   };
   const tab = workspace.state.selectedTab;
+  const openNewBot = useOpenNewBot();
 
   return (
     <WorkspaceTabsContext value={context}>
@@ -52,9 +53,7 @@ export function WorkspaceRootScreen() {
             layout.usesSplitView
               ? insets
               : floatingTabsEnabled
-                ? tab === "usage"
-                  ? { ...insets, bottom: context.bottomClearance }
-                  : insets
+                ? insets
                 : { ...insets, bottom: 0 }
           }
         >
@@ -71,8 +70,32 @@ export function WorkspaceRootScreen() {
               renderTab={(tab) =>
                 tab === "threads" ? (
                   <HomeRouteScreen />
-                ) : tab !== "pullRequests" ? (
-                  <WorkspaceExtraTab tab={tab} />
+                ) : tab === "bots" ? (
+                  layout.usesSplitView ? (
+                    <>
+                      <NativeStackScreenOptions options={{ headerShown: false }} />
+                      <AndroidScreenHeader title="Bots" />
+                      <View className="flex-1 items-center justify-center px-10">
+                        <EmptyState
+                          title="Select a bot"
+                          detail="Choose a bot from the sidebar."
+                          variant="plain"
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <AndroidScreenHeader
+                        title="Bots"
+                        actions={[
+                          { accessibilityLabel: "New bot", icon: "plus", onPress: openNewBot },
+                        ]}
+                      />
+                      <ScreenContent>
+                        <BotsScreen />
+                      </ScreenContent>
+                    </>
+                  )
                 ) : layout.usesSplitView ? (
                   <>
                     <NativeStackScreenOptions options={{ headerShown: false }} />

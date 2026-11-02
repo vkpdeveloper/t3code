@@ -219,8 +219,9 @@ export function workspaceTabNavigationState<
     return { ...settings, index: routes.length - 1, routes };
   }
   const home = state.routes.find((route) => route.name === "Home") ?? { name: "Home" };
+  // Bots opens on its list; a remembered chat belongs to Threads.
   const detail =
-    options.columns && tab !== "usage"
+    options.columns && tab !== "bots"
       ? detailRoute(state, tab, selections, options.check)
       : undefined;
   const routes = [...[home, ...(detail ? [detail] : [])].map(keyed), ...overlays];

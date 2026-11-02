@@ -22,7 +22,6 @@ export function SettingsScreen(
   props: Pick<AppBarProps, "title" | "actions" | "trailing" | "search"> & {
     readonly children: ReactNode;
     readonly formSheet?: boolean;
-    readonly workspaceRoot?: boolean;
   },
 ) {
   const navigation = useNavigation();
@@ -35,8 +34,7 @@ export function SettingsScreen(
   const cover = deviceType === "duo-folded";
   // Android opens Settings as a workspace tab; its root page has nothing to go back to.
   const workspaceRoot =
-    props.workspaceRoot ||
-    (Platform.OS === "android" && workspace !== null && route.name === "Settings");
+    Platform.OS === "android" && workspace !== null && route.name === "Settings";
 
   // Settings' grouped cards only lift off the screen surface, so the folded Duo doesn't take
   // the workspace's drawer surface here.
