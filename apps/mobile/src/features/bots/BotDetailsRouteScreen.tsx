@@ -99,6 +99,14 @@ function BotDetails(props: { readonly project: BotProject }) {
   );
 }
 
+function sameAvatar(left: ProjectBot["avatar"], right: ProjectBot["avatar"]) {
+  return (
+    left.shape === right.shape &&
+    left.color === right.color &&
+    (left.imagePath ?? null) === (right.imagePath ?? null)
+  );
+}
+
 function BotAvatarSection(props: { readonly project: BotProject }) {
   const { project } = props;
   const updateBot = useAtomCommand(serverEnvironment.updateBot, {
@@ -120,26 +128,28 @@ function BotAvatarSection(props: { readonly project: BotProject }) {
     ) ?? false;
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
-  // The newest unconfirmed pick, so quick picks build on each other instead of the stale server avatar.
-  const [pending, setPending] = useState<{ shape: BotAvatarShape; color: BotAvatarColor } | null>(
-    null,
-  );
+  // The newest pick, shown until the bot's avatar changes from the one it was picked over, so quick
+  // picks build on each other even when a save returns before the project update arrives.
+  const [pending, setPending] = useState<{
+    readonly change: { shape: BotAvatarShape; color: BotAvatarColor };
+    readonly base: ProjectBot["avatar"];
+  } | null>(null);
   const latestSave = useRef(0);
-  const avatar = pending ?? project.bot.avatar;
+  const live = pending !== null && sameAvatar(pending.base, project.bot.avatar) ? pending : null;
+  const avatar = live?.change ?? project.bot.avatar;
   // Drawn choices fall back to the first option when the server knows a newer one.
   const shape = BOT_AVATAR_SHAPES.find((value) => value === avatar.shape) ?? "circle";
   const color = BOT_AVATAR_COLORS.find((value) => value === avatar.color) ?? "gray";
 
   const saveAvatar = (next: { shape: BotAvatarShape; color: BotAvatarColor }) => {
     const save = ++latestSave.current;
-    setPending(next);
+    setPending({ change: next, base: live?.base ?? project.bot.avatar });
     void updateBot({
       environmentId: project.environmentId,
       // Picking a drawn avatar replaces a generated image.
       input: { projectId: project.id, avatar: { ...next, imagePath: null } },
     }).then((result) => {
-      if (save !== latestSave.current) return;
-      setPending(null);
+      if (result._tag === "Failure" && save === latestSave.current) setPending(null);
       alertFailure("Couldn't update avatar", result);
     });
   };

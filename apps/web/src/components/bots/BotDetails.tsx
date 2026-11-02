@@ -56,6 +56,14 @@ function knownColor(value: string): BotAvatarColor {
 
 type AvatarChange = { shape: BotAvatarShape; color: BotAvatarColor; imagePath?: null };
 
+function sameAvatar(left: ProjectBot["avatar"], right: ProjectBot["avatar"]) {
+  return (
+    left.shape === right.shape &&
+    left.color === right.color &&
+    (left.imagePath ?? null) === (right.imagePath ?? null)
+  );
+}
+
 function AvatarEditor({
   project,
   bot,
@@ -75,24 +83,29 @@ function AvatarEditor({
   );
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
-  // The newest unconfirmed pick, so quick picks build on each other instead of the stale server avatar.
-  const [pending, setPending] = useState<AvatarChange | null>(null);
+  // The newest pick, shown until the bot's avatar changes from the one it was picked over, so quick
+  // picks build on each other even when a save returns before the project update arrives.
+  const [pending, setPending] = useState<{
+    change: AvatarChange;
+    base: ProjectBot["avatar"];
+  } | null>(null);
   const latestSave = useRef(0);
-  const avatar = pending === null ? bot.avatar : { ...bot.avatar, ...pending };
+  const live = pending !== null && sameAvatar(pending.base, bot.avatar) ? pending : null;
+  const avatar = live === null ? bot.avatar : { ...bot.avatar, ...live.change };
   const shape = knownShape(avatar.shape);
   const color = knownColor(avatar.color);
   const imagePath = avatar.imagePath ?? null;
 
   const saveAvatar = async (next: AvatarChange) => {
     const save = ++latestSave.current;
-    setPending(next);
+    setPending({ change: next, base: live?.base ?? bot.avatar });
     const result = await updateBot({
       environmentId: project.environmentId,
       input: { projectId: project.id, avatar: next },
     });
-    if (save !== latestSave.current) return;
-    setPending(null);
-    if (result._tag === "Failure") reportFailure("Could not update avatar", result);
+    if (result._tag !== "Failure") return;
+    if (save === latestSave.current) setPending(null);
+    reportFailure("Could not update avatar", result);
   };
 
   const generate = async () => {
@@ -251,14 +264,18 @@ function useArtifactEntries({
       input: { cwd: project.workspaceRoot, directoryPath },
     }),
   );
-  const seenRun = useRef(runCompletedAt);
-  const { refresh } = query;
+  // A listing fetched before the latest run finished may miss files the agent wrote, including a
+  // cached one shown when a folder reopens. Once per run, so a skewed server clock can't loop it.
+  const refreshedFor = useRef<string | null>(null);
+  const { refresh, dataUpdatedAt, isPending } = query;
+  const loaded = query.data !== null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- re-reads the folder from disk after a run, since the agent may have written files
   useEffect(() => {
-    if (seenRun.current === runCompletedAt) return;
-    seenRun.current = runCompletedAt;
-    if (runCompletedAt !== null) refresh();
-  }, [runCompletedAt, refresh]);
+    if (runCompletedAt === null || !loaded || isPending) return;
+    if (refreshedFor.current === runCompletedAt) return;
+    refreshedFor.current = runCompletedAt;
+    if (dataUpdatedAt < Date.parse(runCompletedAt)) refresh();
+  }, [runCompletedAt, loaded, isPending, dataUpdatedAt, refresh]);
   const entries = (query.data?.entries ?? []).toSorted(
     (left, right) =>
       (left.kind === "directory" ? 0 : 1) - (right.kind === "directory" ? 0 : 1) ||
