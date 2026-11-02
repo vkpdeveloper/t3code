@@ -518,6 +518,14 @@
     "./provider-clients": {
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
+    },
+    "./bot-avatar": {
+      "types": "./src/botAvatar.ts",
+      "default": "./src/botAvatar.ts"
+    },
+    "./state/bots": {
+      "types": "./src/state/bots.ts",
+      "default": "./src/state/bots.ts"
     }
   },
   "scripts": {
