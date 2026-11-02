@@ -40,7 +40,13 @@ export function BotAvatarPicker({
           </button>
         ))}
       </div>
-      <div role="group" aria-label="Color" className="flex flex-wrap gap-2">
+      <div
+        role="group"
+        aria-label="Color"
+        className="grid gap-1.5"
+        // One row that spans the shape grid, so no swatch wraps alone on a phone.
+        style={{ gridTemplateColumns: `repeat(${BOT_AVATAR_COLORS.length}, minmax(0, 1fr))` }}
+      >
         {BOT_AVATAR_COLORS.map((option) => (
           <button
             key={option}
@@ -50,7 +56,7 @@ export function BotAvatarPicker({
             disabled={disabled}
             onClick={() => onChange({ shape, color: option })}
             className={cn(
-              "size-6 cursor-pointer rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
+              "aspect-square w-full cursor-pointer rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
               option === color && "ring-2 ring-foreground/70 ring-inset",
             )}
             style={{ backgroundColor: BOT_AVATAR_COLOR_HEX[option] }}

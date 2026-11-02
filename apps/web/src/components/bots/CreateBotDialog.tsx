@@ -309,31 +309,30 @@ function MachineBotForm({
           {model === null ? (
             <p className="text-sm text-muted-foreground">No providers on this computer</p>
           ) : (
-            <div className="flex min-w-0">
-              <ProviderModelPicker
-                environmentId={environmentId}
-                disabled={pending}
-                activeInstanceId={model.instanceId}
-                model={model.model}
-                lockedProvider={null}
-                instanceEntries={entries}
-                modelOptionsByInstance={getCustomModelOptionsByInstance(
-                  settings,
-                  providers,
-                  model.instanceId,
-                  model.model,
-                )}
-                isComposerOwned={false}
-                popupAlign="start"
-                triggerSuffix={effort.suffix}
-                triggerDetail={effort.detail}
-                effortColumn={<ComposerEffortColumn traits={traits} />}
-                footer={<ComposerPickerFooter traits={traits} />}
-                onInstanceModelChange={(instanceId, slug) =>
-                  setChosenModel(createModelSelection(instanceId, slug))
-                }
-              />
-            </div>
+            <ProviderModelPicker
+              environmentId={environmentId}
+              disabled={pending}
+              activeInstanceId={model.instanceId}
+              model={model.model}
+              lockedProvider={null}
+              instanceEntries={entries}
+              modelOptionsByInstance={getCustomModelOptionsByInstance(
+                settings,
+                providers,
+                model.instanceId,
+                model.model,
+              )}
+              isComposerOwned={false}
+              triggerVariant="field"
+              popupAlign="start"
+              triggerSuffix={effort.suffix}
+              triggerDetail={effort.detail}
+              effortColumn={<ComposerEffortColumn traits={traits} />}
+              footer={<ComposerPickerFooter traits={traits} />}
+              onInstanceModelChange={(instanceId, slug) =>
+                setChosenModel(createModelSelection(instanceId, slug))
+              }
+            />
           )}
         </div>
       ) : null}

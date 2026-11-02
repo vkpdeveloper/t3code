@@ -5,9 +5,10 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { createContext, memo, type ReactNode, useRef, useState } from "react";
+import { createContext, memo, type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { SelectButton } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
@@ -94,6 +95,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   popupAlign?: "start" | "end";
   triggerClassName?: string;
+  /** `field` draws the trigger as a full-width form select instead of a composer chip. */
+  triggerVariant?: "composer" | "field";
   triggerLabel?: string;
   triggerAriaLabel?: string;
   onOpenChange?: (open: boolean) => void;
@@ -287,6 +290,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     />
   );
 
+  const isField = props.triggerVariant === "field";
+  const triggerProps = {
+    ref: triggerRef,
+    "aria-label": [
+      props.triggerAriaLabel ?? props.triggerLabel ?? allModelNames ?? triggerLabel,
+      props.triggerDetail,
+    ]
+      .filter(Boolean)
+      .join(", "),
+    "data-chat-provider-model-picker": "true",
+    "data-composer-shortcut": props.triggerShortcuts,
+    disabled: props.disabled,
+    onClick: (event: MouseEvent<HTMLButtonElement>) => {
+      if (!isMenuOpen || !docked) return;
+      const target = takeOpenTarget(triggerRef.current);
+      if (!target) return;
+      // A shortcut aimed at the open picker moves within it instead of closing it.
+      (event as typeof event & { preventBaseUIHandler?: () => void }).preventBaseUIHandler?.();
+      openTarget(target);
+    },
+  };
+
   return (
     <Popover
       open={isMenuOpen}
@@ -304,36 +329,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     >
       <PopoverTrigger
         render={
-          <ComposerControl
-            ref={triggerRef}
-            aria-label={[
-              props.triggerAriaLabel ?? props.triggerLabel ?? allModelNames ?? triggerLabel,
-              props.triggerDetail,
-            ]
-              .filter(Boolean)
-              .join(", ")}
-            size={size}
-            data-chat-provider-model-picker="true"
-            data-composer-shortcut={props.triggerShortcuts}
-            onClick={(event) => {
-              if (!isMenuOpen || !docked) return;
-              const target = takeOpenTarget(triggerRef.current);
-              if (!target) return;
-              // A shortcut aimed at the open picker moves within it instead of closing it.
-              (
-                event as typeof event & { preventBaseUIHandler?: () => void }
-              ).preventBaseUIHandler?.();
-              openTarget(target);
-            }}
-            className={cn(
-              "min-w-0 shrink justify-between whitespace-nowrap",
-              props.compact
-                ? "max-w-42 shrink-0"
-                : !props.isComposerOwned && "max-w-48 sm:max-w-56",
-              props.triggerClassName,
-            )}
-            disabled={props.disabled}
-          />
+          isField ? (
+            <SelectButton {...triggerProps} />
+          ) : (
+            <ComposerControl
+              {...triggerProps}
+              size={size}
+              className={cn(
+                "min-w-0 shrink justify-between whitespace-nowrap",
+                props.compact
+                  ? "max-w-42 shrink-0"
+                  : !props.isComposerOwned && "max-w-48 sm:max-w-56",
+                props.triggerClassName,
+              )}
+            />
+          )
         }
       >
         <span
@@ -387,7 +397,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               />
             </span>
           ) : null}
-          {props.isComposerOwned ? (
+          {props.isComposerOwned || isField ? (
             <span {...triggerTextProps}>{triggerText}</span>
           ) : (
             <Tooltip>
