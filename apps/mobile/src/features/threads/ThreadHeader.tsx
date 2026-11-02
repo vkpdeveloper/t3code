@@ -22,7 +22,7 @@ export function ThreadHeader(
   const goBack = useWorkspaceBackNavigation(props.onOpenBotDetails ? "bots" : "threads");
   const { layout, panes, toggleAuxiliaryPane, composerKeyboardActive } =
     useAdaptiveWorkspaceLayout();
-  const { onOpenTerminal, onMergeBack } = props.gitControls;
+  const { onOpenTerminal, onMergeBack, showGitMenu } = props.gitControls;
   const native = useThreadHeaderOptions(props);
   const androidHeaderActions = useMemo<ReadonlyArray<AppBarAction>>(() => {
     const actions: AppBarAction[] = [];
@@ -56,11 +56,13 @@ export function ThreadHeader(
         onPress: () => onOpenTerminal(null),
       });
     }
-    actions.push({
-      accessibilityLabel: "Open git controls",
-      icon: "point.topleft.down.curvedto.point.bottomright.up",
-      onPress: props.onOpenGitInspector,
-    });
+    if (showGitMenu !== false) {
+      actions.push({
+        accessibilityLabel: "Open git controls",
+        icon: "point.topleft.down.curvedto.point.bottomright.up",
+        onPress: props.onOpenGitInspector,
+      });
+    }
     if (onMergeBack) {
       actions.push({
         accessibilityLabel: "Merge back to source",
@@ -76,6 +78,7 @@ export function ThreadHeader(
     onOpenTerminal,
     onMergeBack,
     props.onOpenGitInspector,
+    showGitMenu,
     toggleAuxiliaryPane,
     props.onReturnToThread,
     props.onOpenBotDetails,

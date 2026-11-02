@@ -68,7 +68,7 @@ export function useThreadHeaderOptions(props: {
         ]
       : []),
     sidebarHeaderItem,
-    ...(!usesDuoHeader && !props.draft
+    ...(!usesDuoHeader && !props.draft && !props.onOpenBotDetails
       ? [
           withNativeGlassHeaderItem({
             accessibilityLabel: "New task",

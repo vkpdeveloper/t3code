@@ -17,7 +17,7 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { View } from "react-native";
 
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
@@ -118,23 +118,37 @@ function BotAvatarSection(props: { readonly project: BotProject }) {
     config?.providers.some(
       (provider) => provider.driver === "codex" && provider.enabled && provider.status === "ready",
     ) ?? false;
+  const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
+  // The newest unconfirmed pick, so quick picks build on each other instead of the stale server avatar.
+  const [pending, setPending] = useState<{ shape: BotAvatarShape; color: BotAvatarColor } | null>(
+    null,
+  );
+  const latestSave = useRef(0);
+  const avatar = pending ?? project.bot.avatar;
   // Drawn choices fall back to the first option when the server knows a newer one.
-  const shape = BOT_AVATAR_SHAPES.find((value) => value === project.bot.avatar.shape) ?? "circle";
-  const color = BOT_AVATAR_COLORS.find((value) => value === project.bot.avatar.color) ?? "gray";
+  const shape = BOT_AVATAR_SHAPES.find((value) => value === avatar.shape) ?? "circle";
+  const color = BOT_AVATAR_COLORS.find((value) => value === avatar.color) ?? "gray";
 
   const saveAvatar = (next: { shape: BotAvatarShape; color: BotAvatarColor }) => {
+    const save = ++latestSave.current;
+    setPending(next);
     void updateBot({
       environmentId: project.environmentId,
       // Picking a drawn avatar replaces a generated image.
       input: { projectId: project.id, avatar: { ...next, imagePath: null } },
-    }).then((result) => alertFailure("Couldn't update avatar", result));
+    }).then((result) => {
+      if (save !== latestSave.current) return;
+      setPending(null);
+      alertFailure("Couldn't update avatar", result);
+    });
   };
   const generate = () => {
     setGenerating(true);
+    const trimmed = prompt.trim();
     void generateAvatar({
       environmentId: project.environmentId,
-      input: { projectId: project.id },
+      input: { projectId: project.id, ...(trimmed ? { prompt: trimmed } : {}) },
     }).then((result) => {
       setGenerating(false);
       if (result._tag === "Failure") {
@@ -155,7 +169,18 @@ function BotAvatarSection(props: { readonly project: BotProject }) {
     <SettingsSection title="Avatar">
       <BotAvatarPicker shape={shape} color={color} disabled={!canUpdate} onChange={saveAvatar} />
       {codexReady && canGenerate ? (
-        <View className="px-4 pb-4">
+        <View className="gap-3 px-4 pb-4">
+          <AppTextInput
+            accessibilityLabel="Avatar idea"
+            className="min-h-11 rounded-xl border-continuous bg-card px-3 text-base text-foreground"
+            value={prompt}
+            maxLength={500}
+            placeholder={`Avatar for ${project.title}`}
+            editable={!generating && canUpdate}
+            returnKeyType="go"
+            onChangeText={setPrompt}
+            onSubmitEditing={generate}
+          />
           <Button
             label={generating ? "Generating image..." : "Generate image"}
             icon="sparkles"

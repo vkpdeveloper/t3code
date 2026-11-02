@@ -859,6 +859,7 @@ function ThreadRouteContent(
       : [],
     terminalSessions: terminalMenuSessions,
     showDirectFileControl: layout.usesSplitView,
+    showGitMenu: botProject === null,
     onOpenTerminal: handleOpenTerminal,
     onOpenNewTerminal: handleOpenNewTerminal,
     onRunProjectScript: handleRunProjectScript,
