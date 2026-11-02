@@ -93,25 +93,50 @@ function shell(overrides: Partial<OrchestrationV2ThreadShell> = {}): Orchestrati
   };
 }
 
-function reply(
-  text: string,
-  createdAt: string,
-  overrides: Partial<OrchestrationV2ConversationMessage> = {},
-): OrchestrationV2ConversationMessage {
+type Reply = {
+  readonly message: OrchestrationV2ConversationMessage;
+  readonly item: OrchestrationV2TurnItem;
+};
+
+function reply(text: string, createdAt: string, ordinal: number): Reply {
+  const runId = RunId.make("run:reply");
+  const at = DateTime.makeUnsafe(createdAt);
+  const id = MessageId.make(`message:reply:${ordinal}`);
   return {
-    id: MessageId.make(`message:${createdAt}`),
-    threadId: THREAD_ID,
-    runId: RunId.make("run:reply"),
-    nodeId: null,
-    role: "assistant",
-    text,
-    attachments: [],
-    streaming: false,
-    createdBy: "agent",
-    creationSource: "provider",
-    createdAt: DateTime.makeUnsafe(createdAt),
-    updatedAt: DateTime.makeUnsafe(createdAt),
-    ...overrides,
+    message: {
+      id,
+      threadId: THREAD_ID,
+      runId,
+      nodeId: null,
+      role: "assistant",
+      text,
+      attachments: [],
+      streaming: false,
+      createdBy: "agent",
+      creationSource: "provider",
+      createdAt: at,
+      updatedAt: at,
+    },
+    item: {
+      id: TurnItemId.make(`item:reply:${ordinal}`),
+      threadId: THREAD_ID,
+      runId,
+      nodeId: NodeId.make("node:reply"),
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal,
+      title: null,
+      startedAt: at,
+      completedAt: at,
+      updatedAt: at,
+      type: "assistant_message",
+      messageId: id,
+      text,
+      streaming: false,
+      status: "completed",
+    },
   };
 }
 
@@ -168,7 +193,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
     readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
     readonly bot?: boolean;
-    readonly replies?: ReadonlyArray<OrchestrationV2ConversationMessage>;
+    readonly replies?: ReadonlyArray<Reply>;
   } = {},
 ) {
   const values = new Map<string, Uint8Array>(
@@ -230,7 +255,10 @@ const makeTestRelay = Effect.fnUntraced(function* (
     getThreadRecords: () =>
       options.replies === undefined
         ? Effect.die("unused record read")
-        : Effect.succeed({ messages: options.replies } as never),
+        : Effect.succeed({
+            messages: options.replies.map((entry) => entry.message),
+            turnItems: options.replies.map((entry) => entry.item),
+          } as never),
     getThreadProjection: unused,
     getCheckpointContext: unused,
     getThreadSnapshot: unused,
@@ -401,12 +429,15 @@ describe("AgentAwarenessRelay", () => {
         const { relay, currentShell, publications } = yield* makeTestRelay({
           bot,
           replies: [
+            // Providers can finalize several messages with one timestamp; turn order decides.
+            reply("I am checking the flights", "2026-09-04T12:00:02Z", 2),
             reply(
               "# Newer\nSaved to [trip.md](/tmp/trip.md): **three** flights.",
               "2026-09-04T12:00:02Z",
+              3,
             ),
-            reply("Older reply", "2026-09-04T12:00:01Z"),
-            reply("   ", "2026-09-04T12:00:03Z"),
+            reply("Older reply", "2026-09-04T12:00:01Z", 1),
+            reply("   ", "2026-09-04T12:00:03Z", 4),
           ],
         });
         yield* Ref.set(currentShell, shell({ latestRunId: RunId.make("run:reply") }));
@@ -434,7 +465,7 @@ describe("AgentAwarenessRelay", () => {
     Effect.gen(function* () {
       const { relay, currentShell, publications } = yield* makeTestRelay({
         bot: true,
-        replies: [reply("word ".repeat(100), "2026-09-04T12:00:01Z")],
+        replies: [reply("word ".repeat(100), "2026-09-04T12:00:01Z", 1)],
       });
       yield* relay.publishThread(THREAD_ID);
       yield* Ref.set(

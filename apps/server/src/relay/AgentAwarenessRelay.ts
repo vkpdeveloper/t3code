@@ -207,12 +207,20 @@ function sanitizeRelayAgentActivityState(
   return { ...rest, ...(detail ? { detail } : {}), ...(message ? { message } : {}) };
 }
 
-function latestReplyPreview(messages: ReadonlyArray<OrchestrationV2ConversationMessage>) {
-  const newestFirst = messages.toSorted(
-    (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
-  );
-  for (const message of newestFirst) {
-    const preview = markdownPreviewText(message.text);
+// Turn order decides the final reply; providers can finalize several messages with one timestamp.
+function latestReplyPreview(records: {
+  readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+}) {
+  const replies = records.turnItems
+    .filter(
+      (item): item is Extract<OrchestrationV2TurnItem, { readonly type: "assistant_message" }> =>
+        item.type === "assistant_message",
+    )
+    .toSorted((left, right) => right.ordinal - left.ordinal);
+  for (const item of replies) {
+    const message = records.messages.find((candidate) => candidate.id === item.messageId);
+    const preview = markdownPreviewText(message?.text ?? item.text);
     if (preview) return preview;
   }
   return undefined;
@@ -553,18 +561,20 @@ export const make = Effect.gen(function* () {
       ) {
         return snapshot;
       }
-      const { messages } = yield* threads
-        .getThreadRecords(input.thread.value.id, ["messages"], {
+      const records = yield* threads
+        .getThreadRecords(input.thread.value.id, ["messages", "turnItems"], {
           messageRunIds: [latestRunId],
           messageRoles: ["assistant"],
+          turnItemRunId: latestRunId,
+          turnItemTypes: ["assistant_message"],
         })
         .pipe(
           Effect.tapError((cause) =>
             Effect.logWarning("bot reply unavailable for agent activity", { threadId, cause }),
           ),
-          Effect.orElseSucceed(() => ({ messages: [] })),
+          Effect.orElseSucceed(() => ({ messages: [], turnItems: [] })),
         );
-      const message = latestReplyPreview(messages);
+      const message = latestReplyPreview(records);
       return message === undefined
         ? snapshot
         : { ...snapshot, state: sanitizeRelayAgentActivityState({ ...snapshot.state, message }) };
