@@ -323,18 +323,17 @@ function ArtifactFile({
   });
   const download = async () => {
     setSaving(true);
+    let failure: string | null = null;
     try {
       const url = await prepareDownload();
-      if (!url) throw new Error("Reconnect to the computer and try again.");
-      await saveUrlAsFile(url, name);
+      if (url) await saveUrlAsFile(url, name);
+      else failure = "Reconnect to the computer and try again.";
     } catch (cause) {
-      toastManager.add({
-        type: "error",
-        title: "Could not download file",
-        description: cause instanceof Error ? cause.message : "Try again.",
-      });
-    } finally {
-      setSaving(false);
+      failure = cause instanceof Error ? cause.message : "Try again.";
+    }
+    setSaving(false);
+    if (failure) {
+      toastManager.add({ type: "error", title: "Could not download file", description: failure });
     }
   };
   return (
