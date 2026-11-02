@@ -89,7 +89,11 @@ export function currentWorkspaceSelections() {
  */
 export function recordWorkspaceSelections(state: NavigationState | undefined) {
   if (!REMEMBERS || !state) return;
-  selections = workspaceSelectionsIn(state.routes.slice(0, state.index + 1), selections);
+  selections = workspaceSelectionsIn(
+    state.routes.slice(0, state.index + 1),
+    selections,
+    isBotThread,
+  );
 }
 
 function environmentRemoved(environmentId: string) {
