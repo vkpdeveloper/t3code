@@ -329,7 +329,7 @@ function ArtifactFile({
       if (url) await saveUrlAsFile(url, name);
       else failure = "Reconnect to the computer and try again.";
     } catch (cause) {
-      failure = cause instanceof Error ? cause.message : "Try again.";
+      failure = (cause instanceof Error && cause.message) || "Try again.";
     }
     setSaving(false);
     if (failure) {
