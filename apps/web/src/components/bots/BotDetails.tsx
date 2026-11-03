@@ -19,7 +19,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { saveUrlAsFile, useAssetUrlRefresh } from "~/assets/assetUrls";
 import { useTheme } from "~/hooks/useTheme";
-import { cn } from "~/lib/utils";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { useEnvironmentProviders } from "../../state/environments";
 import { useQuietThreadShell, useThreadShell } from "../../state/entities";
@@ -32,7 +31,7 @@ import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import { getDisplayModelName } from "../chat/providerIconUtils";
 import { ThreadAutomationsPanel } from "../chat/ThreadAutomationsPanel";
 import { ThreadDetailsSection } from "../chat/ThreadDetailsSection";
-import { Button } from "../ui/button";
+import { Button, ContentButton } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -132,6 +131,7 @@ function AvatarEditor({
           <button
             type="button"
             aria-label="Change avatar"
+            // oxlint-disable-next-line t3code/no-styled-raw-controls -- The avatar is the control; no Button variant frames a round image.
             className="cursor-pointer rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           />
         }
@@ -163,7 +163,7 @@ function AvatarEditor({
                 disabled={generating}
                 onChange={(event) => setPrompt(event.target.value)}
               />
-              <Button type="submit" size="sm" variant="outline" disabled={generating}>
+              <Button type="submit" size="sm" variant="secondary" disabled={generating}>
                 <SparklesIcon />
                 {generating ? "Generating" : "Generate"}
               </Button>
@@ -203,7 +203,8 @@ function BotName({ project }: { project: EnvironmentProject }) {
       <button
         type="button"
         onClick={() => setDraft(project.title)}
-        className="min-w-0 cursor-text truncate rounded-md text-left text-base font-semibold outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        // oxlint-disable-next-line t3code/no-styled-raw-controls -- Click-to-rename text that becomes an input; it must read as the title.
+        className="min-w-0 cursor-text truncate rounded-md text-left text-label outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {project.title}
       </button>
@@ -235,7 +236,7 @@ function BotModel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const provider = providers.find((entry) => entry.instanceId === instanceId);
   const known = provider?.models.find((entry) => entry.slug === model);
   return (
-    <p className="truncate px-2.5 text-sm text-foreground">
+    <p className="truncate px-2.5 text-body text-foreground">
       {known ? getDisplayModelName(known) : formatModelSlugName(model)}
       {provider?.displayName ? (
         <span className="text-muted-foreground"> on {provider.displayName}</span>
@@ -252,11 +253,8 @@ type ArtifactFolderProps = {
   runCompletedAt: string | null;
 };
 
-const ARTIFACT_ROW_CLASS =
-  "flex w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2.5 text-left text-sm outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
-
 function artifactRowIndent(depth: number) {
-  return { paddingLeft: `${0.625 + depth}rem` };
+  return { paddingLeft: `${0.5 + depth}rem` };
 }
 
 function useArtifactEntries({
@@ -338,15 +336,15 @@ function ArtifactFile({
   };
   return (
     <li className="group relative">
-      <button
-        type="button"
+      <ContentButton
+        variant="inset-row"
         onClick={() => useRightPanelStore.getState().openFile(props.threadRef, path)}
-        className={cn(ARTIFACT_ROW_CLASS, "pr-9")}
-        style={artifactRowIndent(props.depth)}
+        // Leaves room for the download button that appears over the row's end.
+        style={{ ...artifactRowIndent(props.depth), paddingRight: "2.25rem" }}
       >
         <PierreEntryIcon pathValue={name} kind="file" theme={resolvedTheme} className="shrink-0" />
         <span className="truncate">{name}</span>
-      </button>
+      </ContentButton>
       <span className="absolute inset-y-0 right-1 flex items-center opacity-0 pointer-coarse:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100">
         <Button
           size="icon-xs"
@@ -371,11 +369,10 @@ function ArtifactDirectory({ name, ...props }: ArtifactFolderProps & { name: str
   const [expanded, setExpanded] = useState(false);
   return (
     <li>
-      <button
-        type="button"
+      <ContentButton
+        variant="inset-row"
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
-        className={ARTIFACT_ROW_CLASS}
         style={artifactRowIndent(props.depth)}
       >
         {expanded ? (
@@ -384,7 +381,7 @@ function ArtifactDirectory({ name, ...props }: ArtifactFolderProps & { name: str
           <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
         )}
         <span className="truncate">{name}</span>
-      </button>
+      </ContentButton>
       {expanded ? <ArtifactFolder {...props} depth={props.depth + 1} /> : null}
     </li>
   );
@@ -402,7 +399,7 @@ function BotArtifacts({
   const { entries, loading } = useArtifactEntries(props);
   if (entries.length === 0) {
     return (
-      <p className="px-2.5 py-2 text-sm text-muted-foreground">
+      <p className="px-2.5 py-2 text-body text-muted-foreground">
         {loading ? "Loading" : "No artifacts yet"}
       </p>
     );
@@ -434,7 +431,7 @@ function BotComputer({ project }: { project: EnvironmentProject }) {
   ];
   return (
     <div className="flex flex-col gap-4 px-2.5 py-1">
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-body">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted-foreground">{label}</dt>
@@ -499,14 +496,14 @@ export function BotDetails({
       </div>
       {tab === "details" ? (
         <>
-          <ThreadDetailsSection headingId="bot-description-heading" title="Description">
-            <p className="px-2.5 text-sm whitespace-pre-wrap text-foreground">
+          <ThreadDetailsSection title="Description">
+            <p className="px-2.5 text-body whitespace-pre-wrap text-foreground">
               {bot.description ?? (
                 <span className="text-muted-foreground">Written after your first chat</span>
               )}
             </p>
           </ThreadDetailsSection>
-          <ThreadDetailsSection headingId="bot-model-heading" title="Model">
+          <ThreadDetailsSection title="Model">
             <BotModel threadRef={threadRef} />
           </ThreadDetailsSection>
           <ThreadAutomationsPanel
@@ -517,15 +514,11 @@ export function BotDetails({
           />
         </>
       ) : tab === "artifacts" ? (
-        <ThreadDetailsSection
-          headingId="bot-artifacts-heading"
-          title="Artifacts"
-          showHeading={false}
-        >
+        <ThreadDetailsSection title="Artifacts" variant="workspace">
           <BotArtifacts project={project} threadRef={threadRef} />
         </ThreadDetailsSection>
       ) : (
-        <ThreadDetailsSection headingId="bot-computer-heading" title="Computer" showHeading={false}>
+        <ThreadDetailsSection title="Computer" variant="workspace">
           <BotComputer project={project} />
         </ThreadDetailsSection>
       )}

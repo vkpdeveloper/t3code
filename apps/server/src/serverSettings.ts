@@ -1,5 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  ForwardCompatibleOptional,
+  LayoutSettings,
   ModelSelection,
   ProjectId,
   ProjectScript,
@@ -18,6 +20,8 @@ import {
   type ServerSettingsPatch,
   type ManagedPolicySummary,
   globalIdleCompaction,
+  isSecretReference,
+  type SecretReference,
   withIdleCompaction,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
@@ -51,6 +55,7 @@ import {
   deriveLegacyProjectOverrides,
   fallbackTextGenerationModelSelection,
   isModelSelectionProviderEnabled,
+  resolveSpeechPostProcessingModelSelection,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ManagedPolicy from "./policy/ManagedPolicy.ts";
@@ -60,7 +65,12 @@ import {
   sourceControlHostSecretName,
 } from "./sourceControl/sourceControlHostSecrets.ts";
 
-import { mapSettingsSecrets, SECRET_REDACTED, type SettingsSecret } from "./settingsSecrets.ts";
+import {
+  mapSettingsSecrets,
+  mapSettingsSecretValues,
+  SECRET_REDACTED,
+  type SettingsSecret,
+} from "./settingsSecrets.ts";
 
 export {
   resolveReviewGuideModelSelection,
@@ -68,7 +78,11 @@ export {
 } from "@t3tools/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
-const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
+const encodeServerSettingsJson = Schema.encodeUnknownEffect(
+  fromJsonStringPretty(
+    Schema.Struct({ ...ServerSettings.fields, layout: ForwardCompatibleOptional(LayoutSettings) }),
+  ),
+);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const textEncoder = new TextEncoder();
@@ -131,13 +145,35 @@ const normalizeServerSettings = (
     ),
   );
 
-export function redactServerSettingsForClient(settings: ServerSettings): ServerSettings {
+export function redactServerSettingsForClient(
+  settings: ServerSettings,
+  client: { readonly secretReferences: boolean },
+): ServerSettings {
   const redacted = mapSettingsSecrets(settings, (secret) =>
     secret.sensitive
       ? { value: "", redacted: secret.redacted || secret.value.length > 0 }
       : { value: secret.value, redacted: false },
   );
-  return { ...redacted, secretProviders: withoutUnknownSecretProviderConfigs(redacted) };
+  // Older clients decode secret fields as strings and fail on a reference, so they see a saved secret.
+  const shaped = client.secretReferences
+    ? redacted
+    : mapSettingsSecretValues(redacted, (value) =>
+        isSecretReference(value) ? SECRET_REDACTED : value,
+      );
+  return { ...shaped, secretProviders: withoutUnknownSecretProviderConfigs(shaped) };
+}
+
+/** A client shown a reference as a saved secret sends that marker back; it keeps the reference. */
+function withEchoedSecretReferences(current: ServerSettings, next: ServerSettings): ServerSettings {
+  const references = new Map<string, SecretReference>();
+  mapSettingsSecretValues(current, (value, secretName) => {
+    if (isSecretReference(value)) references.set(secretName, value);
+    return value;
+  });
+  if (references.size === 0) return next;
+  return mapSettingsSecretValues(next, (value, secretName) =>
+    value === SECRET_REDACTED ? (references.get(secretName) ?? value) : value,
+  );
 }
 
 // A newer kind's config may hold credentials this build cannot recognize, so it never leaves the server.
@@ -230,6 +266,7 @@ export class ServerSettingsService extends Context.Service<
     /** The administrator's policy as clients see it; absent when unmanaged. */
     readonly managedPolicy?: ManagedPolicySummary | undefined;
 
+    /** Read current server settings. */
     readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;
 
     readonly updateSettings: (
@@ -350,8 +387,10 @@ const PersistedServerSettings = Schema.Struct({
 // Parse first and decode second, so a managed policy can fill its defaults in between.
 const decodeSettingsFileJsonExit = Schema.decodeUnknownExit(fromLenientJson(Schema.Unknown));
 const decodePersistedServerSettingsExit = Schema.decodeUnknownExit(PersistedServerSettings);
+/** Retired keys feed source-control migration and the read-only client layout migration. */
 const LegacyProviderSettingsJson = fromLenientJson(
   Schema.Struct({
+    layout: ForwardCompatibleOptional(LayoutSettings),
     providers: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
     bitbucket: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
     github: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
@@ -482,14 +521,24 @@ function resolveTextGenerationProvider(
   isDriverAllowed: DriverAllowed = anyDriver,
 ): ServerSettings {
   const selection = settings.textGenerationModelSelection;
-  return isModelSelectionProviderEnabled(settings, selection) &&
+  const resolved =
+    isModelSelectionProviderEnabled(settings, selection) &&
     selectionSupportsTextGeneration(settings, selection) &&
     isDriverAllowed(
       settings.providerInstances[selection.instanceId]?.driver ??
         ProviderDriverKind.make(selection.instanceId),
     )
-    ? settings
-    : fallbackTextGenerationProvider(settings, isDriverAllowed);
+      ? settings
+      : fallbackTextGenerationProvider(settings, isDriverAllowed);
+  const speechPostProcessingModelSelection = resolveSpeechPostProcessingModelSelection(
+    resolved,
+    undefined,
+    isDriverAllowed,
+  );
+  return speechPostProcessingModelSelection === null ||
+    speechPostProcessingModelSelection === resolved.speechPostProcessingModelSelection
+    ? resolved
+    : { ...resolved, speechPostProcessingModelSelection };
 }
 
 function fallbackTextGenerationProvider(
@@ -517,6 +566,7 @@ const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "reviewGuideModelSelection",
   "textGenerationModelSelection",
   "fallbackModelSelection",
+  "speechPostProcessingModelSelection",
   "pullRequestMergeMethod",
   // Empty by default, these hold one whole value, which a managed policy can default.
   ...Object.entries(DEFAULT_SERVER_SETTINGS).flatMap(([key, value]) =>
@@ -656,6 +706,7 @@ const make = Effect.gen(function* () {
     );
   const writeSemaphore = yield* Semaphore.make(1);
   const cacheKey = "settings" as const;
+  const legacyLayoutRef = yield* Ref.make<LayoutSettings | undefined>(undefined);
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>();
   const startedRef = yield* Ref.make(false);
   const startedDeferred = yield* Deferred.make<void, ServerSettingsError>();
@@ -696,14 +747,19 @@ const make = Effect.gen(function* () {
 
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
+      // Preserve the read-only layout on disk so each client can migrate independently.
+      const legacyLayout = yield* Ref.get(legacyLayoutRef);
       const stripped = stripDefaultServerSettings(settings, managed.defaults) ?? {};
-      const sparseSettingsJson = yield* encodeServerSettingsJson(
+      const sparseSettings =
         managed.keepStored === undefined
           ? stripped
           : managed.keepStored(stripped, settings, yield* readStoredSettings, (key) =>
               ATOMIC_SETTINGS_KEYS.has(key),
-            ),
-      );
+            );
+      const sparseSettingsJson = yield* encodeServerSettingsJson({
+        ...(typeof sparseSettings === "object" && sparseSettings !== null ? sparseSettings : {}),
+        ...(legacyLayout === undefined ? {} : { layout: legacyLayout }),
+      });
 
       return yield* writeFileStringAtomically({
         filePath: settingsPath,
@@ -755,6 +811,7 @@ const make = Effect.gen(function* () {
 
   const loadSettingsFromDisk = Effect.gen(function* () {
     let settings = managed.defaults;
+    yield* Ref.set(legacyLayoutRef, undefined);
     let legacyProviders: Readonly<Record<string, unknown>> | undefined;
     let legacySourceControl: Parameters<typeof migrateLegacySourceControlSettings>[1] = {};
     let parseFailure = Option.none<unknown>();
@@ -767,6 +824,7 @@ const make = Effect.gen(function* () {
         : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
       if (legacySettings._tag === "Success") {
+        yield* Ref.set(legacyLayoutRef, legacySettings.value.layout);
         legacyProviders = legacySettings.value.providers;
         legacySourceControl = {
           bitbucket: legacySettings.value.bitbucket,
@@ -1004,7 +1062,7 @@ const make = Effect.gen(function* () {
       });
       const changes: SecretChange[] = [];
       const nextSecretNames = new Set<string>();
-      const settings = mapSettingsSecrets(next, (secret) => {
+      const settings = mapSettingsSecrets(withEchoedSecretReferences(current, next), (secret) => {
         const metadata = {
           secretName: secret.secretName,
           ...(secret.providerInstanceId !== undefined
@@ -1305,7 +1363,15 @@ const make = Effect.gen(function* () {
     managedPolicy,
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getMaterializedSettings,
+    getSettings: getMaterializedSettings.pipe(
+      Effect.flatMap((settings) =>
+        Ref.get(legacyLayoutRef).pipe(
+          Effect.map((legacyLayout) =>
+            legacyLayout === undefined ? settings : { ...settings, layout: legacyLayout },
+          ),
+        ),
+      ),
+    ),
     updateSettings: (patch) =>
       updateAndPersistSettings(patch, (current) =>
         ensureSecretProviderWritesAllowed(patch, settingsPath).pipe(

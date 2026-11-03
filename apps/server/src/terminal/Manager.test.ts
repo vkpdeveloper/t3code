@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -406,7 +407,11 @@ it("bounds long partial lines and joins surrogate pairs across chunk boundaries"
 });
 
 it.layer(
-  Layer.merge(NodeServices.layer, ProcessRunner.layer.pipe(Layer.provide(NodeServices.layer))),
+  Layer.mergeAll(
+    NodeServices.layer,
+    NodeCrypto.layer,
+    ProcessRunner.layer.pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  ),
   { excludeTestServices: true },
 )("TerminalManager", (it) => {
   it.effect("spawns lazily and reuses running terminal per thread", () =>
@@ -683,6 +688,39 @@ it.layer(
     Effect.flatMap(Effect.service(FileSystem.FileSystem), (fs) =>
       fs.writeFileString(filePath, contents),
     );
+
+  it.effect("reports the last command exit code from shell-integration marks", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter, getEvents } = yield* createManager();
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0];
+      expect(process).toBeDefined();
+      if (!process) return;
+
+      const failed = yield* Deferred.make<void>();
+      const succeeded = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.subscribe((event) =>
+        event.type === "activity" && event.lastCommandExitCode === 1
+          ? Deferred.succeed(failed, undefined).pipe(Effect.asVoid)
+          : event.type === "activity" &&
+              event.lastCommandExitCode === 0 &&
+              event.hasRunningSubprocess === false
+            ? Deferred.succeed(succeeded, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+
+      // Split across chunks: the mark must still be read once it completes.
+      process.emitData("fail\r\n\u001b]133;D;");
+      process.emitData("1\u0007\u001b]133;A\u0007$ ");
+      yield* Deferred.await(failed);
+
+      process.emitData("\u001b]633;D;0\u0007$ ");
+      yield* Deferred.await(succeeded);
+      const activityCount = (yield* getEvents).filter((event) => event.type === "activity").length;
+      expect(activityCount).toBe(2);
+    }),
+  );
 
   it.effect("handles an exit replayed during subscription after publishing startup", () =>
     Effect.gen(function* () {

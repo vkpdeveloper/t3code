@@ -31,6 +31,7 @@ export function BotAvatarPicker({
             aria-label={option}
             disabled={disabled}
             onClick={() => onChange({ shape: option, color })}
+            // oxlint-disable-next-line t3code/no-styled-raw-controls -- Avatar shape tiles; no Button variant draws a selectable glyph tile.
             className={cn(
               "group/bot flex aspect-square cursor-pointer items-center justify-center rounded-lg bg-muted/60 outline-hidden ring-ring hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
               option === shape && "bg-muted ring-2 ring-foreground/70 ring-inset",
@@ -54,6 +55,7 @@ export function BotAvatarPicker({
             aria-label={option}
             disabled={disabled}
             onClick={() => onChange({ shape, color: option })}
+            // oxlint-disable-next-line t3code/no-styled-raw-controls -- Colour swatches; no Button variant draws a filled circle.
             className={cn(
               "aspect-square w-full cursor-pointer rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-default disabled:opacity-60",
               option === color && "ring-2 ring-foreground/70 ring-inset",

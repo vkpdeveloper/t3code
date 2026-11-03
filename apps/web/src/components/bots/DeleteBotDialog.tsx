@@ -59,7 +59,7 @@ export function DeleteBotDialog({
         >
           <Label htmlFor={`${id}-name`}>
             <span>
-              Type <span className="font-semibold text-foreground">{name}</span> to confirm
+              Type <span className="text-label text-foreground">{name}</span> to confirm
             </span>
           </Label>
           <Input
@@ -73,7 +73,7 @@ export function DeleteBotDialog({
           />
         </form>
         <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+          <AlertDialogClose render={<Button variant="secondary" />}>Cancel</AlertDialogClose>
           <Button variant="destructive" disabled={!matches || deleting} onClick={confirm}>
             {deleting ? "Deleting" : "Delete bot"}
           </Button>

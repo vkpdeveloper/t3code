@@ -38,8 +38,8 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   ComposerEffortColumn,
-  ComposerPickerFooter,
   describeComposerEffort,
+  hasComposerModelOptions,
 } from "../chat/ComposerModelEffort";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import type { TraitsSelectionInput } from "../chat/TraitsPicker";
@@ -156,7 +156,7 @@ function CreateBotForm(props: FormProps) {
   const connected = machines.some((machine) => machine.environmentId === environmentId);
   const machinePicker =
     machines.length === 0 ? (
-      <p className="text-sm text-muted-foreground">No connected computers</p>
+      <p className="text-body text-muted-foreground">No connected computers</p>
     ) : (
       <Select
         value={environmentId ?? ""}
@@ -307,7 +307,7 @@ function MachineBotForm({
         <div className="flex flex-col gap-1.5">
           <Label>Model</Label>
           {model === null ? (
-            <p className="text-sm text-muted-foreground">No providers on this computer</p>
+            <p className="text-body text-muted-foreground">No providers on this computer</p>
           ) : (
             <ProviderModelPicker
               environmentId={environmentId}
@@ -323,12 +323,16 @@ function MachineBotForm({
                 model.model,
               )}
               isComposerOwned={false}
-              triggerVariant="field"
+              triggerVariant="settings"
+              triggerClassName="w-full max-w-none sm:max-w-none"
               popupAlign="start"
               triggerSuffix={effort.suffix}
               triggerDetail={effort.detail}
-              effortColumn={<ComposerEffortColumn traits={traits} />}
-              footer={<ComposerPickerFooter traits={traits} />}
+              effortColumn={
+                hasComposerModelOptions(traits) ? (
+                  <ComposerEffortColumn traits={traits} optionsOnly />
+                ) : undefined
+              }
               onInstanceModelChange={(instanceId, slug) =>
                 setChosenModel(createModelSelection(instanceId, slug))
               }
@@ -369,7 +373,7 @@ function MachineBotForm({
         </>
       ) : (
         <div className="flex flex-col gap-6 p-6">
-          <h1 className="text-lg font-semibold">Create your first bot</h1>
+          <h1 className="text-title">Create your first bot</h1>
           {fields}
           <div className="flex justify-end gap-2">{actions}</div>
         </div>
