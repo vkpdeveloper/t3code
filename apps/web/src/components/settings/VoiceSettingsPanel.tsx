@@ -650,7 +650,7 @@ function AdvancedSpeechSettings({
                 );
             }}
           >
-            <SelectTrigger size="sm" aria-label="Transcription hardware" className="max-w-72">
+            <SelectTrigger variant="well" size="compact" aria-label="Transcription hardware" className="max-w-72">
               <SelectValue>
                 {supported.acceleration === "auto"
                   ? "Auto"
@@ -692,7 +692,7 @@ function AdvancedSpeechSettings({
                 );
             }}
           >
-            <SelectTrigger size="sm" aria-label="Unload model" className="max-w-72">
+            <SelectTrigger variant="well" size="compact" aria-label="Unload model" className="max-w-72">
               <SelectValue>{UNLOAD_LABELS[supported.modelUnloadTimeout]}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -771,7 +771,7 @@ function SpeechModelBrowser(props: {
                   Languages
                 </Text>
                 <Input
-                  size="compact"
+                  size="settings"
                   aria-label="Search languages"
                   placeholder="Search languages"
                   value={languageSearch}
@@ -815,7 +815,7 @@ function SpeechModelBrowser(props: {
                     : "All models"}
                 </Text>
                 <Input
-                  size="compact"
+                  size="settings"
                   aria-label="Search transcription models"
                   placeholder="Search models"
                   value={search}
@@ -1089,7 +1089,7 @@ export function VoiceSettingsPanel() {
                       });
                   }}
                 >
-                  <SelectTrigger size="sm" aria-label="Microphone" className="max-w-64">
+                  <SelectTrigger variant="well" size="compact" aria-label="Microphone" className="max-w-64">
                     <SelectValue>{selectedMicrophoneLabel}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1126,7 +1126,7 @@ export function VoiceSettingsPanel() {
                   void updateClientSettings({ voiceShortcutMode: value as VoiceShortcutMode });
               }}
             >
-              <SelectTrigger size="sm" aria-label="Dictation shortcut mode" className="max-w-72">
+              <SelectTrigger variant="well" size="compact" aria-label="Dictation shortcut mode" className="max-w-72">
                 <SelectValue>{SHORTCUT_MODE_LABELS[settings.voiceShortcutMode]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1163,7 +1163,7 @@ export function VoiceSettingsPanel() {
                 );
               }}
             >
-              <SelectTrigger size="sm" aria-label="Send microphone audio to" className="max-w-72">
+              <SelectTrigger variant="well" size="compact" aria-label="Send microphone audio to" className="max-w-72">
                 <SelectValue>
                   {destinationValue === OFF
                     ? "Off"
@@ -1313,7 +1313,7 @@ export function VoiceSettingsPanel() {
                     });
                 }}
               >
-                <SelectTrigger size="sm" aria-label="Cleanup instructions" className="max-w-64">
+                <SelectTrigger variant="well" size="compact" aria-label="Cleanup instructions" className="max-w-64">
                   <SelectValue>
                     {settings.speechPostProcessingPrompt.mode === "custom" ? "Custom" : "Built-in"}
                   </SelectValue>
@@ -1354,6 +1354,7 @@ export function VoiceSettingsPanel() {
             description="The word or phrase you say to flag a correction, like “sorry” or “scratch that”. Cleanup applies the correction only where one is meant, and hears the cue as a hint."
             control={
               <Input
+                size="settings"
                 key={settings.speechCorrectionWord}
                 defaultValue={settings.speechCorrectionWord}
                 maxLength={50}
