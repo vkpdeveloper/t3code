@@ -62,6 +62,7 @@ export function ComposerControlsBar(props: {
   composerControlsHidden: boolean;
   restingHiddenBlockCount: number;
   iconOnlyBlockCount: number;
+  traitsIconOnly: boolean;
   pickerIconOnly: boolean;
   showProviderUnavailable: boolean;
   providerSetupInstanceId: ProviderInstanceId | undefined;
@@ -107,6 +108,7 @@ export function ComposerControlsBar(props: {
     composerControlsHidden,
     restingHiddenBlockCount: measuredHiddenBlockCount,
     iconOnlyBlockCount,
+    traitsIconOnly,
     pickerIconOnly,
     showProviderUnavailable,
     providerSetupInstanceId,
@@ -254,11 +256,11 @@ export function ComposerControlsBar(props: {
       {traitsInput ? (
         <div
           data-resting-fixed-control
-          data-composer-block-icon-only={pickerIconOnly ? "true" : "false"}
+          data-composer-block-icon-only={traitsIconOnly ? "true" : "false"}
           className={cn(
             "flex shrink-0 items-center",
             "@max-[620px]/composer-surface:[&_[data-composer-control-label]]:pointer-events-none @max-[620px]/composer-surface:[&_[data-composer-control-label]]:invisible @max-[620px]/composer-surface:[&_[data-composer-control-label]]:absolute @max-[620px]/composer-surface:[&_[data-composer-control-label]]:w-max @max-[620px]/composer-surface:[&_[data-composer-control-label]]:max-w-none",
-            pickerIconOnly &&
+            traitsIconOnly &&
               "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none",
           )}
         >
