@@ -89,9 +89,7 @@ export function WorkspaceNativeTabs(props: {
   const { layout, panes } = useAdaptiveWorkspaceLayout();
   // The tabs belong to the sidebar; over a page with the sidebar hidden they'd cover the composer.
   const hiddenWithSidebar =
-    deviceType === "pad" &&
-    layout.usesSplitView &&
-    !panes.primarySidebarVisible;
+    deviceType === "pad" && layout.usesSplitView && !panes.primarySidebarVisible;
   const floatingTabs = useFloatingWorkspaceTabs();
   const { width } = useWindowDimensions();
   const { colors } = useControlTheme();
