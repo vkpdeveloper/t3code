@@ -212,7 +212,7 @@ export function ComposerControlsBar(props: {
         "@max-[620px]/composer-surface:min-w-0 @max-[620px]/composer-surface:px-1.5 @max-[620px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:pointer-events-none @max-[620px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:invisible @max-[620px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:absolute @max-[620px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:w-max @max-[620px]/composer-surface:[&_[data-chat-provider-model-picker-label]]:max-w-none",
         pickerIconOnly
           ? "min-w-0 shrink-0 @min-[620px]/composer-surface:[&>span:has(>[data-chat-provider-model-picker-label])]:-mx-0.5 [&_[data-chat-provider-model-picker-label]]:pointer-events-none [&_[data-chat-provider-model-picker-label]]:invisible [&_[data-chat-provider-model-picker-label]]:absolute [&_[data-chat-provider-model-picker-label]]:w-max [&_[data-chat-provider-model-picker-label]]:max-w-none"
-          : "min-w-13 shrink",
+          : "shrink-0",
       )}
       effortColumn={
         hasComposerModelOptions(traitsInput) ? (
