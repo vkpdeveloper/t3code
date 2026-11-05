@@ -15,7 +15,7 @@ import * as Socket from "effect/socket/Socket";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as SpeechService from "./SpeechService.ts";
 
-const decodeCommand = Schema.decodeUnknownSync(Schema.fromJsonString(SpeechStreamCommand));
+const decodeCommand = Schema.decodeUnknownEffect(Schema.fromJsonString(SpeechStreamCommand));
 
 /** One socket owns one stream. Audio is processed and acknowledged in arrival order. */
 export const runSpeechSocket = Effect.fn("speech.runSocket")(function* (
@@ -40,7 +40,7 @@ export const runSpeechSocket = Effect.fn("speech.runSocket")(function* (
     return Effect.gen(function* () {
       if (typeof data === "string") {
         if (data.length > 100) return yield* fail("Invalid speech stream command.");
-        yield* Effect.try(() => decodeCommand(data));
+        yield* decodeCommand(data);
         const text = yield* current.finish;
         ended = true;
         yield* send({ type: "finished", text });

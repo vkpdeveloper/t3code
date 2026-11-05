@@ -17,6 +17,7 @@ import {
   ArrowUpIcon,
   BoxIcon,
   CornerDownLeftIcon,
+  EraserIcon,
   HammerIcon,
   MessageCircleQuestionIcon,
   MessagesSquareIcon,
@@ -173,6 +174,7 @@ const SLASH_COMMAND_ICONS: Record<ComposerSlashCommand, LucideIcon> = {
   default: HammerIcon,
   side: MessageCircleQuestionIcon,
   btw: MessageCircleQuestionIcon,
+  clear: EraserIcon,
 };
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {

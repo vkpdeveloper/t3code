@@ -489,10 +489,13 @@ export default function GitActionsControl({
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const gitStatusForActions = gitStatus;
-  const changesTotals = resolveChangesTotals(gitStatusForActions) ?? {
-    insertions: 0,
-    deletions: 0,
-  };
+  const resolvedChangesTotals = resolveChangesTotals(gitStatusForActions);
+  const changesTotals = resolvedChangesTotals ?? { insertions: 0, deletions: 0 };
+  const changesBaseLabel = resolvedChangesTotals
+    ? resolvedChangesTotals.baseRef === null
+      ? "Uncommitted"
+      : `vs ${resolvedChangesTotals.baseRef}`
+    : null;
 
   // Changed-file paths resolve against the worktree root from this status snapshot.
   const workingTreeRoot = gitStatusForActions?.workingTree.rootPath ?? null;
@@ -1228,6 +1231,11 @@ export default function GitActionsControl({
             <ThreadDetailsControl disabled={!onOpenChanges} onClick={onOpenChanges}>
               <FileDiffIcon aria-hidden />
               <MenuItemLabel>View changes</MenuItemLabel>
+              {changesBaseLabel ? (
+                <span className="min-w-0 truncate text-caption text-dim-foreground">
+                  {changesBaseLabel}
+                </span>
+              ) : null}
               {!showActions ? changesSummary : null}
               {keybindings && (
                 <MenuShortcut>

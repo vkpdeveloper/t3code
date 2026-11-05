@@ -820,15 +820,17 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     isWoke,
   });
   const topStatusLabel =
-    topStatus === "working" && thread.goal?.status === "active"
-      ? "Goal"
-      : topStatus === "waiting" &&
-          thread.runtime?.status === "running" &&
-          thread.blockedOnThreadWait === true
-        ? "Waiting"
-        : topStatus
-          ? SIDEBAR_STATUSES[topStatus].label
-          : null;
+    status === "preparing"
+      ? "Setting up"
+      : topStatus === "working" && thread.goal?.status === "active"
+        ? "Goal"
+        : topStatus === "waiting" &&
+            thread.runtime?.status === "running" &&
+            thread.blockedOnThreadWait === true
+          ? "Waiting"
+          : topStatus
+            ? SIDEBAR_STATUSES[topStatus].label
+            : null;
   const isWokeStatus = topStatus === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
@@ -1020,7 +1022,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
               : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
     shouldRecede &&
-      status === "working" &&
+      (status === "preparing" || status === "working") &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",

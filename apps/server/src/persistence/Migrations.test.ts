@@ -29,21 +29,22 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect("upgrades bot builds that recorded ProjectionProjectBot as 78", () =>
+  it.effect.each([78, 80])("upgrades bot builds that recorded ProjectionProjectBot as %i", (id) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 77 });
+      yield* runMigrations({ toMigrationInclusive: id - 1 });
       yield* sql`ALTER TABLE projection_projects ADD COLUMN bot_json TEXT`;
       yield* sql`
-        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (78, 'ProjectionProjectBot')
+        INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, 'ProjectionProjectBot')
       `;
 
       yield* runMigrations();
 
-      assert.deepStrictEqual((yield* history).slice(-3), [
+      assert.deepStrictEqual((yield* history).slice(-4), [
         [78, "DropOrchestrationEventCorrelationIndex"],
         [79, "DelegatedRecoveryIndexes"],
-        [80, "ProjectionProjectBot"],
+        [80, "ScheduledTaskThreadMode"],
+        [81, "ProjectionProjectBot"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

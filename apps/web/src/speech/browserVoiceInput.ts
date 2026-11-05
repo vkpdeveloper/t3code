@@ -170,11 +170,11 @@ export function createBrowserVoiceInputPlatform(input: {
       return result.text;
     } catch (cause) {
       throwIfVoiceTranscriptionAborted(transcriptionSignal);
-      throw new VoiceTranscriptionError(
-        "transcription-failed",
-        "Voice transcription on this environment failed.",
-        { cause },
-      );
+      throw new VoiceTranscriptionError({
+        code: "transcription-failed",
+        message: "Voice transcription on this environment failed.",
+        cause,
+      });
     }
   };
 
@@ -195,7 +195,8 @@ export function createBrowserVoiceInputPlatform(input: {
           options,
         );
         throwIfVoiceTranscriptionAborted(options.signal);
-        if (!status.supported) throw new VoiceTranscriptionError("unavailable", status.reason);
+        if (!status.supported)
+          throw new VoiceTranscriptionError({ code: "unavailable", message: status.reason });
         streaming = status.supportsStreaming;
         if (status.supportsStreaming) {
           const url = await runtime.runPromise(

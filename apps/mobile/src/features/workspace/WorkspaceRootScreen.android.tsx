@@ -7,6 +7,7 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { AppBar } from "../../components/ui/AppBar";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
@@ -105,13 +106,7 @@ function WorkspaceRoot() {
                     <>
                       <NativeStackScreenOptions options={{ headerShown: false }} />
                       <AppBar embedded title="Pull requests" />
-                      <View className="flex-1 items-center justify-center px-10">
-                        <EmptyState
-                          title="Select a pull request"
-                          detail="Choose a pull request from the sidebar to review it."
-                          variant="plain"
-                        />
-                      </View>
+                      <WorkspaceEmptyDetail tab="pullRequests" />
                     </>
                   ) : (
                     <PullRequestsScreen

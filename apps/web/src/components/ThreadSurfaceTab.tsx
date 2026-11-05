@@ -1,5 +1,6 @@
 import type { SideChatParentPanel } from "~/lib/sideChatPane";
 import { useSideChat } from "./chat/useSideChat";
+import * as Schema from "effect/Schema";
 import { threadEnvironment } from "../state/threads";
 /** Resolve surface context independently of ChatView so tabs remain usable after the chat closes,
  * and report when their thread is gone. */
@@ -118,6 +119,8 @@ import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
+
+const isBrowserSettingsReadError = Schema.is(BrowserSettingsReadError);
 
 const SideChatPane = lazy(() => import("./chat/SideChatPane"));
 const PreviewPanel = lazy(() =>
@@ -309,7 +312,7 @@ export function useThreadSurfaceOpeners(threadRef: ScopedThreadRef) {
         }).then((result) => {
           if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
           const error = squashAtomCommandFailure(result);
-          if (error instanceof BrowserSettingsReadError) {
+          if (isBrowserSettingsReadError(error)) {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
