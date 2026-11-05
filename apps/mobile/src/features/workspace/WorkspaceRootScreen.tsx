@@ -11,13 +11,12 @@ import { useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { HeaderItemsWidthContext } from "../../native/header-items-width";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { isDuoDevice } from "../../lib/device-type";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
-import { useWorkspaceSurface } from "./useWorkspaceSurface";
 import {
   useDeviceType,
   useNativeColumnLayoutMetrics,
@@ -82,7 +81,6 @@ function WorkspaceRootContent() {
   const columnMetrics = useNativeColumnLayoutMetrics();
   const nativeMetrics = useNativeLayoutMetrics();
   const deviceType = useDeviceType();
-  const surface = useWorkspaceSurface();
   const systemTabBar = useSystemWorkspaceTabBar();
   const compactTabs = useCompactWorkspaceTabs();
   const enabled = useEnabledNavigationTabs();
@@ -128,7 +126,7 @@ function WorkspaceRootContent() {
 
   return (
     <WorkspaceTabsContext value={context}>
-      <View className={`flex-1 ${sidebarPicker ? "bg-drawer" : surface.className}`}>
+      <View className={sidebarPicker ? "flex-1 bg-drawer" : "flex-1 bg-screen"}>
         {Platform.OS === "ios" ? (
           <NativeStackScreenOptions
             optionsVersion={[
@@ -161,7 +159,8 @@ function WorkspaceRootContent() {
             }}
           />
         ) : (
-          <AndroidScreenHeader
+          <AppBar
+            embedded
             title="T3 Code"
             titleContent={renderHeaderTitle()}
             actions={[

@@ -16,6 +16,7 @@ import {
   type LayoutState,
   type LayoutTabDestination,
 } from "./layoutModel";
+import { notePaneDrop } from "../motion/paneDrop";
 import { saveLayoutNow, useLayoutStore } from "./layoutStore";
 
 export type LayoutDragSource =
@@ -224,8 +225,8 @@ function isLayoutDropUseful(
 }
 
 /** The label on the pill under the pointer (pen MI18S "Side by side", nYpzc "Below"). */
-export function layoutDropLabel(target: LayoutDropTarget): string {
-  if (target.kind === "into") return "Add as tab";
+export function layoutDropLabel(target: LayoutDropTarget, reorder: boolean): string {
+  if (target.kind === "into") return reorder ? "Move here" : "Add as tab";
   if (target.kind === "extend") {
     return target.edge === "bottom" ? "New workspace" : "New column";
   }
@@ -309,7 +310,10 @@ export function dropLayoutDrag(): boolean {
   const current = dragState;
   setDragState(null);
   if (!current?.target) return false;
-  return commitLayoutDrop(current.source, current.target);
+  notePaneDrop(true);
+  const committed = commitLayoutDrop(current.source, current.target);
+  if (!committed) notePaneDrop(false);
+  return committed;
 }
 
 export function cancelLayoutDrag(): void {

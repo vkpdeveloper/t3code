@@ -5,7 +5,7 @@ import { NAVIGATION_TAB_ORDER } from "./navigation-tab-order";
 import { View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -18,11 +18,18 @@ import { AndroidWorkspaceNavigation, FloatingWorkspaceTabs } from "./AndroidWork
 import { FLOATING_TABS } from "./floating-workspace-tabs";
 import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { WorkspaceTabPanes } from "./WorkspaceTabPanes";
+import { WorkspaceAppBarScope } from "../../components/ui/WorkspaceAppBar.android";
+import { usePaneRole } from "../../components/ui/Pane";
+import { AndroidWorkspaceSidebar } from "./AndroidWorkspaceSidebar.android";
 import type { WorkspaceTab } from "./workspace-tabs-state";
 
 const TABS: readonly WorkspaceTab[] = NAVIGATION_TAB_ORDER;
 
 export function WorkspaceRootScreen() {
+  return usePaneRole() === "sidebar" ? <AndroidWorkspaceSidebar /> : <WorkspaceRoot />;
+}
+
+function WorkspaceRoot() {
   const floatingTabsEnabled = useAndroidFloatingTabs();
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const workspace = useWorkspaceTabs()!;
@@ -60,62 +67,65 @@ export function WorkspaceRootScreen() {
               <WorkspaceNoTabs />
             )
           ) : (
-            <WorkspaceTabPanes
-              tabs={TABS}
-              selected={tab}
-              renderTab={(tab) =>
-                tab === "threads" ? (
-                  <HomeRouteScreen />
-                ) : tab === "bots" ? (
-                  layout.usesSplitView ? (
+            <WorkspaceAppBarScope enabled={!layout.usesSplitView}>
+              <WorkspaceTabPanes
+                tabs={TABS}
+                selected={tab}
+                renderTab={(tab) =>
+                  tab === "threads" ? (
+                    <HomeRouteScreen />
+                  ) : tab === "bots" ? (
+                    layout.usesSplitView ? (
+                      <>
+                        <NativeStackScreenOptions options={{ headerShown: false }} />
+                        <AppBar embedded title="Bots" />
+                        <View className="flex-1 items-center justify-center px-10">
+                          <EmptyState
+                            title="Select a bot"
+                            detail="Choose a bot from the sidebar."
+                            variant="plain"
+                          />
+                        </View>
+                      </>
+                    ) : (
+                      <>
+                        <AppBar
+                          embedded
+                          title="Bots"
+                          actions={[
+                            { accessibilityLabel: "New bot", icon: "plus", onPress: openNewBot },
+                          ]}
+                        />
+                        <ScreenContent>
+                          <BotsScreen />
+                        </ScreenContent>
+                      </>
+                    )
+                  ) : layout.usesSplitView ? (
                     <>
                       <NativeStackScreenOptions options={{ headerShown: false }} />
-                      <AndroidScreenHeader title="Bots" />
+                      <AppBar embedded title="Pull requests" />
                       <View className="flex-1 items-center justify-center px-10">
                         <EmptyState
-                          title="Select a bot"
-                          detail="Choose a bot from the sidebar."
+                          title="Select a pull request"
+                          detail="Choose a pull request from the sidebar to review it."
                           variant="plain"
                         />
                       </View>
                     </>
                   ) : (
-                    <>
-                      <AndroidScreenHeader
-                        title="Bots"
-                        actions={[
-                          { accessibilityLabel: "New bot", icon: "plus", onPress: openNewBot },
-                        ]}
-                      />
-                      <ScreenContent>
-                        <BotsScreen />
-                      </ScreenContent>
-                    </>
+                    <PullRequestsScreen
+                      renderFrame={(filters, list) => (
+                        <>
+                          <PullRequestToolbar filters={filters} />
+                          <ScreenContent>{list}</ScreenContent>
+                        </>
+                      )}
+                    />
                   )
-                ) : layout.usesSplitView ? (
-                  <>
-                    <NativeStackScreenOptions options={{ headerShown: false }} />
-                    <AndroidScreenHeader title="Pull requests" />
-                    <View className="flex-1 items-center justify-center px-10">
-                      <EmptyState
-                        title="Select a pull request"
-                        detail="Choose a pull request from the sidebar to review it."
-                        variant="plain"
-                      />
-                    </View>
-                  </>
-                ) : (
-                  <PullRequestsScreen
-                    renderFrame={(filters, list) => (
-                      <>
-                        <PullRequestToolbar filters={filters} />
-                        <ScreenContent>{list}</ScreenContent>
-                      </>
-                    )}
-                  />
-                )
-              }
-            />
+                }
+              />
+            </WorkspaceAppBarScope>
           )}
         </SafeAreaInsetsContext>
         {layout.usesSplitView ? null : floatingTabsEnabled ? (

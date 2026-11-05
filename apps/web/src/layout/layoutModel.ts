@@ -334,6 +334,30 @@ export function selectLayoutPaneSlots(
   return { slots, stripWidth, fits, unitWidth };
 }
 
+/**
+ * A top pane starting this close to the strip's left edge shares its row with
+ * the collapsed sidebar's toggle and arrows, so its header makes room for them.
+ */
+const WINDOW_START_EDGE_PX = 160;
+
+export function selectWindowStartPaneId(
+  slots: readonly LayoutPaneSlot[],
+  scrollLeft: number,
+  stripPx: number,
+): string | null {
+  let startPaneId: string | null = null;
+  let startPx = Number.POSITIVE_INFINITY;
+  for (const slot of slots) {
+    if (slot.hasAbove) continue;
+    const screenLeft = slot.rect.left * stripPx - scrollLeft;
+    if (screenLeft > -1 && screenLeft < WINDOW_START_EDGE_PX && screenLeft < startPx) {
+      startPx = screenLeft;
+      startPaneId = slot.paneId;
+    }
+  }
+  return startPaneId;
+}
+
 /** The pane with this id and where it sits, or null. */
 export function findLayoutPane(
   state: LayoutState,
@@ -981,16 +1005,11 @@ export function renameLayoutWorkspace(
   );
 }
 
-/** The chat tab a workspace is named after when it has no name of its own. */
+/** The tab a workspace is named after when it has no name of its own. */
 export function selectLayoutWorkspaceLeadTab(workspace: LayoutWorkspace): LayoutTab | null {
-  for (const column of workspace.columns) {
-    for (const pane of column.panes) {
-      const tab =
-        pane.tabs.find((candidate) => candidate.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
-      if (tab?.content.kind === "chat") return tab;
-    }
-  }
-  return null;
+  const panes = workspace.columns.flatMap((column) => column.panes);
+  const pane = panes.find((candidate) => candidate.id === workspace.focusedPaneId) ?? panes[0];
+  return pane?.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane?.tabs[0] ?? null;
 }
 
 /** Scoped keys of every server thread a chat tab holds, in any workspace, sorted. */
@@ -1334,8 +1353,15 @@ export function moveLayoutTab(
     return state;
   }
 
+  const growPaneId =
+    destination.kind === "pane" &&
+    location.pane.tabs.length === 1 &&
+    location.column.panes.some((pane) => pane.id === destination.paneId)
+      ? destination.paneId
+      : null;
   // Detach without normalizing so the destination pane cannot disappear.
   const detached = mapPanes(state, (pane) => {
+    if (pane.id === growPaneId) return { ...pane, size: pane.size + location.pane.size };
     if (pane.id !== location.pane.id) return pane;
     const tabs = pane.tabs.filter((tab) => tab.id !== tabId);
     const activeTabId =
@@ -1578,6 +1604,31 @@ export function resizeLayoutColumn(
       ),
     };
   });
+}
+
+export function resizeLayoutColumnEdge(
+  state: LayoutState,
+  columnId: string,
+  width: number,
+  cameraWidth: number,
+  drawnUnitWidth = cameraWidth,
+): LayoutState {
+  const scale = drawnUnitWidth / cameraWidth;
+  const rebased =
+    scale === 1
+      ? state
+      : mapWorkspaces(state, (workspace) =>
+          workspace.columns.some((column) => column.id === columnId)
+            ? {
+                ...workspace,
+                columns: workspace.columns.map((column) => ({
+                  ...column,
+                  width: column.width * scale,
+                })),
+              }
+            : workspace,
+        );
+  return arrangeLayoutWorkspaces(state, resizeLayoutColumn(rebased, columnId, width), cameraWidth);
 }
 
 /** Step to the next width preset, wrapping from 2/3 back to 1/3. A lone column keeps filling the window. */

@@ -6,6 +6,7 @@ import {
   removeEnvironmentSpeechModel,
   selectEnvironmentSpeechModel,
   updateEnvironmentSpeechCustomWords,
+  updateEnvironmentSpeechModelDirectories,
   updateEnvironmentSpeechFillerWordRemoval,
   updateEnvironmentSpeechAcceleration,
   updateEnvironmentSpeechModelUnloadTimeout,
@@ -24,6 +25,7 @@ import * as Option from "effect/Option";
 import {
   AudioLinesIcon,
   CheckIcon,
+  ChevronDownIcon,
   DownloadIcon,
   GaugeIcon,
   GlobeIcon,
@@ -45,6 +47,7 @@ import {
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { ensureLocalApi } from "../../localApi";
 import { runtime } from "../../lib/runtime";
+import { cn } from "../../lib/utils";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { usePreparedConnection } from "../../state/session";
 import { Badge } from "../ui/badge";
@@ -83,6 +86,8 @@ const PRIMARY_ENVIRONMENT = "primary-environment";
 const deviceValue = (id: string) => `device:${id}`;
 const environmentValue = (id: EnvironmentId) => `environment:${id}`;
 const formatSize = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`;
+const MODEL_FOLDER_PATH_PATTERN = /^(\/|\\\\|[A-Za-z]:[/\\])/;
+const MODEL_FOLDER_LIMIT = 20;
 const normalizeDictionaryTerm = (value: string) =>
   value
     .replace(/[<>"']/g, "")
@@ -190,6 +195,15 @@ const modelSortOrder = (model: EnvironmentSpeechModel) => {
   if (model.state === "installed") return 1;
   if (model.state === "downloading" || model.state === "verifying") return 2;
   return 3;
+};
+const SHORT_MODEL_LIST_SIZE = 5;
+const shortModelList = (sortedModels: readonly EnvironmentSpeechModel[]) => {
+  const downloadable = sortedModels.filter((model) => model.state === "downloadable");
+  const recommended = downloadable.filter((model) => model.recommended);
+  return [
+    ...sortedModels.filter((model) => model.state !== "downloadable"),
+    ...(recommended.length > 0 ? recommended : downloadable).slice(0, SHORT_MODEL_LIST_SIZE),
+  ];
 };
 
 function ModelRow(props: {
@@ -303,7 +317,7 @@ function ModelRow(props: {
               Selected
             </Button>
           )}
-          {model.state === "installed" ? (
+          {model.state === "installed" && !model.shared ? (
             <Button
               size="icon-sm"
               variant="ghost-destructive"
@@ -368,11 +382,13 @@ export function VoiceSettingsPanel() {
     modelIds: ReadonlySet<string>;
   } | null>(null);
   const [customWordDraft, setCustomWordDraft] = useState("");
+  const [modelFolderDraft, setModelFolderDraft] = useState("");
   const [bulkWordsDraft, setBulkWordsDraft] = useState("");
   const [bulkWordsOpen, setBulkWordsOpen] = useState(false);
   const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
   const [languageSearch, setLanguageSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
+  const [showAllModels, setShowAllModels] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<{
     readonly environmentId: EnvironmentId | null;
     readonly code: string;
@@ -518,6 +534,7 @@ export function VoiceSettingsPanel() {
     : "System default";
   const currentStatus = status?.prepared === prepared ? status.value : null;
   const customWords = currentStatus?.supported ? currentStatus.customWords : [];
+  const modelDirectories = currentStatus?.supported ? (currentStatus.modelDirectories ?? []) : [];
   const removeFillerWords = currentStatus?.supported ? currentStatus.removeFillerWords : true;
   const acceleration = currentStatus?.supported ? currentStatus.acceleration : "auto";
   const modelUnloadTimeout = currentStatus?.supported ? currentStatus.modelUnloadTimeout : "min_15";
@@ -541,6 +558,33 @@ export function VoiceSettingsPanel() {
         });
       })
       .finally(() => setOperation(null));
+  };
+  const updateModelFolders = (directories: string[], onSuccess?: () => void) => {
+    if (!prepared) return;
+    setOperation("model-folders");
+    void runtime
+      .runPromise(updateEnvironmentSpeechModelDirectories(prepared, directories))
+      .then(() => {
+        onSuccess?.();
+        return refreshModels();
+      })
+      .catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not update model folders",
+          description: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => setOperation(null));
+  };
+  const addModelFolder = () => {
+    const folder = modelFolderDraft.trim();
+    if (!MODEL_FOLDER_PATH_PATTERN.test(folder) || modelDirectories.length >= MODEL_FOLDER_LIMIT)
+      return;
+    updateModelFolders([...modelDirectories, folder], () => setModelFolderDraft(""));
+  };
+  const removeModelFolder = (folder: string) => {
+    updateModelFolders(modelDirectories.filter((entry) => entry !== folder));
   };
   const addCustomWord = () => {
     if (
@@ -593,7 +637,7 @@ export function VoiceSettingsPanel() {
     model.languages.includes(language ?? ""),
   );
   const modelSearchTerm = modelSearch.trim().toLocaleLowerCase();
-  const visibleModels = modelsForLanguage
+  const matchingModels = modelsForLanguage
     .filter(
       (model) =>
         !modelSearchTerm ||
@@ -608,6 +652,9 @@ export function VoiceSettingsPanel() {
         b.speed - a.speed ||
         a.name.localeCompare(b.name),
     );
+  const shortModels = shortModelList(matchingModels);
+  const canShortenModels = !modelSearchTerm && shortModels.length < matchingModels.length;
+  const visibleModels = canShortenModels && !showAllModels ? shortModels : matchingModels;
 
   return (
     <SettingsPageContainer>
@@ -842,6 +889,62 @@ export function VoiceSettingsPanel() {
       >
         {currentStatus?.supported && prepared ? (
           <>
+            {currentStatus.modelDirectories !== undefined ? (
+              <SettingsRow
+                title="Model folders"
+                description="Look for downloaded models in these folders on this environment. T3 Code never changes files there."
+                control={
+                  <div className="flex w-full max-w-80 items-center gap-1.5">
+                    <Input
+                      value={modelFolderDraft}
+                      placeholder="Add a folder path"
+                      aria-label="Add a model folder"
+                      disabled={operation !== null}
+                      onChange={(event) => setModelFolderDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addModelFolder();
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={
+                        operation !== null ||
+                        !MODEL_FOLDER_PATH_PATTERN.test(modelFolderDraft.trim()) ||
+                        modelDirectories.length >= MODEL_FOLDER_LIMIT
+                      }
+                      onClick={addModelFolder}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                }
+              >
+                {modelDirectories.length > 0 ? (
+                  <div
+                    aria-label="Model folders"
+                    className="mt-3 flex flex-wrap gap-1.5 border-t border-border/60 pt-3"
+                  >
+                    {modelDirectories.map((directory) => (
+                      <Button
+                        key={directory}
+                        type="button"
+                        size="xs"
+                        variant="secondary"
+                        disabled={operation !== null}
+                        aria-label={`Remove folder ${directory}`}
+                        onClick={() => removeModelFolder(directory)}
+                      >
+                        {directory}
+                        <XIcon className="ml-1 size-3" />
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
+              </SettingsRow>
+            ) : null}
             <SettingsRow
               title="Model language"
               description="Find models that support your language."
@@ -962,6 +1065,26 @@ export function VoiceSettingsPanel() {
                 }
               />
             ))}
+            {canShortenModels ? (
+              <div className="px-3 py-2 sm:px-4">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost-muted"
+                  aria-expanded={showAllModels}
+                  onClick={() => setShowAllModels((open) => !open)}
+                >
+                  {showAllModels ? "Show fewer" : `Show all ${matchingModels.length} models`}
+                  <ChevronDownIcon
+                    aria-hidden
+                    className={cn(
+                      "size-3.5 transition-transform duration-150 motion-reduce:transition-none",
+                      showAllModels && "rotate-180",
+                    )}
+                  />
+                </Button>
+              </div>
+            ) : null}
 
             {modelsForLanguage.length === 0 ? (
               <SettingsRow title="No transcription models are available." />

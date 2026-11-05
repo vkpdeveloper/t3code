@@ -6,7 +6,7 @@ import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { DEFAULT_CLIENT_SETTINGS, type EnvironmentId } from "@t3tools/contracts";
 
 import { act, fakeTimers, render } from "../../test/render";
-import { ComposerSpeechTray } from "../components/chat/ComposerSpeechButton";
+import { ComposerSpeechMicButton } from "../components/chat/ComposerSpeechButton";
 import type { createBrowserVoiceInputPlatform } from "./browserVoiceInput";
 import { useEnvironmentSpeechInput } from "./useEnvironmentSpeechInput";
 
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   microphoneFailure: true,
   missingModel: false,
   downloadGate: null as { promise: Promise<void>; resolve(): void } | null,
+  statusGate: null as Promise<void> | null,
   downloadCancelled: false,
   microphoneRequests: 0,
   onLevel: (_level: number) => {},
@@ -50,12 +51,19 @@ vi.mock("../localApi", () => ({ ensureLocalApi: () => ({}) }));
 vi.mock("@t3tools/client-runtime/voice-input", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/client-runtime/voice-input")>()),
   getEnvironmentSpeechStatus: () =>
-    Effect.succeed({
-      supported: true,
-      state: mocks.busy ? "transcribing" : mocks.missingModel ? "missing-model" : "ready",
-      model: "test",
-      modelId: "test-model",
-      size: 731_357_568,
+    Effect.promise(async () => {
+      await mocks.statusGate;
+      return {
+        supported: true as const,
+        state: mocks.busy
+          ? ("transcribing" as const)
+          : mocks.missingModel
+            ? ("missing-model" as const)
+            : ("ready" as const),
+        model: "test",
+        modelId: "test-model",
+        size: 731_357_568,
+      };
     }),
   downloadEnvironmentSpeechModel: () =>
     Effect.promise(async () => {
@@ -109,11 +117,11 @@ function Probe({
     onChange(value);
   });
   return (
-    <ComposerSpeechTray
+    <ComposerSpeechMicButton
       state={value.state}
-      progress={value.progress}
       level={value.level}
-      preview={value.preview}
+      onStart={() => void value.start()}
+      onStop={() => void value.stop()}
       onCancel={value.cancel}
       onSkipPostProcessing={value.skipPostProcessing}
     />
@@ -139,6 +147,7 @@ function setup() {
   mocks.microphoneFailure = true;
   mocks.missingModel = false;
   mocks.downloadGate = null;
+  mocks.statusGate = null;
   mocks.downloadCancelled = false;
   mocks.microphoneRequests = 0;
   mocks.ownerKey = "draft";
@@ -247,7 +256,18 @@ it("opens setup before requesting microphone access for a missing model", async 
   mocks.missingModel = true;
   const probe = createProbe();
   await using _screen = await render(probe.view());
-  await act(() => probe.voice.start());
+  const status = Promise.withResolvers<void>();
+  mocks.statusGate = status.promise;
+  let starting!: Promise<void>;
+  await act(async () => {
+    starting = probe.voice.start();
+  });
+  expect(probe.voice.state.phase).toBe("idle");
+  await act(async () => {
+    status.resolve();
+    await starting;
+  });
+  expect(probe.voice.state.phase).toBe("idle");
   expect(probe.voice.setup.open).toBe(true);
   expect(probe.voice.setup.step).toBe(0);
   expect(mocks.microphoneRequests).toBe(0);
@@ -343,11 +363,11 @@ it("updates the recording meter without rerendering the draft owner", async () =
     await act(() => mocks.onLevel(level));
   }
   expect(onChange).not.toHaveBeenCalled();
-  expect(
-    screen.container
-      .querySelector('[aria-label="Recording"] div[aria-hidden] > span:last-child')
-      ?.getAttribute("style"),
-  ).toContain("scaleY(0.8)");
+  const bars = screen.container.querySelectorAll<HTMLElement>(
+    'button[aria-label="Finish voice input"] span[style*="scaleY"]',
+  );
+  expect(bars).toHaveLength(3);
+  expect(Number.parseFloat(bars[1]!.style.transform.slice("scaleY(".length))).toBeCloseTo(0.88);
   expect(voice.level.getSnapshot()).toBe(0.8);
   await act(() => voice.cancel());
 });

@@ -238,11 +238,7 @@ import {
 import { composerPromptLengthBannerItem } from "./ComposerPromptLengthValidation";
 import { pendingDraftWork } from "./pendingDraftWork";
 import { importComposerThreadAttachment } from "./composerThreadImport";
-import {
-  ComposerSpeechMicButton,
-  ComposerSpeechUnavailableMic,
-  ComposerSpeechTray,
-} from "./ComposerSpeechButton";
+import { ComposerSpeechMicButton, ComposerSpeechUnavailableMic } from "./ComposerSpeechButton";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { observeResize } from "~/lib/observeResize";
 
@@ -1308,6 +1304,7 @@ export function ChatComposer(props: ChatComposerProps) {
     attachControls: attachExpandedComposerControls,
     hiddenBlockCount: expandedControlsHiddenBlockCount,
     iconOnlyBlockCount: expandedControlsIconOnlyBlockCount,
+    traitsIconOnly: expandedControlsTraitsIconOnly,
     pickerIconOnly: expandedControlsPickerIconOnly,
   } = useRestingComposerControlsLayout(props.trayControlsHost ?? null);
   const pendingPrimaryAction = activePendingProgress
@@ -1345,7 +1342,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   const addComposerFilesToDraft = (files: ComposerFileAttachment[]) =>
     addComposerDraftFiles(attachmentDraftTarget, files, {
-      appendReference: false,
+      appendReference: questionAttachmentTarget === null,
     });
 
   const removeComposerImageFromDraft = (imageId: string) => {
@@ -1680,7 +1677,6 @@ export function ChatComposer(props: ChatComposerProps) {
       return;
     }
     onTypingGuardDraftChange();
-    const previousReferencedContextIds = new Set(collectInlineContextIds(promptRef.current));
     promptRef.current = nextPrompt;
     setPrompt(nextPrompt);
     if (promptHistoryPositionRef.current?.position.recalled !== nextPrompt) {
@@ -1770,7 +1766,6 @@ export function ChatComposer(props: ChatComposerProps) {
 
     const attachmentChanges = reconcileAttachmentContextReferences({
       referencedContextIds: referenced,
-      previousReferencedContextIds,
       files: composerFiles,
       images: composerImages,
       previewAnnotations: composerPreviewAnnotations,
@@ -1937,15 +1932,19 @@ export function ChatComposer(props: ChatComposerProps) {
   const speechMicAction = speechInput.available ? (
     <ComposerSpeechMicButton
       state={speechInput.state}
+      level={speechInput.level}
       shortcutLabel={dictationShortcutLabel}
       disabled={dictationDisabled}
       onStart={() => void speechInput.start()}
       onStop={() => void speechInput.stop()}
       onCancel={() => void speechInput.cancel()}
+      onSkipPostProcessing={() => speechInput.skipPostProcessing()}
     />
   ) : speechInput.unavailableReason ? (
     <ComposerSpeechUnavailableMic reason={speechInput.unavailableReason} />
   ) : undefined;
+  const stopDictationStable = useStableCallback(() => void speechInput.stop());
+  const onStopDictation = speechInput.state.phase === "recording" ? stopDictationStable : undefined;
   const voiceSendDisabledReason = speechInput.blocksSubmission
     ? "Finish or discard voice input before sending"
     : sendDisabledReason;
@@ -2452,6 +2451,7 @@ export function ChatComposer(props: ChatComposerProps) {
       composerControlsHidden={composerControlsHidden}
       restingHiddenBlockCount={expandedControlsHiddenBlockCount}
       iconOnlyBlockCount={expandedControlsIconOnlyBlockCount}
+      traitsIconOnly={expandedControlsTraitsIconOnly}
       pickerIconOnly={expandedControlsPickerIconOnly}
       showProviderUnavailable={showProviderUnavailable}
       providerSetupInstanceId={providerSetupInstanceId}
@@ -2608,6 +2608,7 @@ export function ChatComposer(props: ChatComposerProps) {
       pendingUserInputs,
       supportsQuestionAttachments,
       isLiteralPendingAnswer,
+      projectSelectionRequired,
       questionAttachmentTarget,
       attachmentTargetKey,
       fileStagingLimit,
@@ -3429,14 +3430,6 @@ export function ChatComposer(props: ChatComposerProps) {
       <ComposerBanner.Dock>
         <ComposerBannerStack items={shelfItems} />
       </ComposerBanner.Dock>
-      <ComposerSpeechTray
-        state={speechInput.state}
-        progress={speechInput.progress}
-        level={speechInput.level}
-        preview={speechInput.preview}
-        onCancel={() => void speechInput.cancel()}
-        onSkipPostProcessing={() => speechInput.skipPostProcessing()}
-      />
       <div className="relative">
         <ComposerSurface.Main
           ref={composerMainSurfaceRef}
@@ -3493,19 +3486,22 @@ export function ChatComposer(props: ChatComposerProps) {
                     type="button"
                     data-chat-composer-transition-actions="true"
                     className={cn(COMPOSER_PILL_BUTTON_CLASS_NAME, "w-8")}
-                    disabled={collapsedComposerPrimaryActionDisabled}
-                    aria-label={collapsedComposerPrimaryActionLabel}
+                    disabled={onStopDictation ? false : collapsedComposerPrimaryActionDisabled}
+                    aria-label={
+                      onStopDictation ? "Stop voice input" : collapsedComposerPrimaryActionLabel
+                    }
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (collapsedComposerShowsStop) onInterrupt();
+                      if (onStopDictation) onStopDictation();
+                      else if (collapsedComposerShowsStop) onInterrupt();
                       else if (showResumeAction) onResume();
                       else if (props.resumeCompactionTokens !== null && !props.keepFullHistory)
                         expandMobileComposer();
                       else submitComposer();
                     }}
                   >
-                    {collapsedComposerShowsStop ? (
+                    {onStopDictation || collapsedComposerShowsStop ? (
                       <span
                         className="size-2.5 rounded-xs bg-error-foreground"
                         aria-hidden="true"
@@ -3594,7 +3590,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 {composerAttachmentFileList}
               </div>
 
-              <div className="composer-prompt-editor relative min-w-0 py-1.5 [grid-area:prompt]">
+              <div className="relative min-w-0 py-1.5 [grid-area:prompt]">
                 {previewFile ? (
                   <ComposerFilePreviewDialog
                     file={previewFile}
@@ -3728,6 +3724,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   onResume={onResume}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryActionStable}
+                  onStopDictation={onStopDictation}
                   compactBeforeSendTokens={props.resumeCompactionTokens}
                   keepFullHistory={props.keepFullHistory}
                   onToggleKeepFullHistory={props.onToggleKeepFullHistory}

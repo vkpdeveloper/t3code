@@ -14,7 +14,6 @@ import type {
   EnvironmentId,
   EnvironmentSpeechModel,
   EnvironmentSpeechStatus,
-  SpeechStreamText,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { useEffect, useRef, useState } from "react";
@@ -104,7 +103,6 @@ export function useEnvironmentSpeechInput(input: HookInput) {
     readonly request: number;
   } | null>(null);
   const [level] = useState(createSpeechLevel);
-  const [preview, setPreview] = useState<SpeechStreamText | null>(null);
   const controllerChanged =
     controllerState.prepared !== prepared ||
     controllerState.postProcessingEnabled !== postProcessingEnabled ||
@@ -116,7 +114,6 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       postProcessingPrepared,
       value: INITIAL_STATE,
     });
-    setPreview(null);
   }
   const state: VoiceInputState<true> =
     queuedStart?.prepared === prepared
@@ -133,6 +130,7 @@ export function useEnvironmentSpeechInput(input: HookInput) {
   const setupCancelledRef = useRef(false);
   const controllerRef = useRef<VoiceInputController<true> | null>(null);
   const startRequestRef = useRef(0);
+  const pendingStartRef = useRef<number | null>(null);
   const latestInputRef = useRef(input);
   const microphoneIdRef = useRef(microphoneId);
   const draftRevisionRef = useRef({ ownerKey: input.ownerKey, text: input.draftText, revision: 0 });
@@ -179,6 +177,7 @@ export function useEnvironmentSpeechInput(input: HookInput) {
     };
 
     let disposed = false;
+    let lastPhase: VoiceInputState<true>["phase"] = "idle";
     let controller: VoiceInputController<true>;
     const platform = createBrowserVoiceInputPlatform({
       prepared,
@@ -189,9 +188,6 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       getMicrophoneId: () => microphoneIdRef.current,
       onLevel: level.set,
       onDurationLimit: () => void controller.stop(),
-      onText: (text) => {
-        if (!disposed) setPreview(text);
-      },
       onError: (message) => {
         if (!disposed) void controller.interruptRecording(message);
       },
@@ -228,7 +224,14 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       onStateChange: (value) => {
         if (!disposed) {
           setControllerState({ prepared, postProcessingEnabled, postProcessingPrepared, value });
-          if (value.phase !== "recording" && value.phase !== "transcribing") setPreview(null);
+          if (value.phase === "error" && lastPhase !== "error") {
+            toastManager.add({
+              type: "error",
+              title: "Voice input failed",
+              description: value.error ?? "Try again.",
+            });
+          }
+          lastPhase = value.phase;
         }
       },
     });
@@ -320,11 +323,9 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       request === startRequestRef.current &&
       controllerRef.current === expectedController &&
       latestInputRef.current.ownerKey === expectedOwner;
-    setQueuedStart({ prepared, request });
-    let latestStatus: EnvironmentSpeechStatus;
-    try {
-      latestStatus = await runtime.runPromise(getEnvironmentSpeechStatus(prepared));
-      if (!stillCurrent()) return;
+    const waitForStatus = async () => {
+      let latestStatus = await runtime.runPromise(getEnvironmentSpeechStatus(prepared));
+      if (!stillCurrent()) return null;
       if (latestStatus.supported && latestStatus.state === "transcribing") {
         setQueuedStart({ prepared, request });
         // Remember the press and start when the previous stream drains,
@@ -332,12 +333,22 @@ export function useEnvironmentSpeechInput(input: HookInput) {
         // Esc, cancel, or a draft change (stillCurrent) abandons the queue.
         while (latestStatus.supported && latestStatus.state === "transcribing") {
           await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
-          if (!stillCurrent()) return;
+          if (!stillCurrent()) return null;
           latestStatus = await runtime.runPromise(getEnvironmentSpeechStatus(prepared));
-          if (!stillCurrent()) return;
+          if (!stillCurrent()) return null;
         }
       }
+      return latestStatus;
+    };
+    const clearPendingStart = () => {
+      if (pendingStartRef.current === request) pendingStartRef.current = null;
+    };
+    pendingStartRef.current = request;
+    let latestStatus: EnvironmentSpeechStatus | null;
+    try {
+      latestStatus = await waitForStatus();
     } catch (error) {
+      clearPendingStart();
       if (!stillCurrent()) return;
       toastManager.add({
         type: "error",
@@ -347,6 +358,8 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       setQueuedStart(null);
       return;
     }
+    clearPendingStart();
+    if (!latestStatus) return;
     setQueuedStart(null);
     if (!latestStatus.supported) return;
     setStatus({ prepared, value: latestStatus });
@@ -437,18 +450,18 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       startRecording: startAfterSetup,
     },
     state,
-    progress: null,
-    preview: state.phase === "recording" || state.phase === "transcribing" ? preview : null,
     level,
     blocksSubmission: voiceInputBlocksSubmission(state),
     freezesEditor: voiceInputFreezesEditor(state),
+    skipPostProcessing: () => controllerRef.current?.skipPostProcessing(),
     start,
+    startPending: () => pendingStartRef.current !== null,
     stop: () => controllerRef.current?.stop() ?? Promise.resolve(),
     cancel: () => {
       startRequestRef.current += 1;
+      pendingStartRef.current = null;
       setQueuedStart(null);
       controllerRef.current?.cancel();
     },
-    skipPostProcessing: () => controllerRef.current?.skipPostProcessing(),
   };
 }

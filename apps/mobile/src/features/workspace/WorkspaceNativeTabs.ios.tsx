@@ -74,6 +74,8 @@ function RetainedWorkspaceTab(props: {
 export function WorkspaceNativeTabs(props: {
   readonly children: ReactNode;
   readonly hidden: boolean;
+  /** The sidebar column draws the tabs itself, so they leave with it. */
+  readonly tabsInSidebarColumn?: boolean;
 }) {
   const workspace = useWorkspaceTabs()!;
   const order = useEnabledNavigationTabs();
@@ -84,7 +86,12 @@ export function WorkspaceNativeTabs(props: {
   const systemTabBar = useSystemWorkspaceTabBar();
   const deviceType = useDeviceType();
   const compactTabs = useCompactWorkspaceTabs();
-  const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
+  const { layout, panes } = useAdaptiveWorkspaceLayout();
+  // The tabs belong to the sidebar; over a page with the sidebar hidden they'd cover the composer.
+  const hiddenWithSidebar =
+    deviceType === "pad" &&
+    layout.usesSplitView &&
+    !panes.primarySidebarVisible;
   const floatingTabs = useFloatingWorkspaceTabs();
   const { width } = useWindowDimensions();
   const { colors } = useControlTheme();
@@ -155,7 +162,10 @@ export function WorkspaceNativeTabs(props: {
           );
         })}
       </Tabs.Host>
-      {(deviceType === "pad" || compactTabs) && !props.hidden ? (
+      {(deviceType === "pad" || compactTabs) &&
+      !props.hidden &&
+      !props.tabsInSidebarColumn &&
+      !hiddenWithSidebar ? (
         <View
           pointerEvents="box-none"
           style={{
@@ -170,17 +180,27 @@ export function WorkspaceNativeTabs(props: {
             height: 128,
           }}
         >
-          <WorkspaceSidebarTabs
-            compact={floatingTabs}
-            reserveComposeSpace={floatingTabs}
-            onNewTask={
-              floatingTabs && !workspace.settingsOpen && selectedTab === "threads"
-                ? startNewTask
-                : undefined
-            }
-          />
+          <WorkspaceSidebarTabsFooter />
         </View>
       ) : null}
     </View>
+  );
+}
+
+/** The workspace tabs at the foot of the sidebar. */
+export function WorkspaceSidebarTabsFooter() {
+  const workspace = useWorkspaceTabs()!;
+  const { startNewTask } = useAdaptiveWorkspaceLayout();
+  const compact = useFloatingWorkspaceTabs();
+  return (
+    <WorkspaceSidebarTabs
+      compact={compact}
+      reserveComposeSpace={compact}
+      onNewTask={
+        compact && !workspace.settingsOpen && workspace.state.selectedTab === "threads"
+          ? startNewTask
+          : undefined
+      }
+    />
   );
 }

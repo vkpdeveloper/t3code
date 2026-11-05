@@ -38,9 +38,10 @@ import { BotAvatar } from "../bots/BotAvatar";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { PANE_TAB_CLASS, PANE_TAB_TITLE_CLASS, PaneNotch, PaneTabButton } from "../PaneNotch";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
 import { surfaceShortcutActionForKey } from "../RightPanelTabs";
-import { SURFACE_LAUNCHER_ENTRIES } from "../SurfaceLauncher";
+import { SURFACE_LAUNCHER_ENTRIES, SurfaceMenuItems, surfaceMenuActions } from "../SurfaceLauncher";
+import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { GuestShareIndicator } from "./GuestShareControls";
@@ -51,6 +52,7 @@ import {
   LayoutPaneTab,
   LayoutPaneTabStrip,
   LayoutTabCloseButton,
+  showIconOnlyWhenClipped,
   buildLayoutTabMenuItems,
   closeLayoutTabOnMiddleClick,
   isLayoutTabMenuId,
@@ -78,7 +80,7 @@ interface ChatHeaderProps {
   onNewThreadInProject: () => void;
   /** What the "+" menu can open beside the chat after a new thread. */
   besideAvailable: ReadonlySet<LayoutBesideKind>;
-  onOpenBeside: (kind: LayoutBesideKind) => void;
+  onOpenBeside: (kind: LayoutBesideKind, paneId?: string | null, browserProfileId?: string) => void;
   newTabShortcutLabel?: string | null | undefined;
   onOpenProjectSettings?: (() => void) | undefined;
   onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
@@ -438,7 +440,10 @@ export const ChatHeader = memo(function ChatHeader({
           ))}
           {hiddenTerminal ? (
             // The hidden terminal keeps a tab like any other pane tab.
-            <span className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}>
+            <span
+              ref={showIconOnlyWhenClipped}
+              className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}
+            >
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -460,7 +465,9 @@ export const ChatHeader = memo(function ChatHeader({
                       hiddenTerminal.running && "text-success-foreground",
                     )}
                   />
-                  <span className="min-w-0 truncate">Terminal</span>
+                  <span className="min-w-[4ch] truncate group-data-icon-only/tab:invisible">
+                    Terminal
+                  </span>
                 </TooltipTrigger>
                 <TooltipPopup side="bottom">
                   Show the terminal
@@ -510,27 +517,23 @@ function NewTabMenu(props: {
   newTabShortcutLabel: string | null | undefined;
   besideAvailable: ReadonlySet<LayoutBesideKind>;
   onNewThread: () => void;
-  onOpenBeside: (kind: LayoutBesideKind) => void;
+  onOpenBeside: (kind: LayoutBesideKind, paneId?: string | null, browserProfileId?: string) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const actions = [
-    {
-      label: "New thread",
-      icon: SquarePenIcon,
-      shortcut: "N",
-      available: true,
-      onClick: props.onNewThread,
-    },
-    // Then what the launcher offers, as it offers them.
-    ...SURFACE_LAUNCHER_ENTRIES.map((item) => ({
-      label: item.label,
-      icon: item.icon,
-      shortcut: item.shortcut,
-      available: props.besideAvailable.has(item.kind),
-      onClick: () => props.onOpenBeside(item.kind),
-    })),
-  ];
+  const browserProfiles = useBrowserDefaults().profiles;
+  const actions = surfaceMenuActions({
+    onNewThread: props.onNewThread,
+    surfaces: Object.fromEntries(
+      SURFACE_LAUNCHER_ENTRIES.map((item) => [
+        item.kind,
+        {
+          available: props.besideAvailable.has(item.kind),
+          onClick: () => props.onOpenBeside(item.kind),
+        },
+      ]),
+    ),
+  });
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const action = surfaceShortcutActionForKey(actions, event.nativeEvent);
     if (!action) return;
@@ -565,21 +568,12 @@ function NewTabMenu(props: {
         </TooltipPopup>
       </Tooltip>
       <MenuPopup align="start" side="bottom" sideOffset={6} onKeyDownCapture={handleKeyDown}>
-        {actions.map((action) => {
-          const Icon = action.icon;
-          return (
-            <MenuItem
-              key={action.label}
-              disabled={!action.available}
-              aria-keyshortcuts={action.shortcut}
-              onClick={action.onClick}
-            >
-              <Icon />
-              {action.label}
-              <MenuShortcut>{action.shortcut}</MenuShortcut>
-            </MenuItem>
-          );
-        })}
+        <SurfaceMenuItems
+          actions={actions}
+          browserProfiles={browserProfiles}
+          onAddBrowserInProfile={(profileId) => props.onOpenBeside("browser", undefined, profileId)}
+          onClose={() => setOpen(false)}
+        />
       </MenuPopup>
     </Menu>
   );
