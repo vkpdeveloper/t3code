@@ -64,6 +64,14 @@ function targetZone(state: LayoutDragState, target: LayoutDropTarget): Box | nul
   if (!pane) return null;
   const { rect } = pane;
   if (target.kind === "into") {
+    if (pane.tabRow) {
+      return box({
+        left: pane.tabRow.left - ZONE_INSET / 2,
+        top: pane.tabRow.top - ZONE_INSET / 2,
+        right: pane.tabRow.right + ZONE_INSET / 2,
+        bottom: pane.tabRow.bottom + ZONE_INSET / 2,
+      });
+    }
     return box({
       left: rect.left + ZONE_INSET / 2,
       top: rect.top + ZONE_INSET / 2,
@@ -311,9 +319,8 @@ export function LayoutDropZones() {
         {zone && state.target ? (
           into ? (
             <div
-              className="absolute flex justify-end-safe"
+              className="absolute left-2 flex justify-end-safe"
               style={{
-                left: PILL_GAP,
                 top: zone.top + zone.height + PILL_GAP,
                 width: Math.max(0, state.point.x - GHOST_OFFSET_X - PILL_GAP * 2),
               }}
