@@ -16,6 +16,7 @@ import {
   countLayoutTabs,
   findLayoutPane,
   findLayoutTab,
+  findLayoutTabByContent,
   selectFocusedChatTab,
   selectFocusedWorkspace,
   type LayoutDirection,
@@ -61,6 +62,8 @@ export interface LayoutDragState {
   composers: readonly LayoutDragRect[];
   /** The composer under the pointer. It takes the drop, so there is no target. */
   composer: LayoutDragRect | null;
+  /** The open tab this drag moves: the dragged tab, or a dragged thread's existing chat. */
+  movingTabId: string | null;
 }
 
 /** The chrome row at the top of a pane: dropping there adds a tab (pen: zones start 48px down). */
@@ -320,11 +323,18 @@ export function moveLayoutDrag(
           .map((composer) => toRect(composer.getBoundingClientRect()));
   const composer = options.composer ? toRect(options.composer.getBoundingClientRect()) : null;
   let raw = composer ? null : resolveLayoutDropTarget(point, measured.panes, measured.strip);
+  const movingTabId =
+    source.kind === "tab"
+      ? source.tabId
+      : (findLayoutTabByContent(layout, {
+          kind: "chat",
+          target: { kind: "server", threadRef: source.threadRef },
+        })?.tab.id ?? null);
   if (raw?.kind === "into") {
     const paneId = raw.paneId;
     const tabs = measured.panes
       .find((pane) => pane.paneId === paneId)
-      ?.tabs?.filter((tab) => source.kind !== "tab" || tab.id !== source.tabId);
+      ?.tabs?.filter((tab) => tab.id !== movingTabId);
     if (tabs) {
       const before = tabs.findIndex((tab) => point.x < (tab.rect.left + tab.rect.right) / 2);
       raw = { ...raw, index: before === -1 ? tabs.length : before };
@@ -350,6 +360,7 @@ export function moveLayoutDrag(
     target,
     composers,
     composer,
+    movingTabId,
   });
 }
 
