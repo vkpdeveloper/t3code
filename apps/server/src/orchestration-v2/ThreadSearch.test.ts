@@ -5,6 +5,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type OrchestrationV2DomainEvent,
   type ThreadLinkedPullRequest,
@@ -130,6 +131,7 @@ const message = (
     readonly minute?: number;
     readonly streaming?: boolean;
     readonly createdBy?: "user" | "agent";
+    readonly retryOfRunId?: RunId;
   } = {},
 ): OrchestrationV2DomainEvent => ({
   id: EventId.make(`message:${id}`),
@@ -148,6 +150,7 @@ const message = (
     text,
     attachments: [],
     streaming: options.streaming ?? false,
+    ...(options.retryOfRunId === undefined ? {} : { retryOfRunId: options.retryOfRunId }),
     createdAt: at(options.minute ?? 1),
     updatedAt: at(options.minute ?? 1),
   },
@@ -757,7 +760,7 @@ it.layer(layerTest)("ThreadSearch filters before it ranks", (it) => {
     }),
   );
 
-  it.effect("leaves out answers to an agent's question, which show in its card", () =>
+  it.effect("leaves out question answers and retried prompts, which the timeline folds", () =>
     Effect.gen(function* () {
       const projections = yield* ProjectionStore.ProjectionStoreV2;
       const search = yield* ThreadSearch.ThreadSearch;
@@ -768,6 +771,9 @@ it.layer(layerTest)("ThreadSearch filters before it ranks", (it) => {
         [
           thread(asked, project),
           message(asked, "async-answer:request-1", "user", "use the albatross drive"),
+          message(asked, "retried", "user", "fix the albatross", {
+            retryOfRunId: RunId.make("run:failed"),
+          }),
         ],
         projections.apply,
         { discard: true },
