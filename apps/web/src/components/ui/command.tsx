@@ -205,7 +205,7 @@ function CommandGroupLabel({
   return (
     <AutocompleteGroupLabel
       className={cn(
-        tone === "muted" && "text-(--command-muted-foreground,var(--contrast-muted-foreground))",
+        tone === "muted" && "text-muted-foreground",
         className,
       )}
       data-slot="command-group-label"
