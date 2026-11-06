@@ -10,6 +10,7 @@ import {
   countLayoutTabs,
   findLayoutPane,
   findLayoutTab,
+  findLayoutTabByContent,
   selectFocusedChatTab,
   selectFocusedWorkspace,
   type LayoutDirection,
@@ -287,11 +288,19 @@ export function moveLayoutDrag(
     options.allowTarget === false
       ? null
       : resolveLayoutDropTarget(point, measured.panes, measured.strip);
+  // The open tab this drag moves: the dragged tab, or a dragged thread's existing chat.
+  const movingTabId =
+    source.kind === "tab"
+      ? source.tabId
+      : (findLayoutTabByContent(layout, {
+          kind: "chat",
+          target: { kind: "server", threadRef: source.threadRef },
+        })?.tab.id ?? null);
   if (raw?.kind === "into") {
     const paneId = raw.paneId;
     const tabs = measured.panes
       .find((pane) => pane.paneId === paneId)
-      ?.tabs?.filter((tab) => source.kind !== "tab" || tab.id !== source.tabId);
+      ?.tabs?.filter((tab) => tab.id !== movingTabId);
     if (tabs) {
       const before = tabs.findIndex((tab) => point.x < (tab.rect.left + tab.rect.right) / 2);
       raw = { ...raw, index: before === -1 ? tabs.length : before };
