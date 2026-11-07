@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { dropLayoutDrag, moveLayoutDrag, openThreadToTheSide } from "./layoutDrag";
+import { dropLayoutDrag, moveLayoutDrag } from "./layoutDrag";
 import { createLayoutState, selectFocusedWorkspace, type LayoutTabContent } from "./layoutModel";
 import { useLayoutStore } from "./layoutStore";
 
@@ -60,18 +60,6 @@ describe("dropLayoutDrag", () => {
       [chat],
       [{ kind: "chat", target: { kind: "server", threadRef: droppedRef } }],
       [sidePane],
-    ]);
-  });
-
-  it("opens a thread to the side after the chat's side pane from the menu", () => {
-    using layout = setupChatWithSidePane();
-
-    openThreadToTheSide(droppedRef);
-
-    expect(layout.columns()).toEqual([
-      [chat],
-      [sidePane],
-      [{ kind: "chat", target: { kind: "server", threadRef: droppedRef } }],
     ]);
   });
 });
