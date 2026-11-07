@@ -6,6 +6,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { MENU_ROW_TEXT_CLASS } from "./menu-row-text";
 
 const Select = SelectPrimitive.Root;
 
@@ -21,6 +22,7 @@ const selectTriggerVariants = cva(
         // The raised recipe; open and focused trade the rim for the ring stroke.
         default:
           "w-full min-w-36 surface-raised text-foreground [:hover,[data-pressed]]:not-data-popup-open:surface-raised-hover focus-visible:not-data-disabled:surface-focus data-popup-open:not-data-disabled:surface-focus aria-invalid:not-data-disabled:surface-invalid focus-visible:aria-invalid:not-data-disabled:surface-invalid-focus data-popup-open:aria-invalid:not-data-disabled:surface-invalid [&_svg:not([class*='text-'])]:text-muted-foreground",
+        well: "w-full min-w-36 surface-well text-foreground [:hover,[data-pressed]]:not-data-popup-open:surface-well focus-visible:not-data-disabled:surface-focus data-popup-open:not-data-disabled:surface-focus aria-invalid:not-data-disabled:surface-invalid focus-visible:aria-invalid:not-data-disabled:surface-invalid-focus data-popup-open:aria-invalid:not-data-disabled:surface-invalid [&_svg:not([class*='text-'])]:text-muted-foreground",
         ghost:
           "border-transparent text-secondary-label focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring [:hover,[data-pressed],[data-popup-open]]:surface-ghost-hover [:hover,[data-pressed],[data-popup-open]]:text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground",
       },
@@ -84,14 +86,17 @@ function SelectTrigger({
 function SelectButton({
   className,
   size = "default",
+  variant = "default",
   children,
   leadingIcon,
   render,
   ...props
 }: useRender.ComponentProps<"button"> &
-  Pick<VariantProps<typeof selectTriggerVariants>, "size"> & { leadingIcon?: React.ReactNode }) {
+  Pick<VariantProps<typeof selectTriggerVariants>, "size" | "variant"> & {
+    leadingIcon?: React.ReactNode;
+  }) {
   const defaultProps = {
-    className: cn(selectTriggerVariants({ size }), className),
+    className: cn(selectTriggerVariants({ size, variant }), className),
     "data-slot": "select-trigger",
     type: render ? undefined : ("button" as const),
   };
@@ -124,10 +129,10 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
   );
 }
 
-// Items put their text 17px into the popup (1px border, p-1.5, px-2.5); a field trigger puts
+// Items put their text 13px into the popup (1px border, p-1, px-2); a field trigger puts
 // its text 10px in. The popup overhangs the trigger by the difference on both sides, so
 // the item text continues the trigger's text line and the edges stay symmetric.
-const SELECT_POPUP_OVERHANG = 7;
+const SELECT_POPUP_OVERHANG = 3;
 
 function SelectPopup({
   className,
@@ -187,10 +192,7 @@ function SelectPopup({
             }
           >
             <SelectPrimitive.List
-              className={cn(
-                "max-h-(--available-height) overflow-y-auto p-1.5 [--popup-item-radius:calc(var(--radius-card)-7px)]",
-                className,
-              )}
+              className={cn("max-h-(--available-height) overflow-y-auto p-1", className)}
               data-slot="select-list"
             >
               {children}
@@ -219,7 +221,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "flex min-h-8 cursor-pointer items-center rounded-[var(--popup-item-radius,8px)] px-2.5 py-1 text-label text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-selected:surface-selected-soft data-selected:text-strong-foreground data-disabled:opacity-45 sm:min-h-8 [&_svg:not([class*='size-'])]:size-[15px] [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        `flex min-h-8 cursor-pointer items-center rounded-[8px] px-2 py-1 ${MENU_ROW_TEXT_CLASS} text-foreground outline-none data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-highlighted:surface-selected-soft data-highlighted:text-strong-foreground data-selected:surface-selected-soft data-selected:text-strong-foreground data-disabled:opacity-45 sm:min-h-7 [&_svg:not([class*='size-'])]:size-[15px] [&_svg]:pointer-events-none [&_svg]:shrink-0`,
         className,
       )}
       data-slot="select-item"

@@ -17,15 +17,15 @@ import type { TerminalContextSelection } from "../lib/terminalContext";
 const fixture = vi.hoisted(() => ({
   statusByThreadId: new Map<string, "running" | "exited">(),
   pendingSurfaces: [] as Array<() => void>,
-  contextMenu: undefined as ((event: MouseEvent) => void) | undefined,
-  showContextMenu: vi.fn(),
-  selection: "",
-  clearSelection: vi.fn(),
   surfaceOptions: [] as GhosttyTerminalSurfaceOptions[],
   metadata: new Map<
     string,
     Atom.Writable<AsyncResult.AsyncResult<FilesystemEntryMetadata | null>>
   >(),
+  contextMenu: undefined as ((event: MouseEvent) => void) | undefined,
+  showContextMenu: vi.fn(),
+  selection: "",
+  clearSelection: vi.fn(),
 }));
 
 // Every surface method is a no-op; `then` stays undefined so awaiting the surface resolves to it.
@@ -50,8 +50,8 @@ vi.mock("~/terminal/ghostty/surface", () => ({
   GhosttyTerminalSurface: {
     create: (_mount: HTMLElement, options: GhosttyTerminalSurfaceOptions) =>
       new Promise((resolve) => {
-        fixture.contextMenu = options.onContextMenu;
         fixture.surfaceOptions.push(options);
+        fixture.contextMenu = options.onContextMenu;
         fixture.pendingSurfaces.push(() => resolve(fakeSurface));
       }),
   },
@@ -87,11 +87,6 @@ vi.mock("../state/server", async () => {
 });
 vi.mock("../state/terminal", () => ({ terminalEnvironment: { write: {}, resize: {} } }));
 vi.mock("../state/preview", () => ({ previewEnvironment: { open: {} } }));
-vi.mock("../layout/PaneTabs", () => ({
-  LayoutPaneTab: () => null,
-  LayoutPaneTabStrip: ({ children }: { children: React.ReactNode }) => children,
-  useLayoutPaneSiblingTabs: () => ({ before: [], after: [] }),
-}));
 vi.mock("../state/projects", async () => {
   const { Atom, AsyncResult } = await import("effect/reactivity");
   return {
@@ -116,6 +111,11 @@ vi.mock("../state/projects", async () => {
     },
   };
 });
+vi.mock("../layout/PaneTabs", () => ({
+  LayoutPaneTab: () => null,
+  LayoutPaneTabStrip: ({ children }: { children: React.ReactNode }) => children,
+  useLayoutPaneSiblingTabs: () => ({ before: [], after: [] }),
+}));
 vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => () => {} }));
 vi.mock("./preview/openTerminalLinkInPreview", () => ({ openTerminalLinkInPreview: () => {} }));
 vi.mock("~/localApi", () => ({
@@ -171,12 +171,12 @@ function setup() {
     [other.threadId, "running"],
   ]);
   fixture.pendingSurfaces = [];
+  fixture.surfaceOptions = [];
+  fixture.metadata.clear();
   fixture.contextMenu = undefined;
   fixture.showContextMenu.mockReset().mockResolvedValue("add-to-chat");
   fixture.selection = "selected output";
   fixture.clearSelection.mockReset();
-  fixture.surfaceOptions = [];
-  fixture.metadata.clear();
   return { original, other };
 }
 
@@ -196,44 +196,6 @@ it("closes an exited terminal on its own thread after navigating to one reusing 
     vi.runOnlyPendingTimers();
   });
   expect(onCloseTerminal.mock.calls).toEqual([["term-1", original]]);
-});
-
-it.each([false, true])("clears selected output only after chat accepts it: %s", async (added) => {
-  const { other } = setup();
-  let accept: (added: boolean) => void = () => {};
-  const onAddTerminalContext = vi.fn(
-    () =>
-      new Promise<boolean>((resolve) => {
-        accept = resolve;
-      }),
-  );
-  await using _screen = await render(
-    <Drawer
-      threadRef={other}
-      onCloseTerminal={() => {}}
-      onAddTerminalContext={onAddTerminalContext}
-    />,
-  );
-  await act(() => fixture.pendingSurfaces.shift()?.());
-  await act(() => fixture.contextMenu?.(new MouseEvent("contextmenu", { cancelable: true })));
-  expect(onAddTerminalContext).toHaveBeenCalledWith(
-    expect.objectContaining({ text: "selected output" }),
-  );
-  expect(fixture.clearSelection).not.toHaveBeenCalled();
-  await act(() => accept(added));
-  expect(fixture.clearSelection).toHaveBeenCalledTimes(added ? 1 : 0);
-});
-
-it("omits add to chat when the terminal has no composer target", async () => {
-  const { other } = setup();
-  await using _screen = await render(<Drawer threadRef={other} onCloseTerminal={() => {}} />);
-  await act(() => fixture.pendingSurfaces.shift()?.());
-  await act(() => fixture.contextMenu?.(new MouseEvent("contextmenu", { cancelable: true })));
-  const items = fixture.showContextMenu.mock.calls[0]![0];
-  expect(items).not.toEqual(
-    expect.arrayContaining([expect.objectContaining({ id: "add-to-chat" })]),
-  );
-  expect(fixture.clearSelection).not.toHaveBeenCalled();
 });
 
 it("only activates terminal paths confirmed to exist on their environment", async () => {
@@ -313,4 +275,42 @@ it("only activates terminal paths confirmed to exist on their environment", asyn
   expect(await validate("~/notes.ts:5:2")).toBe(true);
   await hover("~/notes.ts:5:2");
   expect(canActivate("~/notes.ts:5:2")).toBe(true);
+});
+
+it.each([false, true])("clears selected output only after chat accepts it: %s", async (added) => {
+  const { other } = setup();
+  let accept: (added: boolean) => void = () => {};
+  const onAddTerminalContext = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        accept = resolve;
+      }),
+  );
+  await using _screen = await render(
+    <Drawer
+      threadRef={other}
+      onCloseTerminal={() => {}}
+      onAddTerminalContext={onAddTerminalContext}
+    />,
+  );
+  await act(() => fixture.pendingSurfaces.shift()?.());
+  await act(() => fixture.contextMenu?.(new MouseEvent("contextmenu", { cancelable: true })));
+  expect(onAddTerminalContext).toHaveBeenCalledWith(
+    expect.objectContaining({ text: "selected output" }),
+  );
+  expect(fixture.clearSelection).not.toHaveBeenCalled();
+  await act(() => accept(added));
+  expect(fixture.clearSelection).toHaveBeenCalledTimes(added ? 1 : 0);
+});
+
+it("omits add to chat when the terminal has no composer target", async () => {
+  const { other } = setup();
+  await using _screen = await render(<Drawer threadRef={other} onCloseTerminal={() => {}} />);
+  await act(() => fixture.pendingSurfaces.shift()?.());
+  await act(() => fixture.contextMenu?.(new MouseEvent("contextmenu", { cancelable: true })));
+  const items = fixture.showContextMenu.mock.calls[0]![0];
+  expect(items).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "add-to-chat" })]),
+  );
+  expect(fixture.clearSelection).not.toHaveBeenCalled();
 });

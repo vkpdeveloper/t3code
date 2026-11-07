@@ -123,6 +123,10 @@ export function getClientSettingsHydratedSnapshot(): boolean {
   return clientSettingsHydrationStatus === "ready";
 }
 
+function getClientSettingsHydrationStatusSnapshot(): ClientSettingsHydrationStatus {
+  return clientSettingsHydrationStatus;
+}
+
 export function subscribeClientSettingsHydration(listener: () => void): () => void {
   clientSettingsHydrationListeners.add(listener);
   void hydrateClientSettings().catch(() => undefined);
@@ -306,6 +310,14 @@ export function useClientSettingsHydrated(): boolean {
   );
 }
 
+export function useClientSettingsHydrationStatus(): ClientSettingsHydrationStatus {
+  return useSyncExternalStore(
+    subscribeClientSettingsHydration,
+    getClientSettingsHydrationStatusSnapshot,
+    () => "pending",
+  );
+}
+
 const getDefaultClientSettings = () => DEFAULT_CLIENT_SETTINGS;
 const selectWholeClientSettings = (settings: ClientSettings) => settings;
 
@@ -428,6 +440,11 @@ export function startLegacyLayoutSettingsMigration(): () => void {
 /** The device-local layout; legacy values come only from the primary environment. */
 export function useClientLayoutSettings(): LayoutSettings {
   return useClientSettings((settings) => settings.layout) ?? DEFAULT_LAYOUT_SETTINGS;
+}
+
+/** Labs › Scrolling workspaces: the niri parts of the layout. Off for everyone until turned on. */
+export function useScrollingWorkspacesEnabled(): boolean {
+  return useClientSettings((settings) => settings.scrollingWorkspacesEnabled);
 }
 
 function resolveEnvironmentIdentificationMode(input: {

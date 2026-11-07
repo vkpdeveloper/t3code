@@ -37,7 +37,6 @@ import {
   findLayoutTab,
   selectFocusedTab,
   selectLayoutPaneSlots,
-  selectWindowStartPaneId,
   type LayoutDirection,
   type LayoutPaneSlot,
   type LayoutState,
@@ -174,7 +173,8 @@ export function LayoutOverview() {
             rowOffset: handoff.rowOffset,
           };
           // The panes go inert under the overview; keys belong to it now.
-          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && !inPopoverAbove(active)) active.blur();
         }
         // Reopened mid-close too: "open" only once the zoom out lands.
         setPhase("opening");
@@ -231,6 +231,10 @@ function useChooseOverviewTab(): (tabId: string | null) => void {
   };
 }
 
+function inPopoverAbove(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-slot="popover-popup"]') !== null;
+}
+
 /** Overview focus changes are real and update the URL. Leave typing and Escape to any palette or
  * dialog opened above the overview. */
 function useOverviewKeys(): void {
@@ -242,6 +246,7 @@ function useOverviewKeys(): void {
       if (isCommandPaletteOpen() || isModalDialogOpen()) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const direction = OVERVIEW_KEYS[event.key];
+      if (!direction && inPopoverAbove(event.target)) return;
       // The overview owns the keyboard: other text goes nowhere, not into the
       // composer behind it, and Tab does not walk the sidebar under it.
       const text = event.key.length === 1 && !isEditableFocused(event.target);
@@ -498,23 +503,6 @@ function exitScrollLeft(row: OverviewRow, width: number): number {
     else if (right > scroll + width) scroll = Math.min(left, right - width);
   }
   return Math.max(0, Math.min(stripPx - width, scroll));
-}
-
-export function selectOverviewStartPaneIds(
-  stage: OverviewStageLayout,
-  width: number,
-): ReadonlySet<string> {
-  const startPaneIds = new Set<string>();
-  for (const row of stage.rows) {
-    const stripPx = row.stripWidth * width;
-    const startPaneId = selectWindowStartPaneId(row.slots, exitScrollLeft(row, width), stripPx);
-    for (const slot of row.slots) {
-      if (startPaneId === null ? !slot.hasLeft && !slot.hasAbove : slot.paneId === startPaneId) {
-        startPaneIds.add(slot.paneId);
-      }
-    }
-  }
-  return startPaneIds;
 }
 
 interface StageTransform {
@@ -886,11 +874,13 @@ export function useOverviewStage(
       element.style.transform = "";
       scroller.scrollLeft = exitScroll.current;
       // DOM focus comes back to the pane the overview landed on.
-      document
-        .querySelector<HTMLElement>(
-          "[data-layout-pane-focused='true'][data-layout-pane-id] [contenteditable='true']",
-        )
-        ?.focus({ preventScroll: true });
+      if (!inPopoverAbove(document.activeElement)) {
+        document
+          .querySelector<HTMLElement>(
+            "[data-layout-pane-focused='true'][data-layout-pane-id] [contenteditable='true']",
+          )
+          ?.focus({ preventScroll: true });
+      }
       return;
     }
     if (phaseNow === "open") {

@@ -739,6 +739,15 @@ export function isSidebarNestedLinkClick(target: EventTarget | null): boolean {
   return nodeClosest(parent, "a[href]") !== null;
 }
 
+/** The "New thread in" picker opens unless there is one open project or none; then the current context decides. */
+export function shouldCreateNewThreadInCurrentProject(
+  shiftKey: boolean,
+  openProjectGroupCount: number,
+  projectGroupCount: number,
+): boolean {
+  return shiftKey || openProjectGroupCount === 1 || projectGroupCount === 0;
+}
+
 export function orderItemsByPreferredIds<TItem, TId>(input: {
   items: readonly TItem[];
   preferredIds: readonly TId[];
@@ -967,6 +976,7 @@ export type SidebarV2TopStatusKind =
   | "limited"
   | "input"
   | "request"
+  | "preparing"
   | "waiting"
   | "woke"
   | "working";
@@ -976,7 +986,10 @@ export function resolveSidebarV2TopStatus(input: {
   readonly isUnread: boolean;
   readonly isWoke: boolean;
 }): SidebarV2TopStatusKind | null {
-  if (input.status === "preparing" || input.status === "working") {
+  if (input.status === "preparing") {
+    return "preparing";
+  }
+  if (input.status === "working") {
     return "working";
   }
   if (input.status === "waiting") {

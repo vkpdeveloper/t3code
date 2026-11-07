@@ -5,19 +5,25 @@ export type VoiceTranscriptionOptions = {
   readonly signal: AbortSignal;
 };
 
+export type VoiceStreamingSession = {
+  readonly finish: (options: VoiceTranscriptionOptions) => Promise<string>;
+};
+
 export type PreparedVoiceTranscription = {
   readonly locale: string;
-  readonly start?: (uri: string, options: VoiceTranscriptionOptions) => Promise<string>;
+  /**
+   * Runs alongside capture once recording starts. Resolves with the transcript when it
+   * transcribed live, or null when `transcribe` still runs after the recording stops.
+   * A rejection stops the recording.
+   */
+  readonly start?: (uri: string, options: VoiceTranscriptionOptions) => Promise<string | null>;
   readonly transcribe: (uri: string, options: VoiceTranscriptionOptions) => Promise<string>;
+  /** Present when audio streams during capture; `finish` then replaces `transcribe`. */
   readonly streaming?: VoiceStreamingSession;
 };
 
 export type VoiceTranscriber = {
   readonly prepare: (options: VoiceTranscriptionOptions) => Promise<PreparedVoiceTranscription>;
-};
-
-export type VoiceStreamingSession = {
-  readonly finish: (options: VoiceTranscriptionOptions) => Promise<string>;
 };
 
 const VoiceTranscriptionErrorCode = Schema.Literals([

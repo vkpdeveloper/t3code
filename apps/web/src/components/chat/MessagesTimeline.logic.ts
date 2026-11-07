@@ -29,6 +29,8 @@ import {
   toolGroupSummaryKind,
   contextCompactionTokenCounts,
   type ToolGroupSummaryKind,
+  liveThoughtLine,
+  workEntryHiddenByToolCallVisibility,
 } from "@t3tools/client-runtime/work-log/presentation";
 import {
   deriveRevertTurnCountByUserMessageId,
@@ -63,6 +65,7 @@ import {
   type TurnItemId,
 } from "@t3tools/contracts";
 import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
+import type { ToolCallVisibility } from "@t3tools/contracts/settings";
 import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
 import { commandRunsTests, compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
@@ -499,6 +502,24 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
   return bMs > aMs ? b : a;
 }
 
+function minIsoTimestamp(a: string | null, b: string | null): string | null {
+  return a === null || b === null ? (a ?? b) : maxIsoTimestamp(a, b) === a ? b : a;
+}
+
+function runFirstAttemptStartedAt(
+  entries: ReadonlyArray<TimelineEntry>,
+  runId: RunId | null,
+): string | null {
+  let first: DateTime.Utc | null = null;
+  for (const entry of entries) {
+    const startedAt = entry.attempt?.runId === runId ? entry.attempt.startedAt : null;
+    if (startedAt != null && (first === null || DateTime.isLessThan(startedAt, first))) {
+      first = startedAt;
+    }
+  }
+  return first === null ? null : DateTime.formatIso(first);
+}
+
 export type TimelineLatestRun = Pick<
   ThreadRunSummary,
   "runId" | "status" | "startedAt" | "completedAt" | "turnEnded"
@@ -508,6 +529,7 @@ const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
 export type MessagesTimelineRow = MessagesTimelineRowContent & {
   readonly continuesWorkLog?: boolean;
+  readonly superseded?: boolean;
   /** A user prompt followed directly by another prompt sits in the same prompt stack. */
   readonly continuesPromptStack?: boolean;
 };
@@ -749,7 +771,7 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   return new Set(lastAssistantMessageIdByResponseKey.values());
 }
 
-export type TurnFoldEnding = "worked" | "stopped" | "failed" | "limited";
+export type TurnFoldEnding = "worked" | "stopped" | "failed" | "limited" | "waiting";
 
 interface TurnFold {
   runId: RunId;
@@ -971,6 +993,7 @@ function steerReplyEntryIds(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<
     if (timelineEntryStartsResponse(entry)) {
       lastReply = null;
     } else if (timelineEntryIsSteer(entry)) {
+      if (entry.kind !== "message" || entry.message.runId == null) continue;
       if (lastReply !== null) ids.add(lastReply);
       lastReply = null;
     } else if (
@@ -1178,12 +1201,15 @@ function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   terminalAssistantMessageIds: ReadonlySet<string>;
   latestRun: TimelineLatestRun | null;
+  latestRunAwaitsBackgroundWork: boolean;
   unfoldedRunIds: ReadonlySet<RunId>;
   runlessWorkActive: boolean;
   failedRunIds: ReadonlySet<RunId>;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   liveSubagentEntryIds: ReadonlySet<string>;
   completeSupersededReplyEntryIds: ReadonlySet<string>;
+  /** Hide all keeps main: a reply with nothing to expand gets no duration row. */
+  durationRowForBareReply: boolean;
 }): ReadonlyMap<string, TurnFold> {
   const interruptedRunIds = new Set<RunId>();
   const usageLimitedRunIds = usageLimitedTimelineRunIds(input.timelineEntries);
@@ -1366,7 +1392,10 @@ function deriveTurnFolds(input: {
       (entry) => hiddenEntryIds.has(entry.id) && !timelineEntryIsCompaction(entry),
     );
     // A reply still owns its duration bar when there was no work to expand.
-    if (!hidesNonCompactionWork && group.terminalEntry === null) {
+    if (
+      !hidesNonCompactionWork &&
+      (group.terminalEntry === null || !input.durationRowForBareReply)
+    ) {
       continue;
     }
 
@@ -1383,7 +1412,13 @@ function deriveTurnFolds(input: {
     const lastEntryEnd = timelineEntryEnd(lastEntry);
     const elapsedMs =
       input.latestRun?.runId === runId && input.latestRun.startedAt && input.latestRun.completedAt
-        ? computeElapsedMs(input.latestRun.startedAt, input.latestRun.completedAt)
+        ? computeElapsedMs(
+            minIsoTimestamp(
+              runFirstAttemptStartedAt(input.timelineEntries, runId),
+              input.latestRun.startedAt,
+            ) ?? input.latestRun.startedAt,
+            input.latestRun.completedAt,
+          )
         : computeElapsedMs(
             group.startBoundary ?? firstEntry.createdAt,
             maxIsoTimestamp(group.terminalEntry?.message.updatedAt ?? null, lastEntryEnd) ??
@@ -1395,7 +1430,9 @@ function deriveTurnFolds(input: {
         : "failed"
       : isLatestInterruptedTurn || interruptedRunIds.has(runId)
         ? "stopped"
-        : "worked";
+        : input.latestRunAwaitsBackgroundWork && input.latestRun?.runId === runId
+          ? "waiting"
+          : "worked";
     const label = turnFoldLabel(ending, elapsedMs);
     // The checkpoint diff is what the changed-files card shows; provider
     // counts are the fallback for turns without a checkpoint.
@@ -1433,6 +1470,8 @@ function turnFoldLabel(ending: TurnFoldEnding, elapsedMs: number | null): string
       return duration ? `Failed after ${duration}` : "Failed";
     case "limited":
       return duration ? `Limited at ${duration}` : "Limited";
+    case "waiting":
+      return duration ? `Progress after ${duration}` : "In progress";
     case "worked":
       return duration ? `Worked for ${duration}` : "Worked";
   }
@@ -1610,17 +1649,129 @@ function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
   });
 }
 
-function timelineRowEntries(entries: ReadonlyArray<TimelineEntry>) {
-  return withoutSubagentDelegationRows(settleSupersededReasoning(entries));
+function workShownAsFinalAnswerOnly(
+  entry: TimelineEntry,
+  pendingApprovalRequestIds: ReadonlySet<RuntimeRequestId> | undefined,
+): boolean {
+  if (entry.kind === "event") return entry.projectedItem.item.type !== "subagent";
+  if (entry.kind !== "work") return true;
+  const work = entry.entry;
+  const item = work.projectedItem?.item;
+  return (
+    (item?.type === "approval_request" &&
+      pendingApprovalRequestIds?.has(item.requestId) === true) ||
+    work.questionAnswer !== undefined ||
+    timelineEntryIsCompaction(entry) ||
+    timelineEntryStartsResponse(entry) ||
+    work.tone === "error" ||
+    work.sourceActivityKind === "runtime.error" ||
+    (work.itemType === "error" && work.toolLifecycleStatus !== "completed")
+  );
+}
+
+function deriveInFlightSteerAnswerIds(entries: ReadonlyArray<TimelineEntry>): ReadonlySet<string> {
+  const ids = new Set<string>();
+  let awaitingReply = false;
+  let candidate: string | null = null;
+  for (const entry of entries) {
+    if (entry.kind === "work" && entry.entry.itemType === "reasoning") continue;
+    const reply = entry.kind === "message" && entry.message.role === "assistant" ? entry : null;
+    if (candidate !== null && reply !== null) ids.add(candidate);
+    candidate = null;
+    if (timelineEntryIsSteer(entry)) {
+      awaitingReply = true;
+    } else if (entry.kind === "message" && entry.message.role === "user") {
+      awaitingReply = false;
+    } else if (reply !== null && awaitingReply) {
+      candidate = reply.message.id;
+      awaitingReply = false;
+    }
+  }
+  return ids;
+}
+
+export function liveAnswerPreview(entries: ReadonlyArray<TimelineEntry>): string | null {
+  const boundary = lastResponseBoundaryIndex(entries);
+  for (let index = entries.length - 1; index > boundary; index -= 1) {
+    const entry = entries[index]!;
+    const text =
+      entry.kind === "message" && entry.message.role === "assistant"
+        ? entry.message.text
+        : entry.kind === "work" && entry.entry.itemType === "reasoning"
+          ? (entry.entry.detail ?? "")
+          : "";
+    const line = liveThoughtLine(text);
+    if (line !== "") return line;
+  }
+  return null;
+}
+
+function withoutRetriedPrompts(entries: ReadonlyArray<TimelineEntry>) {
+  return entries.filter(
+    (entry) => entry.kind !== "message" || entry.message.retryOfRunId === undefined,
+  );
+}
+
+function timelineRowEntries(
+  input: Pick<
+    MessagesTimelineRowsInput,
+    | "timelineEntries"
+    | "toolCallVisibility"
+    | "revealedMessageId"
+    | "isWorking"
+    | "latestRun"
+    | "runningRunId"
+    | "pendingApprovalRequestIds"
+  >,
+) {
+  const visibility = input.toolCallVisibility ?? "showAll";
+  const entries = withoutRetriedPrompts(input.timelineEntries);
+  let shown = entries;
+  if (visibility === "zen") {
+    const answering = input.isWorking && input.latestRun?.turnEnded !== true;
+    const answeringRunId = answering
+      ? deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null)
+      : null;
+    const answeringFrom = answering ? lastResponseBoundaryIndex(entries) + 1 : entries.length;
+    const terminalIds = deriveTerminalAssistantMessageIds(entries);
+    const steerAnswerIds = deriveInFlightSteerAnswerIds(entries);
+    shown = entries.filter((entry, index) => {
+      if (entry.kind !== "message") {
+        return workShownAsFinalAnswerOnly(entry, input.pendingApprovalRequestIds);
+      }
+      const { message } = entry;
+      return (
+        message.role !== "assistant" ||
+        message.id === input.revealedMessageId ||
+        steerAnswerIds.has(message.id) ||
+        (terminalIds.has(message.id) &&
+          index < answeringFrom &&
+          (answeringRunId === null || message.runId !== answeringRunId))
+      );
+    });
+  } else if (visibility !== "showAll") {
+    shown = entries.filter(
+      (entry) =>
+        entry.kind !== "work" || !workEntryHiddenByToolCallVisibility(entry.entry, visibility),
+    );
+  }
+  return withoutSubagentDelegationRows(settleSupersededReasoning(shown));
 }
 
 function deriveTimelineTurnFolds(
   input: Pick<
     MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+    | "timelineEntries"
+    | "latestRun"
+    | "isWorking"
+    | "runlessWorkActive"
+    | "runningRunId"
+    | "toolCallVisibility"
+    | "revealedMessageId"
   >,
 ) {
-  const timelineEntries = timelineRowEntries(input.timelineEntries);
+  if (input.toolCallVisibility === "zen") return new Map<string, TurnFold>();
+  const timelineEntries = timelineRowEntries(input);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
   const failedRunIds = failedTimelineRunIds(timelineEntries, input.latestRun ?? null);
   const activeVisualResponseRunIds = deriveActiveVisualResponseRunIds({
@@ -1634,11 +1785,13 @@ function deriveTimelineTurnFolds(
     latestRun: input.latestRun ?? null,
     unfoldedRunIds: activeVisualResponseRunIds,
     failedRunIds,
+    latestRunAwaitsBackgroundWork: false,
     runlessWorkActive: input.isWorking && input.runlessWorkActive === true,
     // Fold membership does not depend on the diff stat the fold header shows.
     turnDiffSummaries: [],
     liveSubagentEntryIds: liveSubagentCardEntryIds(timelineEntries),
     completeSupersededReplyEntryIds: completeSupersededReplyEntryIds(timelineEntries),
+    durationRowForBareReply: input.toolCallVisibility !== "hideAll",
   });
 }
 
@@ -1646,6 +1799,8 @@ export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   pendingApprovalRequestIds?: ReadonlySet<RuntimeRequestId>;
   latestRun?: TimelineLatestRun | null;
+  /** The latest run's provider turn ended, but its agent still awaits background work. */
+  awaitingBackgroundWork?: boolean;
   runningRunId?: RunId | null;
   expandedRunIds?: ReadonlySet<RunId>;
   expandedAttemptIds?: ReadonlySet<RunAttemptId>;
@@ -1659,10 +1814,12 @@ export function deriveMessagesTimelineRows(input: {
   threadStartCheckpointReady?: boolean;
   availableRevertTurnCounts?: ReadonlySet<number> | undefined;
   worktreeSetup?: WorktreeSetupSnapshot | null;
+  toolCallVisibility?: ToolCallVisibility;
+  revealedMessageId?: MessageId | null;
   /** Commands and skills of the thread's provider, for telling a command from a path. */
   slashCommands?: SlashCommandCatalog;
 }): MessagesTimelineRow[] {
-  const timelineEntries = timelineRowEntries(input.timelineEntries);
+  const timelineEntries = timelineRowEntries(input);
   const isPendingApproval = (entry: WorkLogEntry) => {
     const item = entry.projectedItem?.item;
     return (
@@ -1677,9 +1834,13 @@ export function deriveMessagesTimelineRows(input: {
     }
   }
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
+  const activeTurnStartedAt = minIsoTimestamp(
+    input.activeTurnStartedAt ?? null,
+    runFirstAttemptStartedAt(timelineEntries, unsettledRunId),
+  );
   const revertTurnCountByUserMessageId = input.supportsConversationRollback
     ? deriveRevertTurnCountByUserMessageId({
-        timelineEntries: timelineEntries,
+        timelineEntries: input.timelineEntries,
         checkpoints: input.turnDiffSummaries,
         threadStartCheckpointReady: input.threadStartCheckpointReady === true,
         unsettledRunId,
@@ -1716,17 +1877,22 @@ export function deriveMessagesTimelineRows(input: {
     isWorking: input.isWorking,
   });
   const runlessWorkActive = input.isWorking && input.runlessWorkActive === true;
-  const turnFolds = deriveTurnFolds({
-    timelineEntries: timelineEntries,
-    terminalAssistantMessageIds,
-    latestRun: input.latestRun ?? null,
-    unfoldedRunIds: activeVisualResponseRunIds,
-    failedRunIds,
-    runlessWorkActive,
-    turnDiffSummaries: input.turnDiffSummaries,
-    liveSubagentEntryIds,
-    completeSupersededReplyEntryIds: completeSupersededReplyIds,
-  });
+  const turnFolds =
+    input.toolCallVisibility === "zen"
+      ? new Map<string, TurnFold>()
+      : deriveTurnFolds({
+          timelineEntries: timelineEntries,
+          terminalAssistantMessageIds,
+          latestRun: input.latestRun ?? null,
+          unfoldedRunIds: activeVisualResponseRunIds,
+          failedRunIds,
+          latestRunAwaitsBackgroundWork: input.awaitingBackgroundWork === true,
+          runlessWorkActive,
+          turnDiffSummaries: input.turnDiffSummaries,
+          liveSubagentEntryIds,
+          completeSupersededReplyEntryIds: completeSupersededReplyIds,
+          durationRowForBareReply: input.toolCallVisibility !== "hideAll",
+        });
   const timelineEntryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
   const turnFoldExpanded = (fold: TurnFold) =>
     (input.expandedRunIds?.has(fold.runId) ?? false) !== turnFoldStartsOpen(fold.ending);
@@ -1785,6 +1951,7 @@ export function deriveMessagesTimelineRows(input: {
         entry.entry.sourceActivityKind === "runtime.error" ||
         entry.entry.itemType === "system_notice" ||
         entry.entry.itemType === "notification" ||
+        entry.entry.itemType === "todo_list" ||
         entry.entry.questionAnswer !== undefined ||
         isPendingApproval(entry.entry) ||
         !runIdIsActiveResponse(entry.entry.runId) ||
@@ -1923,16 +2090,21 @@ export function deriveMessagesTimelineRows(input: {
   const activeCompactionRunId = compactsOnReturn
     ? runningCompactionRunId
     : (resumeCompactionEntry?.entry.runId ?? null);
+  const endedRunId = input.latestRun?.turnEnded === true ? input.latestRun.runId : null;
+  const zenAnswerLanded =
+    input.toolCallVisibility === "zen" &&
+    endedRunId !== null &&
+    timelineEntries.findLastIndex((entry) => timelineEntryRunId(entry) === endedRunId) >=
+      activeTurnHeaderIndex;
   const appendWorkingRow = () => {
-    if (compactionOnlyRunFinished) return;
+    if (compactionOnlyRunFinished || zenAnswerLanded) return;
     if (runningCompactionRunId !== null && activeCompactionRunId === null) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
       createdAt:
         (compactsOnReturn ? undefined : resumeCompactionEntry?.entry.createdAt) ??
-        input.activeTurnStartedAt ??
-        null,
+        activeTurnStartedAt,
       ...(activeCompactionRunId !== null ? { compacting: true as const } : {}),
     });
   };
@@ -2123,6 +2295,7 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.entry.sourceActivityKind === "runtime.error" ||
         timelineEntry.entry.itemType === "system_notice" ||
         timelineEntry.entry.itemType === "notification" ||
+        timelineEntry.entry.itemType === "todo_list" ||
         timelineEntry.entry.questionAnswer !== undefined
       ) {
         nextRows.push({
@@ -2148,6 +2321,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.entry.sourceActivityKind === "runtime.error" ||
           nextEntry.entry.itemType === "system_notice" ||
           nextEntry.entry.itemType === "notification" ||
+          nextEntry.entry.itemType === "todo_list" ||
           nextEntry.entry.questionAnswer !== undefined ||
           isPendingApproval(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||
@@ -2442,7 +2616,7 @@ export function deriveMessagesTimelineRows(input: {
       nextRows.push({
         kind: "thinking",
         id: LIVE_ACTIVITY_ROW_ID,
-        createdAt: input.activeTurnStartedAt ?? null,
+        createdAt: activeTurnStartedAt,
         groupId,
         expanded,
       });
@@ -2459,19 +2633,39 @@ export function deriveMessagesTimelineRows(input: {
       nextRows.push({
         kind: "thinking",
         id: LIVE_ACTIVITY_ROW_ID,
-        createdAt: input.activeTurnStartedAt ?? null,
+        createdAt: activeTurnStartedAt,
       });
     }
   }
 
+  const supersededRowIds = new Set<string>();
+  for (const fold of supersededFoldsByAnchorEntryId.values()) {
+    if (!input.expandedAttemptIds?.has(fold.attemptId)) continue;
+    for (const entryId of fold.hiddenEntryIds) {
+      supersededRowIds.add(entryId);
+      supersededRowIds.add(`work-toggle:${entryId}`);
+      supersededRowIds.add(`work-live:${entryId}`);
+      supersededRowIds.add(`${workGroupId(entryId)}:details`);
+      const entry = timelineEntryById.get(entryId);
+      if (entry?.kind === "message") {
+        supersededRowIds.add(`assistant-meta:${entry.message.id}`);
+      }
+    }
+  }
   const result = attachTrailingToolGroupsToAssistant(
     attachCreatedThreadSummaries(nextRows, timelineEntries, collapsedFoldMemberIds),
   );
+  return groupTimelinePrompts(result).map((sourceRow, index) => {
+    const row = supersededRowIds.has(sourceRow.id) ? { ...sourceRow, superseded: true } : sourceRow;
+    return timelineRowIsWorkLog(row) && timelineRowIsWorkLog(result[index + 1])
+      ? { ...row, continuesWorkLog: true }
+      : row;
+  });
+}
+
+function groupTimelinePrompts(result: ReadonlyArray<MessagesTimelineRow>): MessagesTimelineRow[] {
   return result.map((row, index) => {
     const next = result[index + 1];
-    if (timelineRowIsWorkLog(row) && timelineRowIsWorkLog(next)) {
-      return { ...row, continuesWorkLog: true };
-    }
     if (!timelineRowIsUserPrompt(row)) return row;
     const promptRow = timelineRowIsUserPrompt(next) ? { ...row, continuesPromptStack: true } : row;
     if (!timelineRowIsOwnUserMessage(promptRow)) return promptRow;
@@ -2728,12 +2922,14 @@ export function applyWorkingWindow(
     | "isWorking"
     | "runlessWorkActive"
     | "pendingApprovalRequestIds"
+    | "toolCallVisibility"
+    | "revealedMessageId"
   >,
   historyOpenKey: string | null = null,
 ): MessagesTimelineRow[] {
   const workingIndex = input.isWorking ? rows.findIndex((row) => row.kind === "working") : -1;
   if (workingIndex < 0) return rows as MessagesTimelineRow[];
-  const entries = timelineRowEntries(input.timelineEntries);
+  const entries = timelineRowEntries(input);
   const workingRow = rows[workingIndex] as Extract<MessagesTimelineRow, { kind: "working" }>;
   const compactionRowIds = new Set(
     rows.filter((row) => row.kind === "context-compaction").map((row) => row.id),
@@ -2766,17 +2962,24 @@ export function applyWorkingWindow(
   );
   let interruptRequested = false;
   let interruptSettled = false;
+  let itemsBeforeLatestPrompt = 0;
+  const supersededWork: WorkLogEntry[] = [];
   for (let index = boundaryIndex + 1; index < entries.length; index += 1) {
     const entry = entries[index]!;
     if (entry.kind === "message" && entry.message.role === "user") {
       key = entry.id;
+      itemsBeforeLatestPrompt = items.length;
       continue;
     }
-    if (entry.attempt?.status === "superseded" || replyIds.has(entry.id)) continue;
     const runId =
       entry.kind === "event" ? entry.projectedItem.item.runId : timelineEntryRunId(entry);
     // A provider-native subagent thread's live work has no app run.
     if (runId === null ? input.runlessWorkActive !== true : !runIds.has(runId)) continue;
+    if (entry.attempt?.status === "superseded") {
+      if (entry.kind === "work") supersededWork.push(entry.entry);
+      continue;
+    }
+    if (replyIds.has(entry.id)) continue;
     if (entry.kind === "work") {
       const item = entry.entry.projectedItem?.item;
       if (
@@ -2839,7 +3042,10 @@ export function applyWorkingWindow(
     }
   }
 
-  const answer = items.at(-1)?.kind === "text" ? items.pop() : undefined;
+  const answer =
+    items.at(-1)?.kind === "text" && items.length > itemsBeforeLatestPrompt
+      ? items.pop()
+      : undefined;
   const ids = collectWindowIds(items);
   const windowStartIndex = Math.max(
     workingIndex,
@@ -2847,27 +3053,36 @@ export function applyWorkingWindow(
   );
   const keptRows = (start: number, end?: number) =>
     rows.slice(start, end).filter((row) => !rowIsReplacedByWindow(row, ids));
-  const before = keptRows(workingIndex + 1, windowStartIndex + 1);
+  const before: MessagesTimelineRow[] = [];
+  const supersededAttempts: MessagesTimelineRow[] = [];
+  let inSupersededAttempt = false;
+  for (const row of keptRows(workingIndex + 1, windowStartIndex + 1)) {
+    if (row.kind === "attempt-fold") inSupersededAttempt = runIds.has(row.runId);
+    else if (row.kind === "message" && row.message.role === "user") inSupersededAttempt = false;
+    (inSupersededAttempt ? supersededAttempts : before).push(row);
+  }
   const after = keptRows(windowStartIndex + 1);
   const window: WorkingWindow = {
     key,
     items,
     compactCommand: compactCommandRunIds.has(unsettledRunId),
-    diff: sumFileChangeLineStat(
-      items.flatMap((item) => (item.kind === "work" ? [item.entry] : [])),
-    ),
+    diff: sumFileChangeLineStat([
+      ...supersededWork,
+      ...items.flatMap((item) => (item.kind === "work" ? [item.entry] : [])),
+    ]),
     failedTests: deriveFailedTests(items),
     retryAttempt: deriveRetryAttempt(items),
     stopping: interruptRequested && !interruptSettled,
-    answering: answer?.kind === "text" && answer.message.streaming,
+    answering: answer !== undefined,
     historyOpen: historyOpenKey === key,
   };
-  return [
+  return groupTimelinePrompts([
     ...rows.slice(0, workingIndex),
     ...before,
+    ...supersededAttempts,
     { ...workingRow, window },
     ...after.map((row) => (row.continuesWorkLog ? { ...row, continuesWorkLog: false } : row)),
-  ];
+  ]);
 }
 
 /** `expanded` with every "Handled N updates" group that holds the run open. */
@@ -3058,7 +3273,13 @@ export type TimelineTurnFoldKey = Pick<TurnFold, "runId" | "ending">;
 export function timelineTurnFoldRunIdsByEntryId(
   input: Pick<
     MessagesTimelineRowsInput,
-    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+    | "timelineEntries"
+    | "latestRun"
+    | "isWorking"
+    | "runlessWorkActive"
+    | "runningRunId"
+    | "toolCallVisibility"
+    | "revealedMessageId"
   >,
 ): ReadonlyMap<string, TimelineTurnFoldKey> {
   const byEntryId = new Map<string, TimelineTurnFoldKey>();
@@ -3244,6 +3465,7 @@ function withPreviousWindowItems(
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {
   if (a.kind !== b.kind || a.id !== b.id) return false;
   if (a.continuesPromptStack !== b.continuesPromptStack) return false;
+  if (a.superseded !== b.superseded) return false;
 
   switch (a.kind) {
     case "background-activity": {

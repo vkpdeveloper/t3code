@@ -4,7 +4,6 @@ import { useEffectEvent, useLayoutEffect, useRef } from "react";
 
 import { useClientSettings } from "../hooks/useSettings";
 import { MotionAnimation, playMotion, toDevicePixel, type MotionRun } from "./animation";
-import { takePaneDrop } from "./paneDrop";
 import { configureMotion } from "./registry";
 import { stripCameraPosition } from "./stripCamera";
 
@@ -352,52 +351,6 @@ function resized(side: Side, before: Box, now: Box): boolean {
     : Math.abs(before.height - now.height) > 1;
 }
 
-interface PaneCopy {
-  pane: HTMLElement;
-  scrolls: [Element, number, number][];
-}
-
-const closingCopies = new Map<string, PaneCopy>();
-
-function copyPainted(from: Element | ShadowRoot, to: Element | ShadowRoot, copy: PaneCopy): void {
-  const twins = to.querySelectorAll("*");
-  from.querySelectorAll("*").forEach((element, index) => {
-    const twin = twins[index];
-    if (!twin) return;
-    if (element.scrollTop !== 0 || element.scrollLeft !== 0) {
-      copy.scrolls.push([twin, element.scrollTop, element.scrollLeft]);
-    }
-    if (
-      element instanceof HTMLCanvasElement &&
-      twin instanceof HTMLCanvasElement &&
-      element.width > 0 &&
-      element.height > 0
-    ) {
-      twin.getContext("2d")?.drawImage(element, 0, 0);
-    }
-    if (element.shadowRoot && twin.shadowRoot) {
-      twin.shadowRoot.replaceChildren(
-        ...[...element.shadowRoot.childNodes].map((node) => node.cloneNode(true)),
-      );
-      copyPainted(element.shadowRoot, twin.shadowRoot, copy);
-    }
-  });
-}
-
-export function keepClosingPane(tabId: string, pane: HTMLElement): void {
-  if (MotionAnimation.start("window-movement", 0, 1).durationMs <= 0) return;
-  const copy: PaneCopy = { pane: pane.cloneNode(true) as HTMLElement, scrolls: [] };
-  copyPainted(pane, copy.pane, copy);
-  for (const name of copy.pane.getAttributeNames()) {
-    if (name !== "class") copy.pane.removeAttribute(name);
-  }
-  copy.pane.style.inset = "0";
-  for (const media of copy.pane.querySelectorAll("iframe, video, audio, object, embed")) {
-    media.remove();
-  }
-  closingCopies.set(tabId, copy);
-}
-
 /** The stage must be a stacking context. Workspace or viewport changes move panes 1:1; unframed lone
  * panes never animate independently. */
 export function usePaneMotion(
@@ -438,10 +391,7 @@ export function usePaneMotion(
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Measure committed pane boxes and start DOM animations before paint.
   useLayoutEffect(() => {
-    const drop = takePaneDrop();
     const stage = stageRef.current;
-    const copies = new Map(closingCopies);
-    closingCopies.clear();
     if (!stage || key === null) {
       previous.current = null;
       return;
@@ -530,14 +480,6 @@ export function usePaneMotion(
         offset = tuckedUnder(side, neighbour.box, gap);
         ghost.style.zIndex = "-2";
       }
-      const copy = copies.get(tabId);
-      if (copy) {
-        ghost.append(copy.pane);
-        for (const [element, top, left] of copy.scrolls) {
-          element.scrollTop = top;
-          element.scrollLeft = left;
-        }
-      }
       const motion = MotionAnimation.start("window-movement", 0, 1);
       const keyframe = (progress: number) => translate(offset.dx * progress, offset.dy * progress);
       if (edge) playMotion(edge.element, motion, keyframe, undefined, undefined, true);
@@ -551,27 +493,16 @@ export function usePaneMotion(
       );
     }
     if (!before || !animate) return;
-    const paneWas = new Map<string, PaneBox>();
-    for (const box of previousBoxes.values()) paneWas.set(box.paneId, box);
-    const wasOf = (tabId: string, box: PaneBox) =>
-      drop ? paneWas.get(box.paneId) : (previousBoxes.get(tabId) ?? paneWas.get(box.paneId));
-    const kept = (from: number, fromSize: number, to: number, toSize: number) =>
-      drop && Math.abs(from + fromSize - to - toSize) < 1;
-    const moved = (was: Box, box: Box) => ({
-      dx: kept(was.x, was.width, box.x, box.width) ? 0 : was.x - box.x,
-      dy: kept(was.y, was.height, box.y, box.height) ? 0 : was.y - box.y,
-    });
     // Where each pane shows now against its new place, before any slide
     // below retargets it: its move plus what a running slide still owes.
     const shows = new Map<string, { dx: number; dy: number }>();
     for (const [tabId, box] of boxes) {
-      const was = wasOf(tabId, box);
+      const was = previousBoxes.get(tabId);
       const running = slides.get(box.element);
       const owed = running ? running.run.value() : 0;
-      const move = was ? moved(was, box) : { dx: 0, dy: 0 };
       shows.set(tabId, {
-        dx: move.dx + (running ? running.dx * owed : 0),
-        dy: move.dy + (running ? running.dy * owed : 0),
+        dx: (was ? was.x - box.x : 0) + (running ? running.dx * owed : 0),
+        dy: (was ? was.y - box.y : 0) + (running ? running.dy * owed : 0),
       });
     }
     /** Hold the neighbor surface behind its moving edge when panes separate, so resizing or
@@ -618,25 +549,11 @@ export function usePaneMotion(
         if (travel - own <= 1 || own < 0) return undefined;
         return makeEdge(stage, box, side, beside.gap, radius ?? 0, travel, false);
       };
-    const panesBefore = new Set(paneWas.keys());
-    const raised: HTMLElement[] = [];
-    let moving = 1;
-    const settle = () => {
-      moving -= 1;
-      if (moving > 0) return;
-      for (const element of raised) {
-        if (element.style.zIndex === "1") element.style.zIndex = "";
-      }
-    };
+    const panesBefore = new Set([...previousBoxes.values()].map((box) => box.paneId));
     for (const [tabId, box] of boxes) {
-      const was = wasOf(tabId, box);
-      if (!was && drop) {
-        box.element.style.zIndex = "1";
-        raised.push(box.element);
-        continue;
-      }
+      const was = previousBoxes.get(tabId);
       if (!was) {
-        if (previousBoxes.size === 0) continue;
+        if (panesBefore.has(box.paneId) || previousBoxes.size === 0) continue;
         const donor = findDonor(
           box,
           [...boxes]
@@ -673,16 +590,11 @@ export function usePaneMotion(
         });
         continue;
       }
-      if (!panesBefore.has(box.paneId)) {
-        box.element.style.zIndex = "1";
-        raised.push(box.element);
-      }
-      const { dx, dy } = moved(was, box);
+      const dx = was.x - box.x;
+      const dy = was.y - box.y;
       if ((Math.abs(dx) >= 1 || Math.abs(dy) >= 1) && !unseen(box, dx, view)) {
-        moving += 1;
-        slide(box.element, dx, dy, settle, openingEdge(box));
+        slide(box.element, dx, dy, undefined, openingEdge(box));
       }
     }
-    settle();
   }, [framed, key, placement, stageRef]);
 }

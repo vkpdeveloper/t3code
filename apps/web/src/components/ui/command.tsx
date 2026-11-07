@@ -3,6 +3,7 @@ import { SearchIcon } from "lucide-react";
 import { useRef } from "react";
 import type * as React from "react";
 import { cn } from "~/lib/utils";
+import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
 import {
   Autocomplete,
   AutocompleteCollection,
@@ -41,15 +42,23 @@ function CommandDialogViewport({
   size = "default",
   ...props
 }: CommandDialogPrimitive.Viewport.Props & { size?: "default" | "content" }) {
+  // Short desktop windows would put the search field under the native window controls.
+  const nativeTitlebarHeight = useNativeTitlebarHeight();
+  const titlebarStyle = {
+    "--command-titlebar-height": `${nativeTitlebarHeight}px`,
+  } as React.CSSProperties;
   return (
     <CommandDialogPrimitive.Viewport
       className={cn(
         // Keep palette actions above the toast stack (z-70).
-        "pointer-events-none fixed inset-0 z-[80] flex flex-col items-center px-4 py-[max(--spacing(4),4vh)]",
-        size === "content" ? "sm:py-22" : "sm:py-24",
+        "pointer-events-none fixed inset-0 z-[80] flex flex-col items-center px-4 pt-[max(--spacing(4),4vh,calc(var(--command-titlebar-height)+--spacing(2)))] pb-[max(--spacing(4),4vh)]",
+        size === "content"
+          ? "sm:pt-[max(--spacing(22),calc(var(--command-titlebar-height)+--spacing(2)))] sm:pb-22"
+          : "sm:pt-[max(--spacing(24),calc(var(--command-titlebar-height)+--spacing(2)))] sm:pb-24",
         className,
       )}
       data-slot="command-dialog-viewport"
+      style={titlebarStyle}
       {...props}
     />
   );
@@ -149,21 +158,10 @@ function CommandInput({
   );
 }
 
-function CommandList({
-  className,
-  inset = "default",
-  ...props
-}: React.ComponentProps<typeof AutocompleteList> & { inset?: "default" | "compact" | "composer" }) {
+function CommandList({ className, ...props }: React.ComponentProps<typeof AutocompleteList>) {
   return (
     <AutocompleteList
-      className={cn(
-        inset === "composer"
-          ? "not-empty:scroll-py-1.5 not-empty:p-1.5"
-          : inset === "compact"
-            ? "not-empty:scroll-py-1 not-empty:p-1"
-            : "not-empty:scroll-py-1.5 not-empty:p-1.5",
-        className,
-      )}
+      className={cn("not-empty:scroll-py-2 not-empty:p-2", className)}
       data-slot="command-list"
       {...props}
     />
@@ -188,11 +186,7 @@ function CommandListHeading({
   ...props
 }: React.ComponentProps<typeof AutocompleteListHeading>) {
   return (
-    <AutocompleteListHeading
-      className={cn("px-2.5 pt-2 pb-1 text-caption", className)}
-      data-slot="command-group-label"
-      {...props}
-    />
+    <AutocompleteListHeading className={className} data-slot="command-group-label" {...props} />
   );
 }
 
@@ -208,31 +202,18 @@ function CommandPanel({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-// The composer's floating menus stack their groups flush; the header carries the spacing.
-function CommandGroup({
-  className,
-  spacing = "default",
-  ...props
-}: React.ComponentProps<typeof AutocompleteGroup> & { spacing?: "default" | "composer" }) {
-  return (
-    <AutocompleteGroup
-      className={cn(
-        spacing === "composer" && "flex flex-col gap-px [[role=group]+&]:mt-px",
-        className,
-      )}
-      data-slot="command-group"
-      {...props}
-    />
-  );
+function CommandGroup({ className, ...props }: React.ComponentProps<typeof AutocompleteGroup>) {
+  return <AutocompleteGroup className={className} data-slot="command-group" {...props} />;
 }
 
 function CommandGroupLabel({
   className,
+  tone = "default",
   ...props
-}: React.ComponentProps<typeof AutocompleteGroupLabel>) {
+}: React.ComponentProps<typeof AutocompleteGroupLabel> & { tone?: "default" | "muted" }) {
   return (
     <AutocompleteGroupLabel
-      className={cn("px-2.5 pt-2 pb-1 text-caption", className)}
+      className={cn(tone === "muted" && "text-muted-foreground", className)}
       data-slot="command-group-label"
       {...props}
     />
@@ -247,18 +228,15 @@ function CommandCollection({ ...props }: React.ComponentProps<typeof Autocomplet
 function CommandItem({
   className,
   active,
-  spacing = "default",
   ...props
 }: Omit<React.ComponentProps<typeof AutocompleteItem>, "automaticHighlight"> & {
   active?: boolean;
-  spacing?: "default" | "composer";
 }) {
   return (
     <AutocompleteItem
       automaticHighlight={false}
       className={cn(
-        "min-h-8.5 px-2.5 py-1.5 text-control sm:min-h-8.5",
-        spacing === "composer" && "min-h-8 gap-2.5 rounded-[8px] px-2.5 py-0 sm:min-h-8",
+        "py-1.5",
         active === undefined
           ? "hover:surface-selected data-highlighted:surface-selected data-highlighted:text-strong-foreground data-selected:surface-selected data-selected:text-strong-foreground"
           : "cursor-pointer",

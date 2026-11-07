@@ -42,7 +42,11 @@ import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useRenderedAppearance } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
-import { pullRequestFindingKey, type PullRequestFinding } from "./pullRequestDetail.logic";
+import {
+  pullRequestFindingKey,
+  type PullRequestChatSubject,
+  type PullRequestFinding,
+} from "./pullRequestDetail.logic";
 import {
   canEditPullRequestComment,
   canResolvePullRequestThread,
@@ -108,6 +112,7 @@ import {
   ReviewThreadCard,
   toViewerSide,
 } from "./PullRequestReviewAnnotation";
+import { pullRequestCompletionScope } from "./PullRequestMarkdownTextarea";
 import {
   getFileViewedRange,
   isFileDiffCollapsed,
@@ -115,7 +120,6 @@ import {
   toggleFileDiffFoldForViewed,
   type DiffFoldOverride,
 } from "./pullRequestDiff.logic";
-import { PullRequestMetaLine } from "./pullRequestPresentation";
 import { PullRequestDiffUnavailableState } from "./PullRequestDiffUnavailableState";
 import { usePullRequestFilesViewed } from "./usePullRequestFilesViewed";
 import {
@@ -359,6 +363,7 @@ function PullRequestCodeTab({
   pendingFinding,
   fixFindingLabel = "Fix in a thread",
   onFixFinding,
+  onAddToChat,
   onAddToAgentSelection,
   onRefresh,
   refreshToken = 0,
@@ -375,6 +380,8 @@ function PullRequestCodeTab({
   pendingFinding?: string | null;
   fixFindingLabel?: string;
   onFixFinding?: (finding: PullRequestFinding) => void;
+  /** Absent where there is no composer beside the panel to add a conversation to. */
+  onAddToChat?: (subject: PullRequestChatSubject) => void;
   onAddToAgentSelection?: (input: PullRequestAgentSelectionInput) => void;
   onRefresh: () => void;
   refreshToken?: number;
@@ -573,6 +580,7 @@ function PullRequestCodeTab({
     commit,
     cacheKey: `pull-request:${referenceKey}:${detail.updatedAt}:${commit ?? "all"}`,
   });
+  const completionScope = pullRequestCompletionScope(detail, environmentId, reference);
   const hostReview = detail.capabilities.review;
   const review = {
     inlineComment: hostReview.inlineComment && detail.viewerPermissions.comment,
@@ -988,10 +996,14 @@ function PullRequestCodeTab({
       canReact={detail.capabilities.reactions === true}
       environmentId={environmentId}
       reference={reference}
+      completionScope={completionScope}
       pending={threadPending}
       fixPending={pendingFinding === pullRequestFindingKey({ kind: "thread", thread })}
       fixLabel={fixFindingLabel}
       {...(onFixFinding ? { onFix: () => onFixFinding({ kind: "thread", thread }) } : {})}
+      {...(onAddToChat
+        ? { onAddToChat: (loaded) => onAddToChat({ kind: "thread", thread: loaded }) }
+        : {})}
       onLoadMore={async (cursor): Promise<PullRequestThreadCommentsResult | null> => {
         const result = await loadThreadComments({
           environmentId,
@@ -1055,10 +1067,12 @@ function PullRequestCodeTab({
         <div className="px-2.5 pt-1.5 pb-2">
           <DiffCommentAnnotation
             environmentId={environmentId}
+            projectId={reference.projectId}
             ownerKey={JSON.stringify([environmentId, reviewKey, draft])}
             kind="draft"
             rangeLabel={`${draft.path}:${getReviewPositionAnchor(draft.position).line}`}
             text=""
+            completionScope={canCommentOnLines ? completionScope : null}
             submitLabel={canCommentOnLines ? "Add to review" : "Add to agent"}
             {...(canCommentOnLines && onAddToAgentSelection
               ? {
@@ -1160,20 +1174,31 @@ function PullRequestCodeTab({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-        <PullRequestMetaLine>
-          <span className="shrink-0 tabular-nums">
-            {files.length} {files.length === 1 ? "file" : "files"}
-            {nextCursor === null ? "" : "+"}
-          </span>
+        <span className="flex min-w-0 items-center gap-x-2.5 whitespace-nowrap">
+          {filesViewed.enabled && files.length > 0 ? null : (
+            <span className="shrink-0 tabular-nums">
+              {files.length} {files.length === 1 ? "file" : "files"}
+              {nextCursor === null ? "" : "+"}
+            </span>
+          )}
           {hiddenTestFileCount > 0 ? (
-            <Button type="button" size="xs" variant="link" onClick={() => setHideTestFiles(false)}>
-              {hiddenTestFileCount} test {hiddenTestFileCount === 1 ? "file" : "files"} hidden
+            <Button
+              type="button"
+              size="xs"
+              variant="link"
+              className="min-w-0"
+              onClick={() => setHideTestFiles(false)}
+            >
+              <span className="truncate">
+                {hiddenTestFileCount} test {hiddenTestFileCount === 1 ? "file" : "files"} hidden
+              </span>
             </Button>
           ) : null}
           {filesViewed.enabled && files.length > 0 ? (
             <span className="flex min-w-0 items-center gap-1 tabular-nums">
               <span className="shrink-0">
                 {filePaths.filter(isFileViewed).length} / {files.length}
+                {nextCursor === null ? "" : "+"}
               </span>
               <span className="truncate">
                 {viewedFilesStore === "environment" ? `viewed in ${APP_BASE_NAME}` : "viewed"}
@@ -1249,7 +1274,7 @@ function PullRequestCodeTab({
               </TooltipPopup>
             </Tooltip>
           ) : null}
-        </PullRequestMetaLine>
+        </span>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <DiffViewControls
@@ -1344,7 +1369,7 @@ function PullRequestCodeTab({
         <div className="shrink-0 border-b border-border">
           <Collapsible open={orphansOpen} onOpenChange={setOrphansOpen}>
             <h2>
-              <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-meta text-muted-foreground">
+              <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-4 py-1.5 text-left text-meta text-muted-foreground">
                 <span>
                   {nextCursor === null
                     ? "Conversations not on the current diff"
@@ -1422,7 +1447,7 @@ function PullRequestCodeTab({
           {/* The viewer must own its scroll element to position virtual rows within it. */}
           <FileViewedToggleContext value={fileViewedToggle}>
             <StyledDiffCodeView<ReviewAnnotationGroup>
-              className="@container h-full overflow-auto [scrollbar-gutter:stable]"
+              className="@container h-full overflow-auto [--surface-top-inset:0px] [scrollbar-gutter:stable]"
               {...(scrollerRef ? { containerRef: scrollerRef } : {})}
               viewerRef={codeViewReveal.attach}
               items={items}

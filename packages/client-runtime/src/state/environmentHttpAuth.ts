@@ -154,15 +154,12 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
   /**
    * The URL to sign, from the group's contract URL builder. It encodes path
    * params exactly like the request client, so the DPoP proof matches the
-   * URL actually sent. The base URL is the one this attempt targets.
+   * URL actually sent.
    */
-  readonly url: (
-    urls: ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>[Group],
-    httpBaseUrl: string,
-  ) => string;
+  readonly url: (urls: ReturnType<typeof makeEnvironmentHttpApiUrlBuilder>[Group]) => string;
   readonly timeoutMs: number;
+  /** Extra fetch options, such as refusing redirects for credentialed audio uploads. */
   readonly requestInit?: RequestInit;
-  readonly validateUrl?: (url: string) => Effect.Effect<void, RemoteEnvironmentRequestError>;
   readonly group: Group;
   readonly request: (input: {
     readonly client: Effect.Success<ReturnType<typeof makeEnvironmentHttpApiGroupClient<Group>>>;
@@ -177,7 +174,7 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
 > {
   let httpBaseUrl = input.prepared.httpBaseUrl;
   const requestUrlFor = (baseUrl: string) =>
-    input.url(makeEnvironmentHttpApiUrlBuilder(baseUrl)[input.group], baseUrl);
+    input.url(makeEnvironmentHttpApiUrlBuilder(baseUrl)[input.group]);
   return yield* Effect.gen(function* () {
     let rejectedAccessToken: string | undefined;
     for (;;) {
@@ -211,7 +208,6 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
         authorization = current.httpAuthorization;
       }
 
-      if (input.validateUrl) yield* input.validateUrl(httpBaseUrl);
       const requestUrl = requestUrlFor(httpBaseUrl);
       const client = yield* makeEnvironmentHttpApiGroupClient(httpBaseUrl, input.group);
       const headers = yield* buildEnvironmentAuthHeaders(

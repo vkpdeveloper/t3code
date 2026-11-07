@@ -20,6 +20,7 @@ import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { GuestShareDialogHost } from "../components/chat/GuestShareControls";
 import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachineDialog";
 import { WelcomeWizardCoordinator } from "../components/onboarding/WelcomeWizardCoordinator";
+import { ClientSettingsRecoveryGate } from "../components/ClientSettingsRecoveryGate";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { DevReplayHost } from "../components/DevReplayHost";
 import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
@@ -31,7 +32,7 @@ import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkC
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
+import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
@@ -174,7 +175,7 @@ function RootRouteBranch() {
   );
 
   return (
-    <>
+    <ClientSettingsRecoveryGate>
       {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
       {primaryEnvironmentAuthenticated || localEnvironmentDisabled ? (
         <DesktopWebLinkCoordinator />
@@ -189,15 +190,15 @@ function RootRouteBranch() {
       <CustomSnoozeDialogHost />
       <GuestShareDialogHost />
       <ProjectCloneToastCoordinator />
-      <ProviderUpdateLaunchNotification />
       <AddProjectToMachineDialogHost />
       {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
       {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
       {appShell}
       <WelcomeWizardCoordinator />
+      <ChatGptWelcomeCoordinator />
       {/* Keep the theme editor above the router so drafts survive navigation. */}
       <ThemeEditorHost />
-    </>
+    </ClientSettingsRecoveryGate>
   );
 }
 
@@ -209,7 +210,7 @@ function RootRouteErrorView({ error }: ErrorComponentProps) {
   const report = errorReport(error, pathname);
 
   return (
-    <StandalonePage tone="error">
+    <StandalonePage>
       <StandalonePageHeader title="Something went wrong." description={message} />
 
       <div className="mt-5 flex flex-wrap gap-2">

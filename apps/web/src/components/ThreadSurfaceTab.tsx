@@ -1,6 +1,5 @@
 import type { SideChatParentPanel } from "~/lib/sideChatPane";
 import { useSideChat } from "./chat/useSideChat";
-import * as Schema from "effect/Schema";
 import { threadEnvironment } from "../state/threads";
 /** Resolve surface context independently of ChatView so tabs remain usable after the chat closes,
  * and report when their thread is gone. */
@@ -27,7 +26,7 @@ import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { FolderX, Unlink2Icon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
-import { BrowserSettingsReadError } from "../browser/openFileInPreview";
+import { isBrowserSettingsReadError } from "../browser/openFileInPreview";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { type ComposerImageAttachment, useComposerDraftStore } from "../composerDraftStore";
 import { useDiffPanelStore } from "../diffPanelStore";
@@ -35,9 +34,9 @@ import { isElectron } from "../env";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useLayoutPane } from "../layout/layoutPaneContext";
+import { copyLayoutFilePath } from "../layout/PaneTabs";
 import type { LauncherSurfaceKind } from "./SurfaceLauncher";
 import { THREAD_TERMINAL_SURFACE_ID } from "../layout/layoutModel";
-import { terminalTabTitle } from "../layout/surfaceTabLabels";
 import { runInNewLayoutTab } from "../layout/layoutStore";
 import {
   useThreadChatBridge,
@@ -45,11 +44,8 @@ import {
   waitForThreadChatSendReady,
 } from "../layout/threadSurfaceBridge";
 import { showThreadChatBeside } from "../layout/openRules";
-import { requestLayoutSurfacePlacement } from "../layout/surfaceSync";
 import { shortcutLabelForCommand } from "../keybindings";
 import { readLocalApi } from "../localApi";
-import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
-import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { randomUUID } from "../lib/utils";
 import {
   isAtomCommandInterrupted,
@@ -119,8 +115,6 @@ import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { confirmTerminalClose } from "../lib/terminalCloseConfirm";
-
-const isBrowserSettingsReadError = Schema.is(BrowserSettingsReadError);
 
 const SideChatPane = lazy(() => import("./chat/SideChatPane"));
 const PreviewPanel = lazy(() =>
@@ -225,6 +219,11 @@ export function useThreadSurfaceOpeners(threadRef: ScopedThreadRef) {
       context.serverConfig?.environment.capabilities.sideChats === true
         ? threadRef
         : null,
+    // Opened outside the composer, so the parent's saved settings are the closest match.
+    readSettings: () => ({
+      runtimeMode: context.serverThread?.runtimeMode ?? "full-access",
+      modelSelection: context.serverThread?.modelSelection,
+    }),
     onError: (description) =>
       toastManager.add({ type: "error", title: "Could not open side chat", description }),
   });
@@ -517,15 +516,9 @@ function ThreadSurfacePane({
   const previewState = useThreadPreviewState(threadRef);
   const terminalLabels = useTerminalLabels(threadRef);
   const threadTitle = useThreadTitle(threadRef);
-  const { visible, paneId } = useLayoutPane();
+  const { visible } = useLayoutPane();
   const handleNewThread = useNewThreadHandler();
   const { projectRef } = context;
-  const add = (kind: LauncherSurfaceKind, browserProfileId?: string) => {
-    if (paneId !== null && openers.available[kind]) {
-      requestLayoutSurfacePlacement(threadRef, { kind: "pane", paneId });
-    }
-    openers.open(kind, browserProfileId);
-  };
   const getShortcutContext = () => ({
     terminalFocus: false,
     terminalOpen: false,
@@ -566,28 +559,21 @@ function ThreadSurfacePane({
       onCloseOtherSurfaces={noop}
       onCloseSurfacesToRight={noop}
       onCloseAllSurfaces={noop}
-      onCopyFilePath={(path) =>
-        void navigator.clipboard?.writeText(
-          formatFilePathForClipboard(
-            path,
-            resolvePathLinkTarget(path, context.gitCwd ?? context.workspaceRoot ?? ""),
-          ),
-        )
-      }
-      onAddBrowser={() => add("browser")}
-      onAddBrowserInProfile={(profileId) => add("browser", profileId)}
+      onCopyFilePath={(path) => copyLayoutFilePath(threadRef, path)}
+      onAddBrowser={() => openers.open("browser")}
+      onAddBrowserInProfile={(profileId) => openers.open("browser", profileId)}
       onNewThread={
         projectRef === null
           ? undefined
           : () => void runInNewLayoutTab(() => handleNewThread(projectRef))
       }
-      onAddTerminal={() => add("terminal")}
-      onAddDiff={() => add("diff")}
-      onAddFiles={() => add("files")}
-      onAddPullRequest={() => add("pull-request")}
-      onAddPullRequests={() => add("pull-requests")}
-      onAddDevice={() => add("device")}
-      onAddSideChat={() => add("side-chat")}
+      onAddTerminal={() => openers.open("terminal")}
+      onAddDiff={() => openers.open("diff")}
+      onAddFiles={() => openers.open("files")}
+      onAddPullRequest={() => openers.open("pull-request")}
+      onAddPullRequests={() => openers.open("pull-requests")}
+      onAddDevice={() => openers.open("device")}
+      onAddSideChat={() => openers.open("side-chat")}
       sideChatAvailable={openers.available["side-chat"]}
       browserAvailable={openers.available.browser}
       browserUnavailableReason={openers.browserUnavailableReason}
@@ -607,7 +593,6 @@ function ThreadSurfacePane({
           context={context}
           visible={visible}
           openers={openers}
-          openInPane={add}
           getShortcutContext={getShortcutContext}
         />
       )}
@@ -644,7 +629,6 @@ function ThreadSurfaceContent({
   context,
   visible,
   openers,
-  openInPane,
   getShortcutContext,
 }: {
   threadRef: ScopedThreadRef;
@@ -652,7 +636,6 @@ function ThreadSurfaceContent({
   context: ReturnType<typeof useThreadSurfaceContext>;
   visible: boolean;
   openers: ReturnType<typeof useThreadSurfaceOpeners>;
-  openInPane: (kind: LauncherSurfaceKind) => void;
   getShortcutContext: () => {
     terminalFocus: boolean;
     terminalOpen: boolean;
@@ -738,7 +721,7 @@ function ThreadSurfaceContent({
           }
           onSplitTerminal={terminal.split}
           onSplitTerminalVertical={terminal.splitVertical}
-          onNewTerminal={() => openInPane("terminal")}
+          onNewTerminal={() => openers.open("terminal")}
           onActiveTerminalChange={terminal.activate}
           onCloseTerminal={terminal.close}
           {...shortcutLabels}
@@ -802,7 +785,7 @@ function ThreadSurfaceContent({
             onBack={
               openers.available["pull-requests"] &&
               visibleThreadPullRequests(shell?.pullRequests ?? []).length > 1
-                ? () => openInPane("pull-requests")
+                ? () => openers.open("pull-requests")
                 : undefined
             }
           />
@@ -848,6 +831,7 @@ function ThreadSurfaceContent({
               context.worktreePath ? undefined : context.project?.repositoryIdentity?.rootPath
             }
             projectName={context.project?.title ?? "~"}
+            projectId={context.project?.id}
             threadRef={threadRef}
             composerDraftTarget={context.composerDraftTarget}
             keybindings={keybindings}
@@ -1009,9 +993,7 @@ export async function closeThreadSurface(
         useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
         threadRef,
       );
-      const [first, ...rest] = terminalIds.map((terminalId) =>
-        terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
-      );
+      const [first, ...rest] = terminalIds.map((terminalId) => getTerminalLabel(terminalId));
       if (first !== undefined) {
         if (!options.bulk && !(await confirmTerminalClose([first, ...rest]))) return;
         surfaceServices?.endTerminals(threadRef, terminalIds);
@@ -1048,8 +1030,8 @@ export async function closeThreadSurface(
     !options.bulk &&
     readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
   ) {
-    const [first = "Terminal", ...rest] = surface.terminalIds.map((terminalId) =>
-      terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
+    const [first = getTerminalLabel(surface.activeTerminalId), ...rest] = surface.terminalIds.map(
+      (terminalId) => getTerminalLabel(terminalId),
     );
     if (!(await confirmTerminalClose([first, ...rest]))) return;
   }

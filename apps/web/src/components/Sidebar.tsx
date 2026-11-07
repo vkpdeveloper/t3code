@@ -1,3 +1,4 @@
+import { SidebarJumpHints } from "./sidebar/SidebarJumpHints";
 import { attachSidebarTree } from "../lib/sidebarTree";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
@@ -17,7 +18,7 @@ import {
   openThreadToTheSide,
   withOpenThreadToTheSideItem,
 } from "../layout/layoutDrag";
-import { appearanceFontStack } from "../appearanceFonts";
+import { appearanceFontStack, DEFAULT_SANS_FONT_STACK } from "../appearanceFonts";
 import { wasThreadSettledByUser } from "../layout/settledByUser";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
@@ -29,13 +30,14 @@ import {
   DndContext,
   useSensor,
   useSensors,
+  type AutoScrollOptions,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
   type Modifier,
 } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
-import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -85,6 +87,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
 
 import {
@@ -97,12 +100,10 @@ import { isElectron } from "../env";
 import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
-  shouldShowThreadJumpHintsForModifiers,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
-import { useShortcutModifierState } from "../shortcutModifierState";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -135,7 +136,6 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
-import { useTerminalFocus } from "../hooks/useTerminalFocus";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -214,15 +214,19 @@ import {
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
   useSnoozeWakeClock,
-  useThreadJumpHintsVisible,
   type SidebarListItem,
   type SidebarSection,
   resolveSidebarRowThreadId,
 } from "./Sidebar.logic";
 import {
   createSidebarCollisionDetection,
+  measureSidebarPinnedGrid,
+  sidebarPinnedGridCell,
+  type SidebarPinnedGrid,
   createSidebarSortingStrategy,
   restrictBelowSidebarLabel,
+  restrictSidebarDrag,
+  resolveSidebarDragSourceRect,
 } from "./Sidebar.drag";
 import { SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
@@ -233,6 +237,7 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import {
   resolveSidebarRouteReveal,
   type SidebarRouteReveal,
+  observeSidebarDraftPromotion,
   useActiveRowReveal,
 } from "./sidebar/routeReveal";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -897,6 +902,9 @@ function checkThreadOperations(
 
 const SIDEBAR_DRAG_DISTANCE = 6;
 
+// dnd-kit's 20% edge zone at full speed runs the list away while the pointer rests near the bottom.
+const SIDEBAR_AUTO_SCROLL: AutoScrollOptions = { threshold: { x: 0, y: 0.05 }, acceleration: 3 };
+
 const SIDEBAR_DRAG_LABEL_HEIGHT = 24;
 
 const threadSearchResultId = (index: number) => `sidebar-thread-search-result-${index}`;
@@ -962,6 +970,62 @@ function revealSidebarRow(viewport: HTMLElement, row: HTMLElement) {
  * must outlive that.
  */
 const settledWhenOpened = new Map<string, boolean>();
+
+function revealSidebarShelf(header: HTMLElement) {
+  const viewport = header.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+  const lastRow = Array.from(
+    header
+      .closest("ul")
+      ?.querySelectorAll<HTMLElement>(
+        `[data-sidebar-parent="${CSS.escape(header.dataset.sidebarRow ?? "")}"]`,
+      ) ?? [],
+  ).at(-1);
+  if (!viewport || !lastRow) return;
+  revealSidebarRow(viewport, lastRow);
+  revealSidebarRow(viewport, header);
+}
+
+function useSidebarSnooze(
+  snoozeThread: ReturnType<typeof useThreadActions>["snoozeThread"],
+  planForwardNavigation: (
+    threadKey: string,
+    coParkingKeys?: ReadonlySet<string>,
+  ) => (() => void) | null,
+  router: AnyRouter,
+) {
+  const snoozingThreadKeysRef = useRef(new Set<string>());
+  return async (
+    threadRef: ScopedThreadRef,
+    preset: Pick<SnoozePreset, "snoozedUntil">,
+    opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
+  ) => {
+    const threadKey = scopedThreadKey(threadRef);
+    if (snoozingThreadKeysRef.current.has(threadKey)) {
+      return { status: "skipped" } as const;
+    }
+    snoozingThreadKeysRef.current.add(threadKey);
+    const navigateAfterSnooze = planForwardNavigation(threadKey, opts.coSnoozingKeys);
+    const result = await snoozeThread(threadRef, preset.snoozedUntil);
+    snoozingThreadKeysRef.current.delete(threadKey);
+    if (result._tag === "Failure") {
+      return isAtomCommandInterrupted(result)
+        ? ({ status: "interrupted" } as const)
+        : ({ status: "failure", error: squashAtomCommandFailure(result) } as const);
+    }
+    if (
+      shouldNavigateAfterThreadPark({
+        threadKey,
+        currentThreadKey: readRouteThreadKey(router),
+        action: "snooze",
+        now: new Date().toISOString(),
+        thread: readThreadShell(threadRef),
+      })
+    ) {
+      navigateAfterSnooze?.();
+    }
+    return { status: "success" } as const;
+  };
+}
 
 export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReveal }) {
   const {
@@ -1120,17 +1184,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     readonly activationY: number | null;
     readonly targetSection: SidebarSection | null;
     readonly contextDrag: boolean;
+    readonly pinnedGrid: SidebarPinnedGrid | undefined;
+    readonly pinnedTargetIndex: number | null;
+    readonly grabOffsetX: number;
+    readonly sourceWidth: number;
   } | null>(null);
   const dragSensorRef = useRef<SidebarPointerSensor | null>(null);
   const contextDragKeyRef = useRef<string | null>(null);
+  const dragScrollRef = useRef<{ readonly viewport: Element; readonly top: number } | null>(null);
   const [actionSweep, setActionSweep] = useState<{
     action: SidebarSweepAction;
     keys: ReadonlySet<string>;
   } | null>(null);
-  const snoozingThreadKeysRef = useRef(new Set<string>());
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
-  const shortcutModifiers = useShortcutModifierState();
-  const terminalFocused = useTerminalFocus();
   const openAddProjectCommandPalette = () => openCommandPalette({ open: "add-project" });
   const routeThreadRef = resolveActiveThreadRouteRef(routeTarget, routeDraftThread);
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
@@ -1184,6 +1250,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         );
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
 
+  if (routeTarget?.kind === "draft") {
+    observeSidebarDraftPromotion(routeReveal, routeRowThreadKey);
+  }
   // History, the palette and links can open a thread the scope hides or the list
   // scrolled away; a remount starts at the top, so each mount scrolls to the open
   // thread once. Render decides the widening, so the first frame of the new route
@@ -1345,8 +1414,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
-              { id: "new-thread", label: "New thread" },
-              { id: "copy-path", label: "Copy path" },
+              { id: "new-thread", label: "New thread", icon: "square-pen" },
+              { id: "copy-path", label: "Copy path", icon: "copy" },
               ...(canPinProject(group)
                 ? [
                     group.pinned
@@ -1779,12 +1848,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     })();
   };
   const restrictBelowPins: Modifier = (args) =>
-    restrictBelowSidebarLabel(args, dragLabelOffsetRef.current);
-  const dndModifiers = [
-    restrictToVerticalAxis,
-    restrictBelowPins,
-    restrictToFirstScrollableAncestor,
-  ];
+    restrictBelowSidebarLabel(
+      args,
+      dragLabelOffsetRef.current,
+      threadListRef.current?.getBoundingClientRect().top,
+    );
   const attachListMotionRef = (node: HTMLUListElement) => {
     threadListRef.current = node;
     const motion = createSidebarListMotion(node);
@@ -1813,12 +1881,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const isContextDrag = dragState?.contextDrag === true || dragState?.activeSection === "working";
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
+    const activeKey = contextDragKeyRef.current ?? undefined;
     dragSensorRef.current = null;
     contextDragKeyRef.current = null;
+    dragScrollRef.current = null;
     endThreadContextDrag();
     cancelLayoutDrag();
     if (started) {
-      listMotionRef.current?.release();
+      listMotionRef.current?.release(activeKey);
       setDragState(null);
     }
   };
@@ -1842,6 +1912,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const bounds = threadListRef.current?.getBoundingClientRect();
     return bounds !== undefined && (point.x < bounds.left || point.x > bounds.right);
   };
+  // The path out of the list often crosses dnd-kit's edge zone, which autoscrolls the sidebar.
+  const restoreDragScroll = () => {
+    const scroll = dragScrollRef.current;
+    if (scroll && scroll.viewport.scrollTop !== scroll.top) scroll.viewport.scrollTop = scroll.top;
+  };
   const moveThreadContextDrag = (point: { x: number; y: number }) => {
     const contextDrag = pointerOutsideThreadList(point);
     setDragState((current) =>
@@ -1854,6 +1929,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       cancelLayoutDrag();
       return false;
     }
+    restoreDragScroll();
     const threads = contextDragThreads();
     const overComposer = moveThreadContextDragGhost(point, {
       count: threads.length,
@@ -1873,6 +1949,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   };
   const dropThreadContextDrag = (point: { x: number; y: number }) => {
     if (!pointerOutsideThreadList(point)) return false;
+    restoreDragScroll();
     if (!dropThreadContext(point, contextDragThreads())) dropLayoutDrag();
     return true;
   };
@@ -1999,10 +2076,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (activeSection === undefined) return;
     listMotionRef.current?.suspend();
     const list = threadListRef.current;
+    const viewport = list?.closest('[data-slot="scroll-area-viewport"]');
+    dragScrollRef.current = viewport ? { viewport, top: viewport.scrollTop } : null;
     const header = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-header"]');
-    if (list && header) {
-      const listRect = list.getBoundingClientRect();
-      const scale = list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
+    const grid = list?.querySelector<HTMLElement>('[data-testid="sidebar-pinned-grid"]');
+    const listRect = list?.getBoundingClientRect();
+    const sourceRect = resolveSidebarDragSourceRect(
+      event.activatorEvent,
+      event.active.rect.current.initial,
+    );
+    const scale = list && listRect && list.offsetWidth > 0 ? listRect.width / list.offsetWidth : 1;
+    if (listRect && header) {
       dragLabelOffsetRef.current =
         header.getBoundingClientRect().top - listRect.top + SIDEBAR_DRAG_LABEL_HEIGHT * scale;
     } else {
@@ -2013,6 +2097,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       activeSection,
       targetSection: activeSection,
       contextDrag: false,
+      pinnedGrid: grid
+        ? measureSidebarPinnedGrid(grid, scale, SIDEBAR_DRAG_LABEL_HEIGHT * scale)
+        : undefined,
+      pinnedTargetIndex: activeSection === "pinned" ? pinnedKeys.indexOf(activeKey) : null,
+      grabOffsetX:
+        event.activatorEvent instanceof PointerEvent
+          ? event.activatorEvent.clientX - (sourceRect?.left ?? event.activatorEvent.clientX)
+          : 0,
+      sourceWidth: sourceRect?.width ?? listRect?.width ?? 0,
       occurredAt: new Date().toISOString(),
       activationY:
         event.activatorEvent instanceof PointerEvent ? event.activatorEvent.clientY : null,
@@ -2111,10 +2204,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     const target = event.over
       ? resolveSidebarDropTarget(sidebarListItems, String(event.active.id), String(event.over.id))
       : null;
+    const pinnedTargetIndex =
+      target?.section === "pinned" ? target.pinnedOrder.indexOf(String(event.active.id)) : null;
     setDragState((current) =>
-      current === null || current.activeKey !== String(event.active.id)
+      current === null ||
+      current.activeKey !== String(event.active.id) ||
+      (current.targetSection === (target?.section ?? null) &&
+        current.pinnedTargetIndex === pinnedTargetIndex)
         ? current
-        : { ...current, targetSection: target?.section ?? null },
+        : { ...current, targetSection: target?.section ?? null, pinnedTargetIndex },
     );
   };
   const sortableIds = sidebarListItems.map(sidebarListItemId);
@@ -2139,6 +2237,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     settledVisibleCount,
     routeThreadKey: routeRowThreadKey,
     snoozedThreadCount: snoozedThreads.length,
+    pinnedGrid: dragState?.pinnedGrid,
   });
   // The open thread's row stays in view: when it first renders and on every
   // navigation. Rows above can still grow after the first paint, so the list
@@ -2150,6 +2249,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keep the active row visible as layout changes until the user scrolls.
   useEffect(() => {
     if (routeRowThreadKey === null || !routeRowRendered || isSearchingThreads) return;
+    if (routeReveal.quietKey === routeRowThreadKey) return;
     const list = threadListRef.current;
     const viewport = list?.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
     if (!list || !viewport) return;
@@ -2174,10 +2274,32 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       release();
       for (const type of userInput) viewport.removeEventListener(type, release);
     };
-  }, [isSearchingThreads, routeRowRendered, routeRowThreadKey]);
+  }, [isSearchingThreads, routeReveal, routeRowRendered, routeRowThreadKey]);
   const draggedThreadKey = dragState?.activeKey;
   const draggedFromSection = dragState?.activeSection;
   const dragActivationY = dragState?.activationY;
+  const pinnedDragPreview = (() => {
+    const grid = dragState?.pinnedGrid;
+    if (!grid || dragState.targetSection !== "pinned" || dragState.pinnedTargetIndex === null)
+      return undefined;
+    const from = pinnedKeys.indexOf(dragState.activeKey);
+    if (dragState.pinnedTargetIndex < 0) return undefined;
+    const sourceWidth =
+      from < 0 ? dragState.sourceWidth : sidebarPinnedGridCell(grid, from, pinnedKeys.length).width;
+    if (sourceWidth <= 0) return undefined;
+    const width = sidebarPinnedGridCell(
+      grid,
+      dragState.pinnedTargetIndex,
+      pinnedKeys.length + (from < 0 ? 1 : 0),
+    ).width;
+    const widthRatio = width / sourceWidth;
+    return { width, widthRatio, offsetX: dragState.grabOffsetX * (1 - widthRatio) };
+  })();
+  const restrictPreview: Modifier = (args) => restrictSidebarDrag(args, pinnedDragPreview);
+  const dndModifiers =
+    dragState?.activeSection === "pinned"
+      ? [restrictBelowPins, restrictPreview]
+      : [restrictToVerticalAxis, restrictBelowPins, restrictPreview];
   const dndCollisionDetection = (() => {
     if (draggedThreadKey === undefined || draggedFromSection === undefined)
       return createSidebarCollisionDetection(() => true);
@@ -2208,6 +2330,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       {
         items: sidebarListItems,
         activationY: dragActivationY ?? null,
+        pinnedGrid: dragState?.pinnedGrid,
       },
     );
   })();
@@ -2351,38 +2474,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       }
     })();
   };
-  const performSnooze = async (
-    threadRef: ScopedThreadRef,
-    preset: Pick<SnoozePreset, "snoozedUntil">,
-    opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
-  ) => {
-    const threadKey = scopedThreadKey(threadRef);
-    if (snoozingThreadKeysRef.current.has(threadKey)) {
-      return { status: "skipped" } as const;
-    }
-    snoozingThreadKeysRef.current.add(threadKey);
-    const navigateAfterSnooze = planForwardNavigation(threadKey, opts.coSnoozingKeys);
-    const result = await snoozeThread(threadRef, preset.snoozedUntil);
-    snoozingThreadKeysRef.current.delete(threadKey);
-    if (result._tag === "Failure") {
-      return isAtomCommandInterrupted(result)
-        ? ({ status: "interrupted" } as const)
-        : ({ status: "failure", error: squashAtomCommandFailure(result) } as const);
-    }
-    if (
-      shouldNavigateAfterThreadPark({
-        threadKey,
-        currentThreadKey: readRouteThreadKey(router),
-        action: "snooze",
-        // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
-        now: new Date().toISOString(),
-        thread: readThreadShell(threadRef),
-      })
-    ) {
-      navigateAfterSnooze?.();
-    }
-    return { status: "success" } as const;
-  };
+  const performSnooze = useSidebarSnooze(snoozeThread, planForwardNavigation, router);
   const attemptSnooze = (
     threadRef: ScopedThreadRef,
     preset: Pick<SnoozePreset, "snoozedUntil">,
@@ -2414,7 +2506,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       );
       if (threadKeys.length === 0) return;
       const count = threadKeys.length;
-      // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
       const selectionNow = new Date();
       const selectedThreads = threadKeys.flatMap((threadKey) => {
         const thread = threadByKeyRef.current.get(threadKey);
@@ -2445,7 +2536,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         pinnedCount: pinnedSelectedThreads.length,
       });
       // Presets sync across environments, so the first selected thread's stand for all.
-      // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
       const menuOpenedAt = new Date();
       const snoozePresets = resolveSnoozePresets(
         menuOpenedAt,
@@ -3076,22 +3166,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     threadByKey,
   ]);
 
-  const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    {
-      platform: navigator.platform,
-      context: {
-        terminalFocus: terminalFocused,
-        terminalOpen: routeTerminalOpen,
-        modelPickerOpen: isModelPickerOpen(),
-        isWeb: !isElectron,
-        isDesktop: isElectron,
-      },
-    },
-  );
-  const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
-
   const handleNewThreadClick = () => {
     if (isMobile) setOpenMobile(false);
     // With no current or open project, such as when every project is archived, pick one.
@@ -3109,7 +3183,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     shortcutLabelForCommand(keybindings, "chat.new") ??
     shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
-    <>
+    <SidebarJumpHints keybindings={keybindings} terminalOpen={routeTerminalOpen}>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
         ref={sidebarContentRef}
@@ -3417,7 +3491,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             >
               <DndContext
                 sensors={dndSensors}
-                autoScroll={!isContextDrag}
+                autoScroll={isContextDrag ? false : SIDEBAR_AUTO_SCROLL}
                 collisionDetection={dndCollisionDetection}
                 modifiers={dndModifiers}
                 onDragStart={handleThreadDragStart}
@@ -3427,12 +3501,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                 <SortableContext items={sortableIds} strategy={sidebarSortingStrategy}>
                   <ul
                     style={{
-                      fontFamily: appearanceFontStack(
-                        sidebarFontFamily,
-                        '-apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif',
-                      ),
+                      fontFamily: appearanceFontStack(sidebarFontFamily, DEFAULT_SANS_FONT_STACK),
                     }}
                     ref={attachTreeRef}
+                    data-sidebar-dragging={dragState === null ? undefined : ""}
                     // Presentation flattens VoiceOver's list interaction boundary while preserving descendant
                     // controls.
                     role="presentation"
@@ -3455,23 +3527,29 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const threadKey = scopedThreadKey(
                           scopeThreadRef(thread.environmentId, thread.id),
                         );
-                        const isCard =
-                          section === "active" || section === "pinned" || section === "working";
+                        const isCard = section === "active" || section === "working";
                         const folderRow =
                           typeof folderOrGhost === "string" ? folderOrGhost : undefined;
-                        const rowVariant = folderRow
-                          ? folderRowsMultiline
-                            ? "folder-multiline"
-                            : "folder"
-                          : isCard
-                            ? "card"
-                            : "slim";
+                        const rowVariant =
+                          section === "pinned" ||
+                          (threadKey === draggedThreadKey && dragTargetSection === "pinned")
+                            ? "tile"
+                            : folderRow
+                              ? folderRowsMultiline
+                                ? "folder-multiline"
+                                : "folder"
+                              : isCard
+                                ? "card"
+                                : "slim";
                         const Row = folderOrGhost === true ? SidebarThreadRow : SortableThreadRow;
                         return (
                           <Row
                             key={threadKey}
                             sortableId={threadKey}
                             contextDrag={isContextDrag}
+                            pinnedDragPreview={
+                              threadKey === draggedThreadKey ? pinnedDragPreview : undefined
+                            }
                             sortableDisabled={
                               projectFolders !== null ||
                               renamingThreadKey === threadKey ||
@@ -3525,9 +3603,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             isRouteThread={routeThreadKey === threadKey}
                             isOnScreen={onScreenThreadKeys.has(threadKey)}
                             openPullRequestsInRightPanel={routeThreadRef !== null}
-                            jumpLabel={
-                              showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null
-                            }
+                            jumpLabel={jumpLabelByKey.get(threadKey) ?? null}
                             currentEnvironmentId={primaryEnvironmentId}
                             environmentLabel={
                               environmentLabelById.get(thread.environmentId) ?? null
@@ -3571,6 +3647,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           />
                         );
                       };
+                      const shelfToggle = (
+                        shelfThreads: readonly EnvironmentThreadShell[],
+                        count: number,
+                        expanded: boolean,
+                        toggle: () => void,
+                      ) =>
+                        count > shelfThreads.length ||
+                        shelfThreads.some((thread) => threadShellKey(thread) !== routeRowThreadKey)
+                          ? {
+                              expanded,
+                              onToggle: (header: HTMLElement) => {
+                                if (expanded) return toggle();
+                                flushSync(toggle);
+                                revealSidebarShelf(header);
+                              },
+                            }
+                          : null;
                       const from = isContextDrag ? null : (dragState?.activeSection ?? null);
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
@@ -3584,10 +3677,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           onDraftContextMenu={handleDraftContextMenu}
                         />,
                       ];
+                      const pinnedTiles = sidebarListItems.flatMap((item) =>
+                        item.kind === "thread" && item.section === "pinned"
+                          ? [renderThreadRow(threadByKey.get(item.key)!, item.section)]
+                          : [],
+                      );
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          // Folders draw active rows in their own place below.
-                          if (projectFolders !== null && item.section === "active") continue;
+                          // Pins render in their grid; folders draw active rows in their own place below.
+                          if (
+                            item.section === "pinned" ||
+                            (projectFolders !== null && item.section === "active")
+                          )
+                            continue;
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
                           continue;
                         }
@@ -3629,13 +3731,25 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             );
                             break;
                           case "pinned-divider":
+                            // Stays mounted while empty so a drag can measure the grid it would open.
                             items.push(
+                              <ul
+                                key="pinned-grid"
+                                role="group"
+                                aria-label="Pinned threads"
+                                data-testid="sidebar-pinned-grid"
+                                data-sidebar-motion-group=""
+                                className="sidebar-pinned-grid"
+                              >
+                                {pinnedTiles}
+                              </ul>,
                               <SidebarDragBoundary
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
+                                rule={pinnedTiles.length > 0}
                               />,
                             );
                             break;
@@ -3665,10 +3779,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 className="mt-auto"
                                 label="Working"
                                 count={workingThreads.length}
-                                toggle={{
-                                  expanded: workingShelfExpanded,
-                                  onToggle: toggleWorkingShelf,
-                                }}
+                                toggle={shelfToggle(
+                                  workingThreads,
+                                  workingThreads.length,
+                                  workingShelfExpanded,
+                                  toggleWorkingShelf,
+                                )}
                               />,
                             );
                             break;
@@ -3680,10 +3796,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 className={cn(workingThreads.length === 0 && "mt-auto")}
                                 label="Snoozed"
                                 count={snoozedThreads.length}
-                                toggle={{
-                                  expanded: snoozedShelfExpanded,
-                                  onToggle: toggleSnoozedShelf,
-                                }}
+                                toggle={shelfToggle(
+                                  snoozedThreads,
+                                  snoozedThreads.length,
+                                  snoozedShelfExpanded,
+                                  toggleSnoozedShelf,
+                                )}
                               />,
                             );
                             break;
@@ -3705,10 +3823,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 concealed={settledCount === 0 && from === null}
                                 dragging={from !== null}
                                 isDropTarget={dragTargetSection === "settled"}
-                                toggle={{
-                                  expanded: settledShelfExpanded,
-                                  onToggle: toggleSettledShelf,
-                                }}
+                                toggle={shelfToggle(
+                                  settledThreads,
+                                  settledCount,
+                                  settledShelfExpanded,
+                                  toggleSettledShelf,
+                                )}
                               />,
                             );
                             break;
@@ -3804,6 +3924,6 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
-    </>
+    </SidebarJumpHints>
   );
 }

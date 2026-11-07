@@ -217,6 +217,15 @@ export function shouldOpenProactiveTurnDiff(input: {
   );
 }
 
+export function shouldShowComposerTasks(input: {
+  steps: ReadonlyArray<{ status: string }>;
+  planRunSettled: boolean;
+  isSendBusy: boolean;
+}): boolean {
+  if (!input.planRunSettled) return true;
+  return !input.isSendBusy && input.steps.some((step) => step.status !== "completed");
+}
+
 export function resolveProactiveTurnDiffAction(input: {
   checkpoint: Pick<TurnDiffSummary, "status" | "files" | "filesTotal"> | undefined;
   isGitRepo: boolean | undefined;
@@ -1029,6 +1038,21 @@ export function deriveCommittedServerUserMessageIds(
   );
 }
 
+export function deriveTimelineWorking(input: {
+  phase: SessionPhase;
+  isSendBusy: boolean;
+  isCompacting: boolean;
+  runlessWorkStartedAt: string | null;
+}): boolean {
+  return (
+    input.phase === "connecting" ||
+    input.phase === "running" ||
+    input.isSendBusy ||
+    input.isCompacting ||
+    input.runlessWorkStartedAt !== null
+  );
+}
+
 export function hasServerAcknowledgedLocalDispatch(input: {
   localDispatch: LocalDispatchSnapshot | null;
   phase: SessionPhase;
@@ -1085,6 +1109,10 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.runtimeStatus !== (runtime?.status ?? null) ||
     input.localDispatch.runtimeUpdatedAt !== (runtime?.updatedAt ?? null)
   );
+}
+
+export function isCoveredByModal(element: Pick<Element, "closest"> | null): boolean {
+  return element?.closest('[aria-hidden="true"]') != null;
 }
 
 // Returning to the window should land the caret in the composer, so the reader can type right

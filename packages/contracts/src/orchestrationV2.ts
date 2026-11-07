@@ -692,6 +692,7 @@ export const OrchestrationV2Run = Schema.Struct({
   checkpointId: Schema.NullOr(CheckpointId),
   contextHandoffId: Schema.NullOr(ContextHandoffId),
   restartContinuationOfRunId: Schema.optional(RunId),
+  usageLimitContinuationOfRunId: Schema.optional(RunId),
   delegatedTaskId: Schema.optional(NodeId),
   workStartedAt: Schema.optional(Schema.DateTimeUtc),
   restartCancelledBackgroundWork: Schema.optional(
@@ -953,6 +954,14 @@ export const OrchestrationV2ProviderSession = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   model: Schema.NullOr(TrimmedNonEmptyString),
   capabilities: OrchestrationV2ProviderCapabilities,
+  extensionStatuses: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+        text: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+      }),
+    ).check(Schema.isMaxLength(32)),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   createdAt: Schema.DateTimeUtc,
   updatedAt: Schema.DateTimeUtc,
   lastError: Schema.NullOr(Schema.String),
@@ -1298,6 +1307,7 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
    * the workflow's opening instead and keep the script behind a disclosure.
    */
   workflowScript: Schema.optional(Schema.Boolean),
+  retryOfRunId: Schema.optional(RunId),
   id: MessageId,
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
@@ -1609,6 +1619,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     senderThreadId: Schema.optional(ThreadId),
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     workflowScript: OrchestrationV2ConversationMessage.fields.workflowScript,
+    retryOfRunId: OrchestrationV2ConversationMessage.fields.retryOfRunId,
     freshContext: OrchestrationV2Run.fields.freshContext,
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
@@ -2453,6 +2464,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     senderThreadId: Schema.optional(ThreadId),
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     workflowScript: OrchestrationV2ConversationMessage.fields.workflowScript,
+    retryOfRunId: OrchestrationV2ConversationMessage.fields.retryOfRunId,
     freshContext: OrchestrationV2Run.fields.freshContext,
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
@@ -2976,6 +2988,7 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.settle"),
     commandId: CommandId,
     threadId: ThreadId,
+    expectedLatestRunId: Schema.optional(RunId),
     settledAt: Schema.optional(Schema.DateTimeUtc),
   }),
   /** Rejects changes since snapshotAt or any explicit settled override to preserve user actions. */
@@ -3165,6 +3178,7 @@ export const OrchestrationV2Command = Schema.Union([
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
+    retryOfRunId: OrchestrationV2ConversationMessage.fields.retryOfRunId,
     /** Start a new provider session without the thread's earlier context. Never steers. */
     freshContext: Schema.optional(Schema.Boolean),
     commandId: CommandId,

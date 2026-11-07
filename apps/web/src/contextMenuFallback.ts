@@ -1,6 +1,7 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
 
 import { MENU_ITEM_ROW_CLASS, MENU_SUB_TRIGGER_ROW_CLASS } from "./components/ui/menu";
+import { prepareFocusReturn } from "./components/ui/focus-return";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -24,6 +25,15 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
   clock: [
     { tag: "path", attrs: { d: "M12 6v6l4 2" } },
     { tag: "circle", attrs: { cx: "12", cy: "12", r: "10" } },
+  ],
+  "square-pen": [
+    { tag: "path", attrs: { d: "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" } },
+    {
+      tag: "path",
+      attrs: {
+        d: "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z",
+      },
+    },
   ],
   pencil: [
     {
@@ -314,6 +324,7 @@ export function showContextMenuFallback<T extends string>(
     const menuStack: HTMLDivElement[] = [];
     const submenuTriggerStack: Array<HTMLButtonElement | undefined> = [];
     let isDisposed = false;
+    let keyboardInteraction = !position;
     let canDismissFromPointer = false;
 
     const dismiss = (restoreFocus = true) => cleanup(null, restoreFocus);
@@ -337,7 +348,9 @@ export function showContextMenuFallback<T extends string>(
         menu.remove();
       }
       if (shouldRestoreFocus && previouslyFocusedElement?.isConnected) {
-        previouslyFocusedElement.focus({ preventScroll: true });
+        prepareFocusReturn(document);
+        const focusOptions = { preventScroll: true, focusVisible: keyboardInteraction };
+        previouslyFocusedElement.focus(focusOptions);
       }
       resolve(result);
     };
@@ -355,6 +368,7 @@ export function showContextMenuFallback<T extends string>(
         isNodeWithinMenuStack(document.activeElement, [menu]),
       );
       if (level < 0) return;
+      keyboardInteraction = true;
       const menu = menuStack[level]!;
       const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")].filter(
         (button) => !button.disabled,
@@ -416,6 +430,7 @@ export function showContextMenuFallback<T extends string>(
     const onWindowBlur = () => cleanup(null, false);
 
     const onPointerDown = (event: PointerEvent) => {
+      keyboardInteraction = false;
       if (!canDismissFromPointer || isNodeWithinMenuStack(event.target, menuStack)) {
         return;
       }
@@ -475,16 +490,16 @@ export function showContextMenuFallback<T extends string>(
       // keeps the same viewport clearance on each edge.
       const inner = document.createElement("div");
       inner.className =
-        "max-h-[calc(100vh-0.5rem)] min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1.5";
+        "max-h-[calc(100vh-0.5rem)] min-w-0 max-w-sm overflow-y-auto overflow-x-hidden p-1";
       inner.style.cssText =
-        "max-height:calc(100vh - 0.5rem);min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.375rem;--popup-item-radius:calc(var(--radius-card) - 7px);display:flex;flex-direction:column;gap:1px;";
+        "max-height:calc(100vh - 0.5rem);min-width:0;max-width:24rem;overflow-x:hidden;overflow-y:auto;padding:0.25rem;display:flex;flex-direction:column;";
 
       for (const item of entries) {
         if (item.separatorBefore === true && inner.children.length > 0) {
           const separator = document.createElement("div");
-          separator.className = "mx-2.5 my-1 h-px shrink-0 bg-hairline";
+          separator.className = "mx-2 my-1 h-px shrink-0 bg-hairline";
           separator.style.cssText =
-            "height:1px;flex-shrink:0;margin:0.25rem 0.625rem;background:var(--hairline);";
+            "height:1px;flex-shrink:0;margin:0.25rem 0.5rem;background:var(--hairline);";
           separator.dataset.contextMenuSeparator = "true";
           separator.setAttribute("role", "separator");
           inner.appendChild(separator);
@@ -492,7 +507,7 @@ export function showContextMenuFallback<T extends string>(
 
         if (item.header === true) {
           const header = document.createElement("div");
-          header.className = "px-2.5 py-1.5 text-meta text-dim-foreground";
+          header.className = "px-2 py-1.5 text-meta text-dim-foreground";
           header.textContent = item.label;
           inner.appendChild(header);
           continue;
@@ -509,12 +524,12 @@ export function showContextMenuFallback<T extends string>(
         button.tabIndex = -1;
         button.setAttribute("role", "menuitem");
         button.setAttribute("aria-disabled", String(isDisabled));
-        const rowBase = `${hasChildren ? MENU_SUB_TRIGGER_ROW_CLASS : MENU_ITEM_ROW_CLASS} w-full text-left`;
+        const rowBase = `${hasChildren ? MENU_SUB_TRIGGER_ROW_CLASS : MENU_ITEM_ROW_CLASS} [&>svg:not(:last-child)]:-mx-0.5 w-full text-left`;
         button.dataset.variant = isLeafDestructive ? "destructive" : "default";
         button.className = rowBase;
         if (isDisabled) button.dataset.disabled = "";
         button.style.cssText =
-          "display:flex;width:100%;min-height:2rem;align-items:center;gap:0.625rem;border:0;border-radius:var(--popup-item-radius,8px);background:transparent;padding:0.25rem 0.625rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-size:0.8125rem;font-weight:500;line-height:1.125rem;text-align:left;cursor:default;";
+          "display:flex;width:100%;min-height:1.75rem;align-items:center;gap:0.5rem;border:0;border-radius:8px;background:transparent;padding:0.25rem 0.5rem;color:var(--contrast-foreground);font-family:var(--font-sans,system-ui,sans-serif);font-weight:500;line-height:1.25rem;text-align:left;cursor:default;";
         if (isLeafDestructive) {
           button.style.color = "var(--destructive-foreground)";
         }
@@ -555,7 +570,7 @@ export function showContextMenuFallback<T extends string>(
 
         if (item.shortcut && !hasChildren) {
           const shortcut = document.createElement("span");
-          shortcut.className = "ms-auto shrink-0 ps-4 font-sans text-caption text-dim-foreground";
+          shortcut.className = "ms-auto shrink-0 font-sans text-meta text-dim-foreground";
           shortcut.textContent = item.shortcut;
           button.appendChild(shortcut);
         }
@@ -590,6 +605,7 @@ export function showContextMenuFallback<T extends string>(
                 : "var(--contrast-foreground)";
           };
           button.addEventListener("mouseenter", () => {
+            keyboardInteraction = false;
             button.focus({ preventScroll: true });
             isHovered = true;
             updateHighlight();

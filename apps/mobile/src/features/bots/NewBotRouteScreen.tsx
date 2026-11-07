@@ -24,7 +24,7 @@ import { useWorkspaceEnvironments } from "../../state/workspace";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { scheduledTaskDefaultModel } from "../settings/scheduledTaskDraft";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { BotAvatar } from "./BotAvatar";
 import { BotAvatarPicker } from "./BotAvatarPicker";
 import { botDraftAtom, updateBotDraft } from "./bot-draft";

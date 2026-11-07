@@ -1744,6 +1744,7 @@ function ComposerPromptEditorTiptapInner(
       <ComposerContextRecordsContext value={contextRecords}>
         <ComposerCitationCommentContext value={citationCommentActions}>
           <div
+            data-composer-empty={value.length === 0}
             className={cn(
               "relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)",
               containerClassName,
@@ -1792,7 +1793,7 @@ function ComposerPromptEditorTiptapInner(
               onCopyCapture={(event) => handleCopyCut(event, false)}
               onCutCapture={(event) => handleCopyCut(event, true)}
             />
-            {isEmpty && contextRecords.size === 0 && placeholder ? (
+            {isEmpty && placeholder ? (
               <div
                 data-composer-placeholder=""
                 className={cn(

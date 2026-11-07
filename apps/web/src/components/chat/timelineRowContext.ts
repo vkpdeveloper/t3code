@@ -95,7 +95,8 @@ export interface TimelineRowSharedState {
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onToggleWorkingHistory: (key: string) => void;
-  onWorkingHistoryCollapsing: (collapsing: boolean) => void;
+  onWorkingHistoryMoving: (moving: boolean) => void;
+  onWorkingHistorySettled: () => void;
   onFocusComposer: (() => void) | null;
   workGroupViewState: WorkGroupViewState;
 }
@@ -112,6 +113,7 @@ export interface TimelineRowActivityState {
   worktreeSetupCardOwnsHeader: boolean;
   latestRunId: RunId | null;
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
+  liveAnswerPreview: string | null;
   /** The approval or question the running turn waits on; it pauses the clock. */
   pendingRequest: TimelinePendingRequest | null;
   /** Background work that outlived the latest turn, named on its fold. */

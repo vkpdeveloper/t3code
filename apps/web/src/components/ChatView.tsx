@@ -36,7 +36,11 @@ import { THREAD_FIND_BAR_RESERVED_HEIGHT } from "./chat/ThreadFindBar";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { resolveDraftHeroState } from "./ChatView.logic";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
-import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
+import {
+  recallCheckoutIsRepo,
+  rememberCheckoutIsRepo,
+  shouldShowComposerTasks,
+} from "./ChatView.logic";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
@@ -75,6 +79,7 @@ import {
 } from "@t3tools/contracts";
 import {
   deriveProviderSubagentStatus,
+  deriveProviderExtensionStatuses,
   deriveReportedModelSelection,
   deriveResumableRunId,
   formatModelSelectionEffort,
@@ -82,6 +87,7 @@ import {
   deriveThreadActivityRun,
   deriveLatestThreadRun,
   deriveThreadStructureRuntime,
+  limitRecoveryOwnsSnooze,
 } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveWorkflowOpening,
@@ -347,6 +353,7 @@ import {
 import {
   buildLocalDraftThread,
   deriveCommittedServerUserMessageIds,
+  deriveTimelineWorking,
   dismissBranchMismatchForSession,
   shouldShowPlanFollowUpPrompt,
   shouldRenderPreviewMiniPlayer,
@@ -357,6 +364,7 @@ import {
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   codexArtifactTemplatePromptToAppend,
+  isCoveredByModal,
   shouldRefocusComposerOnWindowFocus,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -374,7 +382,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { observeResize } from "~/lib/observeResize";
 import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
-import { branchMismatchBannerItem } from "./chat/ThreadActivityBanners";
+import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
@@ -1025,11 +1033,19 @@ export default function ChatView(props: ChatViewProps) {
   );
   const browserAvailable = isPreviewSupportedInRuntime() || activeEnvironmentServerBrowser;
   const activeThreadShell = serverThread;
+  const limitRecoveryRun =
+    serverRuntime?.status === "failed" && serverRuntime.lastErrorClass === "usage_limit"
+      ? (activeThreadShell?.latestRun ?? null)
+      : null;
+  // The recovery banner offers Wake now for a snooze it set.
+  const limitRecoveryHoldsSnooze = limitRecoveryOwnsSnooze({
+    runId: limitRecoveryRun?.runId,
+    resetAt: serverRuntime?.usageLimitResetAt,
+    recovery: activeThreadShell?.limitRecovery,
+    snoozedUntil: activeThreadShell?.snoozedUntil,
+  });
   const timelineThreadError =
-    serverRuntime?.status === "failed" &&
-    serverRuntime.lastErrorClass === "usage_limit" &&
-    activeThreadShell?.latestRun &&
-    visibleThreadError === serverRuntime.lastError
+    limitRecoveryRun !== null && visibleThreadError === serverRuntime?.lastError
       ? null
       : visibleThreadError;
 
@@ -1505,8 +1521,12 @@ export default function ChatView(props: ChatViewProps) {
   const isCompacting =
     (isSendBusy || phase === "connecting" || phase === "running") &&
     (compactionRunning || (compactRequestIsActive && !compactionSettled));
-  const isWorking =
-    phase === "running" || isSendBusy || isCompacting || runlessWorkStartedAt !== null;
+  const isWorking = deriveTimelineWorking({
+    phase,
+    isSendBusy,
+    isCompacting,
+    runlessWorkStartedAt,
+  });
   const activeContextWindow = deriveLatestContextWindowSnapshot(
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
@@ -2156,16 +2176,18 @@ export default function ChatView(props: ChatViewProps) {
     setTimelineAnchor,
   });
 
+  const focusOpenedThreadComposer = useStableCallback(() => {
+    if (!isCoveredByModal(composerOverlayElement)) focusComposer();
+  });
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- schedules a frame to focus the composer DOM element when a thread opens with the terminal closed
   useEffect(() => {
     if (embedded || !activeThread?.id || terminalUiState.terminalOpen) return;
-    const frame = window.requestAnimationFrame(() => {
-      focusComposerStable();
-    });
+    const frame = window.requestAnimationFrame(focusOpenedThreadComposer);
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, embedded, focusComposerStable, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, embedded, focusOpenedThreadComposer, terminalUiState.terminalOpen]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window focus listener that refocuses the composer after the window regains focus
   useEffect(() => {
@@ -2439,6 +2461,7 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadKey,
     activeThreadShell,
     activeLatestRun,
+    limitRecoveryHoldsSnooze,
     activeProjectCwd,
     serverConfig,
     runtimeMode,
@@ -2569,21 +2592,21 @@ export default function ChatView(props: ChatViewProps) {
   // Dismissing hides this run's limit notice until the run or its reset time changes.
   const [dismissedLimitRecoveryKey, setDismissedLimitRecoveryKey] = useState<string | null>(null);
   const limitRecoveryKey =
-    serverRuntime?.status === "failed" &&
-    serverRuntime.lastErrorClass === "usage_limit" &&
-    activeThreadShell?.latestRun
-      ? `${activeThreadShell.latestRun.runId}:${serverRuntime.usageLimitResetAt ?? ""}`
+    limitRecoveryRun !== null
+      ? `${limitRecoveryRun.runId}:${serverRuntime?.usageLimitResetAt ?? ""}`
       : null;
   const limitRecoveryBanner =
     limitRecoveryKey !== null &&
     limitRecoveryKey !== dismissedLimitRecoveryKey &&
-    serverRuntime &&
-    activeThreadShell?.latestRun
+    limitRecoveryRun !== null &&
+    activeThreadShell !== null
       ? usageLimitRecoveryBannerItem({
-          runId: activeThreadShell.latestRun.runId,
-          errorCode: serverRuntime.lastErrorCode ?? null,
-          resetAt: serverRuntime.usageLimitResetAt ?? null,
-          stoppedAt: activeThreadShell.latestRun.completedAt ?? activeThreadShell.updatedAt,
+          runId: limitRecoveryRun.runId,
+          errorCode: serverRuntime?.lastErrorCode ?? null,
+          resetAt: serverRuntime?.usageLimitResetAt ?? null,
+          stoppedAt: limitRecoveryRun.completedAt ?? activeThreadShell.updatedAt,
+          settled: activeThreadShell.settledOverride === "settled",
+          requestPending: pendingApprovals.length > 0 || pendingUserInputs.length > 0,
           recovery: activeThreadShell.limitRecovery ?? null,
           snoozedUntil: activeThreadShell.snoozedUntil,
           timestampFormat,
@@ -2727,6 +2750,10 @@ export default function ChatView(props: ChatViewProps) {
           ]
         : [];
     const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    const extensionStatusBanner = extensionStatusBannerItem(
+      deriveProviderExtensionStatuses(serverProjection),
+    );
+    const extensionStatusItems = extensionStatusBanner === null ? [] : [extensionStatusBanner];
     const usageLimitsItems = usageLimitsBanner === null ? [] : [usageLimitsBanner];
     const projectCloneItems = projectCloneBannerItem === null ? [] : [projectCloneBannerItem];
     // An approval's feedback goes to that approval; the armed session waits for the next message.
@@ -2739,6 +2766,7 @@ export default function ChatView(props: ChatViewProps) {
         ...feedbackBannerItems,
         ...fallbackItems,
         ...limitRecoveryItems,
+        ...extensionStatusItems,
         ...usageLimitsItems,
         ...projectCloneItems,
         ...freshSessionItems,
@@ -2749,6 +2777,7 @@ export default function ChatView(props: ChatViewProps) {
       ...feedbackBannerItems,
       ...fallbackItems,
       ...limitRecoveryItems,
+      ...extensionStatusItems,
       ...usageLimitsItems,
       ...projectCloneItems,
       ...freshSessionItems,
@@ -2901,6 +2930,10 @@ export default function ChatView(props: ChatViewProps) {
     serverConfig?.environment.capabilities.sideChats === true;
   const sideChat = useSideChat({
     threadRef: sideChatsOffered && isServerThread ? activeThreadRef : null,
+    readSettings: () => ({
+      runtimeMode,
+      modelSelection: composerRef.current?.getSendContext().selectedModelSelection,
+    }),
     onError: (message) => {
       if (activeThread) setThreadError(activeThread.id, message);
     },
@@ -3140,7 +3173,11 @@ export default function ChatView(props: ChatViewProps) {
       ? (serverRuntime?.lastErrorCode ?? null)
       : null,
     threadErrorBannerKey,
-    onRetry: canRetryFailedRun ? () => void onRetryFailedRunStable() : null,
+    onRetry: !canRetryFailedRun
+      ? null
+      : failedRunId !== null && retryableWorkspacePreparationRunIds.has(failedRunId)
+        ? () => onRetryWorkspacePreparationStable(failedRunId)
+        : () => void onRetryFailedRunStable(),
     retrying: retryingFailedRunId !== null,
     setThreadError,
     setThreadErrorBannerDismissTick,
@@ -3544,6 +3581,7 @@ export default function ChatView(props: ChatViewProps) {
                     : {})}
                   isWorking={isWorking}
                   runlessWorkActive={runlessWorkStartedAt !== null}
+                  awaitingBackgroundWork={activeRuntime?.awaitingBackgroundWork === true}
                   isCompacting={isCompacting}
                   pendingRequest={timelinePendingRequest}
                   usageLimit={timelineUsageLimit}
@@ -3629,13 +3667,12 @@ export default function ChatView(props: ChatViewProps) {
                 />
               </WorkspaceMutationIdContext>
 
-              {showScrollToBottom && !isThreadFindActive && (
-                <ScrollToEndButton
-                  bottom={scrollToEndClearance + 4}
-                  summary={scrollToEndSummary}
-                  onScrollToEnd={() => scrollToEnd(true)}
-                />
-              )}
+              <ScrollToEndButton
+                visible={showScrollToBottom && !isThreadFindActive}
+                bottom={scrollToEndClearance + 4}
+                summary={scrollToEndSummary}
+                onScrollToEnd={() => scrollToEnd(true)}
+              />
             </div>
 
             {/* Input bar — docked at the bottom; an empty draft centers its headline above it. */}
@@ -3706,8 +3743,14 @@ export default function ChatView(props: ChatViewProps) {
                       ) : null}
                       {hasQueuedTurns ? queuedRunsControl : null}
                       {composerTasks?.type === "todo_list" &&
-                      (isWorking ||
-                        composerTasks.steps.some((step) => step.status !== "completed")) ? (
+                      shouldShowComposerTasks({
+                        steps: composerTasks.steps,
+                        planRunSettled: isLatestRunSettled(
+                          activeActivityRun ?? activeLatestRun,
+                          activeRuntime,
+                        ),
+                        isSendBusy,
+                      }) ? (
                         <ComposerTaskStatus
                           key={composerTasks.planId}
                           steps={composerTasks.steps}
@@ -3744,7 +3787,6 @@ export default function ChatView(props: ChatViewProps) {
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
-                              projectName={activeProject?.title}
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
@@ -3849,6 +3891,7 @@ export default function ChatView(props: ChatViewProps) {
                               }
                               activeThreadModelSelection={activeThread?.modelSelection}
                               activeProjectId={activeProject?.id ?? null}
+                              projectName={activeProject?.title}
                               contextWindowEntries={serverVisibleTurnItems}
                               contextWindowLiveUsage={activeThreadLiveTokenUsage}
                               contextWindowProviderThread={activeProviderThread}

@@ -18,8 +18,8 @@ import {
   THREAD_LIST_V2_SIDEBAR_ROW_STYLE,
   selectedThreadRowColors,
 } from "../threads/thread-list-v2-row-appearance";
-import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
-import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { BotAvatar } from "./BotAvatar";
 import { startBotDraft } from "./bot-draft";
 

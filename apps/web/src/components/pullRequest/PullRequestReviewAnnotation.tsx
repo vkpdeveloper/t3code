@@ -7,15 +7,20 @@ import type {
   PullRequestThreadCommentsResult,
   PullRequestThreadComment,
 } from "@t3tools/contracts";
-import { CheckIcon, FileCodeIcon, HammerIcon, Trash2Icon } from "lucide-react";
+import {
+  CheckIcon,
+  FileCodeIcon,
+  HammerIcon,
+  MessageSquarePlusIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Circle, CircleCheck } from "lucide";
 import { useRef, useState } from "react";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
-import { SpeechTextField, TextFieldSpeechControls } from "~/speech/useTextFieldSpeech";
-
 import { RelativeTime } from "~/components/RelativeTime";
 import { cn } from "~/lib/utils";
+import { SpeechTextField, TextFieldSpeechControls } from "~/speech/useTextFieldSpeech";
 
 import { Button, InlineButton } from "../ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
@@ -29,12 +34,17 @@ import { Badge } from "../ui/badge";
 import {
   editPullRequestThreadComment,
   mergePullRequestThreadComments,
+  visibleBody,
 } from "./pullRequestDetail.logic";
 import { PullRequestActorLabel } from "./pullRequestPresentation";
 import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import type { PendingReviewComment } from "./pullRequestReviewStore";
+import {
+  PullRequestMarkdownTextarea,
+  type PullRequestCompletionScope,
+} from "./PullRequestMarkdownTextarea";
 
 /** Inset under the code like the thread diff's comments, on the same raised card. */
 const CARD_CLASS = `mx-2.5 mt-1.5 mb-2 p-2.5 text-sm ${COMMENT_CARD_CLASS}`;
@@ -42,6 +52,7 @@ const CARD_CLASS = `mx-2.5 mt-1.5 mb-2 p-2.5 text-sm ${COMMENT_CARD_CLASS}`;
 function submitKeys(input: {
   readonly value: string;
   readonly pending: boolean;
+  readonly allowEmpty?: boolean;
   readonly onSubmit: () => void;
   readonly onCancel?: (() => void) | undefined;
 }) {
@@ -50,7 +61,7 @@ function submitKeys(input: {
       event.preventDefault();
       input.onCancel();
     }
-    if (isCommentSubmitShortcut(event, input.value, input.pending)) {
+    if (isCommentSubmitShortcut(event, input.value, input.pending, input.allowEmpty)) {
       event.preventDefault();
       input.onSubmit();
     }
@@ -169,10 +180,12 @@ export function ReviewThreadCard({
   canReact,
   environmentId,
   reference,
+  completionScope,
   pending,
   fixPending,
   fixLabel = "Fix in a thread",
   onFix,
+  onAddToChat,
   onReply,
   onLoadMore,
   canEditComment,
@@ -192,10 +205,16 @@ export function ReviewThreadCard({
   canReact: boolean;
   environmentId: EnvironmentId;
   reference: PullRequestRef;
+  completionScope: PullRequestCompletionScope | null;
   pending: boolean;
   fixPending?: boolean;
   fixLabel?: string;
   onFix?: () => void;
+  /**
+   * Absent where there is no composer beside the panel to add the conversation to. Handed the
+   * thread with every comment the reader has loaded, not only the first page.
+   */
+  onAddToChat?: (thread: PullRequestReviewThread) => void;
   onReply: (body: string) => Promise<boolean>;
   onLoadMore: (cursor: string) => Promise<PullRequestThreadCommentsResult | null>;
   canEditComment: (comment: PullRequestThreadComment) => boolean;
@@ -238,8 +257,8 @@ export function ReviewThreadCard({
     }
   };
 
-  const send = async () => {
-    const trimmed = reply.trim();
+  const send = async (text: string) => {
+    const trimmed = text.trim();
     if (trimmed.length === 0 || pending || sendingRef.current) return;
     sendingRef.current = true;
     const result = await settlePromise(() => onReply(trimmed));
@@ -311,6 +330,7 @@ export function ReviewThreadCard({
                   value={comment.body}
                   cwd={workspaceRoot}
                   environmentId={environmentId}
+                  completionScope={completionScope}
                   label="Edit comment"
                   saving={savingEdit}
                   onSave={(body) => void saveEdit(comment.id, body)}
@@ -362,7 +382,7 @@ export function ReviewThreadCard({
                   submitKeys({
                     value: reply,
                     pending,
-                    onSubmit: () => void send(),
+                    onSubmit: () => void send(reply),
                     onCancel: () => setReply(""),
                   })(event)
                 }
@@ -371,7 +391,7 @@ export function ReviewThreadCard({
               <span className="flex-1" />
             )}
             {canReply && reply.trim().length > 0 ? (
-              <Button size="sm" disabled={pending} onClick={() => void send()}>
+              <Button size="sm" disabled={pending} onClick={() => void send(reply)}>
                 Reply
               </Button>
             ) : null}
@@ -425,11 +445,22 @@ export function ReviewThreadCard({
             {fixPending ? "Preparing..." : fixLabel}
           </Button>
         ) : null}
-        {canResolve && !resolveBesideReply ? (
+        {onAddToChat && comments.some((comment) => visibleBody(comment.body) !== null) ? (
           <Button
             size="xs"
             variant="ghost"
             className={onFix ? undefined : "ml-auto"}
+            onClick={() => onAddToChat({ ...thread, comments })}
+          >
+            <MessageSquarePlusIcon className="size-3" />
+            Add to chat
+          </Button>
+        ) : null}
+        {canResolve && !resolveBesideReply ? (
+          <Button
+            size="xs"
+            variant="ghost"
+            className={onFix || onAddToChat ? undefined : "ml-auto"}
             disabled={pending}
             onClick={onToggleResolved}
           >
@@ -455,6 +486,7 @@ export function ReviewThreadCard({
                     value={comment.body}
                     cwd={workspaceRoot}
                     environmentId={environmentId}
+                    completionScope={completionScope}
                     label="Edit comment"
                     saving={savingEdit}
                     onSave={(body) => void saveEdit(comment.id, body)}
@@ -507,6 +539,7 @@ export function ReviewThreadCard({
             replying ? (
               <SpeechTextField
                 environmentId={environmentId}
+                projectId={reference.projectId}
                 ownerKey={JSON.stringify(["pr-reply", environmentId, reference, thread.id])}
                 text={reply}
                 textareaRef={replyRef}
@@ -515,23 +548,24 @@ export function ReviewThreadCard({
               >
                 {(speech) => (
                   <div className="mt-2 border-t border-border pt-2">
-                    <Textarea
+                    <PullRequestMarkdownTextarea
                       ref={replyRef}
                       readOnly={speech.freezesEditor}
                       autoFocus
                       size="sm"
+                      completionScope={completionScope}
                       value={reply}
                       placeholder="Reply…"
                       aria-label="Reply to this conversation"
-                      onChange={(event) => setReply(event.target.value)}
-                      onKeyDown={(event) =>
-                        submitKeys({
-                          value: reply,
-                          pending: pending || speech.blocksSubmission,
-                          onSubmit: () => void send(),
-                          onCancel: () => setReplying(false),
-                        })(event)
-                      }
+                      onValueChange={setReply}
+                      onKeyDown={submitKeys({
+                        value: reply,
+                        pending,
+                        allowEmpty: speech.blocksSubmission,
+                        onSubmit: () => speech.submitAfterDictation((text) => void send(text)),
+                        onCancel: () =>
+                          speech.state.phase === "idle" ? setReplying(false) : speech.cancel(),
+                      })}
                     />
                     <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
                       <TextFieldSpeechControls speech={speech} disabled={pending} />
@@ -540,8 +574,12 @@ export function ReviewThreadCard({
                       </Button>
                       <Button
                         size="xs"
-                        disabled={pending || speech.blocksSubmission || reply.trim().length === 0}
-                        onClick={() => void send()}
+                        disabled={
+                          speech.preparing ||
+                          pending ||
+                          (!speech.blocksSubmission && reply.trim().length === 0)
+                        }
+                        onClick={() => speech.submitAfterDictation((text) => void send(text))}
                       >
                         Reply
                       </Button>

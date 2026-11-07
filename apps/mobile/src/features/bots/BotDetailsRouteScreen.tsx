@@ -39,7 +39,7 @@ import { fileRoutePathSegments } from "../files/filePath";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { describeSchedule } from "../settings/scheduledTaskPresentation";
-import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
+import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab";
 import { BotAvatar } from "./BotAvatar";
 import { BotAvatarPicker } from "./BotAvatarPicker";
 

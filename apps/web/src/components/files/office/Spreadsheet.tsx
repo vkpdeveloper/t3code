@@ -1,5 +1,5 @@
-import { Button } from "~/components/ui/button";
 import * as Schema from "effect/Schema";
+import { Button } from "~/components/ui/button";
 import { observeResize } from "~/lib/observeResize";
 import { useEffect, useRef, useState } from "react";
 import {

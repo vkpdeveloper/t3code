@@ -12,6 +12,7 @@ import { DEFAULT_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import * as Schema from "effect/Schema";
 import { TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../../appearanceFonts";
 import { writeLocalStorageValue } from "../../hooks/useLocalStorage";
+import { isScrollingWorkspaceCommand } from "../../layout/layoutBehavior";
 import { commandLabel } from "./KeybindingsSettings.logic";
 import type { ResolvedSettingsScope } from "./settingsScope";
 
@@ -64,7 +65,6 @@ export interface SettingsSearchItem {
   readonly cloudOnly?: boolean;
   readonly environmentOnly?: boolean;
   readonly providerSettingsOnly?: boolean;
-  readonly macProviderSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
@@ -72,6 +72,8 @@ export interface SettingsSearchItem {
   readonly peerLinksOnly?: boolean;
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
+  /** Hidden until Labs › Scrolling workspaces is on. */
+  readonly scrollingWorkspacesOnly?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -79,12 +81,12 @@ export interface SettingsSearchAvailability {
   readonly hasCloudPublicConfig: boolean;
   readonly hasEnvironment: boolean;
   readonly hasProviderSettingsEnvironment: boolean;
-  readonly hasMacProviderSettingsEnvironment: boolean;
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
   readonly managedTunnelActive?: boolean;
   readonly hasPeerLinkHost?: boolean;
+  readonly scrollingWorkspaces?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -126,9 +128,9 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
       "/settings/appearance",
       "/settings/layout",
       "/settings/chat",
-      "/settings/voice",
       "/settings/diffs",
       "/settings/keybindings",
+      "/settings/voice",
       "/settings/snap-shot",
     ],
   },
@@ -155,7 +157,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    heading: null,
+    heading: "Application",
     paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
   },
 ];
@@ -176,6 +178,7 @@ const KEYBINDING_SEARCH_ITEMS = STATIC_KEYBINDING_COMMANDS.toSorted((left, right
     to: "/settings/keybindings" as const,
     searchTerms: [command, ...defaultKeys],
     secondary: true,
+    ...(isScrollingWorkspaceCommand(command) ? { scrollingWorkspacesOnly: true } : {}),
     ...(defaultKeys.length === 0 ? { targetId: "keybindings" } : {}),
   };
 });
@@ -338,6 +341,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "When it doesn't fit",
     to: "/settings/layout",
     searchTerms: ["no room shrink then scroll always shrink always scroll strip columns width"],
+    scrollingWorkspacesOnly: true,
   },
   {
     id: "layout-three-finger-swipe",
@@ -346,6 +350,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["trackpad gesture swipe between pages column workspace"],
     desktopOnly: true,
     macOnly: true,
+    scrollingWorkspacesOnly: true,
   },
   {
     id: "color-scheme",
@@ -506,62 +511,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
-    id: "dictation-shortcut-mode",
-    title: "Dictation shortcut mode",
-    to: "/settings/voice",
-    searchTerms: ["speech voice keyboard hotkey hold toggle auto"],
-  },
-  {
-    id: "transcription-environment",
-    title: "Transcription environment",
-    to: "/settings/voice",
-    desktopOnly: true,
-    searchTerms: ["speech voice stt server machine device"],
-  },
-  {
-    id: "local-voice-input",
-    title: "Transcription models",
-    to: "/settings/voice",
-    desktopOnly: true,
-    searchTerms: ["speech voice stt download local whisper parakeet canary moonshine"],
-  },
-  {
-    id: "microphone",
-    title: "Microphone",
-    to: "/settings/voice",
-    desktopOnly: true,
-  },
-  {
-    id: "dictionary",
-    title: "Dictionary",
-    to: "/settings/voice",
-    desktopOnly: true,
-    searchTerms: ["speech voice transcription vocabulary names glossary"],
-  },
-  {
-    id: "remove-filler-words",
-    title: "Remove filler words",
-    to: "/settings/voice",
-    desktopOnly: true,
-    searchTerms: ["voice speech transcription hesitation um uh cleanup"],
-  },
-  {
-    id: "speech-acceleration",
-    title: "Transcription acceleration",
-    to: "/settings/voice",
-    searchTerms: ["voice speech gpu cpu hardware transcription"],
-  },
-  {
-    id: "speech-model-unload",
-    title: "Model unload",
-    to: "/settings/voice",
-    searchTerms: ["voice speech transcription memory idle timeout never"],
-  },
-  {
     id: "working-shelf",
     title: "Working section",
     to: "/settings/general",
     searchTerms: ["hide fold running monitoring threads inbox sidebar shelf"],
+  },
+  {
+    id: "scrolling-workspaces",
+    title: "Scrolling workspaces",
+    to: "/settings/labs",
+    searchTerms: [
+      "beta labs niri strip scroll sideways workspaces overview layout tour swipe panes shrink",
+    ],
   },
   {
     id: "boring-sidebar",
@@ -574,6 +535,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Two-line folder rows",
     to: "/settings/labs",
     searchTerms: ["beta boring sidebar folder rows multiline branch pull request details"],
+  },
+  {
+    id: "tool-call-visibility",
+    title: "Tool calls in chat",
+    to: "/settings/labs",
+    searchTerms: [
+      "beta hide tool calls commands edits searches work log activity quiet chat zen final answers only",
+    ],
   },
   {
     id: "guest-links",
@@ -595,6 +564,110 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/labs",
     scope: "environment",
     searchTerms: ["beta alpha simlock callstack simulator emulator ios android pool lease gateway"],
+  },
+  {
+    id: "voice-transcription-destination",
+    title: "Transcribe with",
+    to: "/settings/voice",
+    searchTerms: [
+      "send microphone audio dictation destination speech voice stt transcription environment machine consent privacy cloud OpenAI Grok OpenRouter",
+    ],
+  },
+  {
+    id: "voice-microphone",
+    title: "Microphone",
+    to: "/settings/voice",
+    searchTerms: ["mic input audio device"],
+  },
+  {
+    id: "dictation-shortcut-mode",
+    title: "Dictation shortcut",
+    to: "/settings/voice",
+    searchTerms: ["speech voice keyboard hotkey hold toggle auto"],
+  },
+  {
+    id: "speech-language",
+    title: "Transcription language",
+    to: "/settings/voice",
+    searchTerms: ["speech voice translate english auto detect"],
+  },
+  {
+    id: "speech-dictionary",
+    title: "Dictionary",
+    to: "/settings/voice",
+    searchTerms: ["speech voice transcription vocabulary names glossary alias"],
+  },
+  {
+    id: "speech-project-dictionary",
+    title: "Project dictionary",
+    to: "/settings/voice",
+    scope: "project-defaults",
+    searchTerms: [
+      "speech voice transcription vocabulary shared dictionary team environment glossary",
+    ],
+  },
+  {
+    id: "speech-post-processing-model",
+    title: "Cleanup model",
+    to: "/settings/voice",
+    scope: "environment",
+    searchTerms: ["speech voice transcript cleanup provider model post-processing"],
+  },
+  {
+    id: "speech-correction-word",
+    title: "Correction cue",
+    to: "/settings/voice",
+    searchTerms: ["speech voice cleanup sorry scratch that fix mistake"],
+  },
+  {
+    id: "speech-silence-filtering",
+    title: "Silence filtering",
+    to: "/settings/voice",
+    searchTerms: ["voice speech vad silero pauses noise"],
+  },
+  {
+    id: "remove-filler-words",
+    title: "Remove filler words",
+    to: "/settings/voice",
+    searchTerms: ["voice speech transcription hesitation um uh cleanup"],
+  },
+  {
+    id: "speech-post-processing",
+    title: "Clean up transcripts with a provider",
+    to: "/settings/voice",
+    searchTerms: ["speech transcription polish clean provider prompt post-processing"],
+  },
+  {
+    id: "speech-models",
+    title: "Transcription models",
+    to: "/settings/voice",
+    searchTerms: [
+      "speech voice stt download whisper parakeet canary moonshine accuracy speed benchmark languages",
+    ],
+  },
+  {
+    id: "speech-model-folders",
+    title: "Model folders",
+    to: "/settings/voice",
+    searchTerms: ["speech voice local models folder directory path reuse hex handy"],
+  },
+  {
+    id: "speech-hardware",
+    title: "Transcription hardware and model unloading",
+    to: "/settings/voice",
+    searchTerms: ["speech voice stt advanced gpu cpu acceleration memory unload idle"],
+  },
+  {
+    id: "microphone-test",
+    title: "Test microphone",
+    to: "/settings/voice",
+    searchTerms: ["test mic audio playback loopback record input level"],
+  },
+  {
+    id: "transcription-test",
+    title: "Test model",
+    to: "/settings/voice",
+    searchTerms: ["test voice speech model transcription recognition"],
   },
   {
     id: "auto-settle-inactive-threads",
@@ -822,34 +895,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["generated thread titles prompt custom style naming rename regenerate"],
   },
   {
-    id: "speech-post-processing",
-    title: "Voice post-processing",
-    to: "/settings/voice",
-    searchTerms: ["speech transcription polish clean provider"],
-    desktopOnly: true,
-  },
-  {
-    id: "speech-post-processing-model",
-    title: "Voice post-processing model",
-    to: "/settings/voice",
-    searchTerms: ["speech transcription provider model"],
-    desktopOnly: true,
-  },
-  {
-    id: "speech-correction-word",
-    title: "Explicit correction cue",
-    to: "/settings/voice",
-    searchTerms: ["speech voice self correction revise err"],
-    desktopOnly: true,
-  },
-  {
-    id: "speech-post-processing-prompt",
-    title: "Voice post-processing prompt",
-    to: "/settings/voice",
-    searchTerms: ["speech transcription instructions cleanup"],
-    desktopOnly: true,
-  },
-  {
     id: "app-version",
     title: "Version",
     to: "/settings/about",
@@ -974,14 +1019,6 @@ export const SETTINGS_SEARCH_ITEMS = [
       "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove",
     ],
     providerSettingsOnly: true,
-  },
-  {
-    id: "cursor-keychain-usage",
-    title: "Cursor account usage",
-    to: "/settings/providers",
-    searchTerms: ["cursor macOS keychain usage tokens cost limits permission"],
-    providerSettingsOnly: true,
-    macProviderSettingsOnly: true,
   },
   {
     id: "provider-health-check-interval",
@@ -1501,13 +1538,13 @@ export function filterAvailableSettingsSearchItems(
       (!item.cloudOnly || availability.hasCloudPublicConfig) &&
       (!item.environmentOnly || availability.hasEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
-      (!item.macProviderSettingsOnly || availability.hasMacProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.localEnvironmentOnly || !availability.localEnvironmentDisabled) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
-      (!item.peerLinksOnly || availability.hasPeerLinkHost === true),
+      (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
+      (!item.scrollingWorkspacesOnly || availability.scrollingWorkspaces === true),
   );
 }
 

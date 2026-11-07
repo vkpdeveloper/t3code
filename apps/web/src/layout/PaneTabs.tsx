@@ -4,7 +4,11 @@ import type {
   ContextMenuItem,
   KeybindingCommand,
   ResolvedKeybindingsConfig,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
+import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
+import { projectScriptCwd } from "@t3tools/shared/projectScripts";
+import { create } from "zustand";
 import { useAtomValue } from "@effect/atom-react";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import {
@@ -28,9 +32,14 @@ import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelSt
 import {
   isThreadlessHomeRef,
   isThreadlessSurfacesRef,
+  readThreadlessHome,
   threadlessSurfacesProjectRef,
   useThreadlessHome,
 } from "../threadlessSurfaces";
+import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
+import { canShareWithGuestAtom } from "../components/chat/guestShareAvailability";
+import { previewBridge } from "../components/preview/previewBridge";
+import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
 
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { ContentButton } from "../components/ui/button";
@@ -39,7 +48,11 @@ import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { ThreadSurfaceTabIcon } from "../components/SurfaceTabIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useComposerDraftStore } from "../composerDraftStore";
-import { useThreadPreviewState } from "../previewStateStore";
+import {
+  readThreadPreviewState,
+  useThreadPreviewState,
+  type DesktopPreviewOverlay,
+} from "../previewStateStore";
 import { contextMenuShortcutFields, shortcutLabelForCommand } from "../keybindings";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
@@ -48,7 +61,7 @@ import { cn } from "../lib/utils";
 import { textDirection } from "../textDirection";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { toastManager } from "../components/ui/toast";
-import { useProject, useQuietThreadShell } from "../state/entities";
+import { readProject, readThreadShell, useProject, useQuietThreadShell } from "../state/entities";
 import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -64,6 +77,7 @@ import {
 import { closeLayoutTabByUser, closeOtherLayoutTabsByUser, splitLayoutTab } from "./layoutActions";
 import { beginLayoutTabDrag } from "./layoutDrag";
 import { useLayoutPane } from "./layoutPaneContext";
+import { isScrollingWorkspacesEnabled } from "./layoutBehavior";
 import { useLayoutStore } from "./layoutStore";
 import { setWheelScroller, wheelDeltaPx } from "../motion/gesture";
 import { observeResize } from "../lib/observeResize";
@@ -198,7 +212,7 @@ export function buildLayoutTabMenuItems(
   if (hasSiblings || paneCount > 1) {
     items.push({ id: "layout:new-column", label: "Move to a new column", icon: "columns-2" });
   }
-  if (countLayoutTabs(layout) > 1) {
+  if (isScrollingWorkspacesEnabled() && countLayoutTabs(layout) > 1) {
     items.push({ id: "layout:new-workspace", label: "Move to a new workspace", icon: "layers-2" });
   }
   if (paneCount > 1) {
@@ -266,6 +280,7 @@ export function runLayoutTabMenuAction(action: LayoutTabMenuId, tabId: string): 
       return;
     }
     case "layout:new-workspace": {
+      if (!isScrollingWorkspacesEnabled()) return;
       const index = store.layout.workspaces.indexOf(location.workspace);
       store.moveTabToNewWorkspace(tabId, index + 1);
       return;
@@ -294,18 +309,131 @@ export function runLayoutTabMenuAction(action: LayoutTabMenuId, tabId: string): 
   }
 }
 
-/** Show the layout menu for a tab at the pointer; resolves once it closes. */
+type SurfaceTabMenuId = "rename" | "copy-path" | "toggle-mute";
+
+/**
+ * Stays disabled until desktop overlay state arrives: a server session id can
+ * resolve while the preview manager's createTab is still in flight, and muting
+ * then fails with a PreviewTabNotFoundError nothing surfaces to the user.
+ */
+export function tabMuteMenuItem(input: {
+  overlay: DesktopPreviewOverlay | null;
+  canResolveRuntimeTabId: boolean;
+}): { label: string; disabled: boolean } {
+  const muted = input.overlay?.audioMuted ?? false;
+  return {
+    label: muted ? "Unmute tab" : "Mute tab",
+    disabled: input.overlay === null || !input.canResolveRuntimeTabId,
+  };
+}
+
+export function copyLayoutFilePath(threadRef: ScopedThreadRef, relativePath: string): void {
+  const thread = readThreadShell(threadRef);
+  const draft = useComposerDraftStore.getState().getDraftThreadByRef(threadRef);
+  const projectId =
+    thread?.projectId ??
+    draft?.projectId ??
+    threadlessSurfacesProjectRef(threadRef)?.projectId ??
+    null;
+  const project =
+    projectId === null ? null : readProject(scopeProjectRef(threadRef.environmentId, projectId));
+  const worktreePath = thread?.worktreePath ?? draft?.worktreePath ?? null;
+  const home = readThreadlessHome(threadRef);
+  const cwd = project
+    ? projectScriptCwd({ project: { cwd: project.workspaceRoot }, worktreePath })
+    : (home ?? worktreePath);
+  void navigator.clipboard?.writeText(
+    formatFilePathForClipboard(relativePath, resolvePathLinkTarget(relativePath, cwd ?? "")),
+  );
+}
+
+function surfaceTabMenu(tab: LayoutTab | undefined): {
+  items: ContextMenuItem<SurfaceTabMenuId>[];
+  run: (action: Exclude<SurfaceTabMenuId, "rename">) => void;
+} {
+  const items: ContextMenuItem<SurfaceTabMenuId>[] = [];
+  if (tab?.content.kind !== "surface") return { items, run: () => undefined };
+  const { threadRef, surfaceId } = tab.content;
+  const surface = selectThreadRightPanelState(
+    useRightPanelStore.getState().byThreadKey,
+    threadRef,
+  ).surfaces.find((candidate) => candidate.id === surfaceId);
+  const previewState = readThreadPreviewState(threadRef);
+  const previewTabId =
+    surface?.kind === "preview" && surface.resourceId
+      ? (previewState.sessions[surface.resourceId]?.tabId ?? null)
+      : null;
+  const overlay = previewTabId ? (previewState.desktopByTabId[previewTabId] ?? null) : null;
+  if (surface?.kind === "device") items.push({ id: "rename", label: "Rename" });
+  if (surface?.kind === "file" && surface.attachment === undefined) {
+    items.push({ id: "copy-path", label: "Copy path" });
+  }
+  if (surface?.kind === "preview") {
+    items.push({
+      id: "toggle-mute",
+      ...tabMuteMenuItem({ overlay, canResolveRuntimeTabId: true }),
+    });
+  }
+  return {
+    items,
+    run: (action) => {
+      if (action === "copy-path" && surface?.kind === "file" && !surface.attachment) {
+        copyLayoutFilePath(threadRef, surface.relativePath);
+      } else if (action === "toggle-mute" && previewTabId && overlay) {
+        void previewBridge
+          ?.setAudioMuted(
+            previewRuntimeTabId(threadRef, previewState.serverEpoch, previewTabId),
+            !overlay.audioMuted,
+          )
+          .catch(() => undefined);
+      }
+    },
+  };
+}
+
+/** Show a tab's menu at the pointer, its own actions before the layout's; resolves once it closes. */
 export async function showLayoutTabMenu(
   tabId: string,
   position: { x: number; y: number },
   keybindings: ResolvedKeybindingsConfig,
+  onRename: () => void = () => renameLayoutTab(tabId),
 ): Promise<void> {
   const api = readLocalApi();
   if (!api) return;
-  const items = buildLayoutTabMenuItems(useLayoutStore.getState().layout, tabId, keybindings);
-  if (items.length === 0) return;
-  const action = await api.contextMenu.show(items, position);
-  if (action) runLayoutTabMenuAction(action, tabId);
+  const { layout } = useLayoutStore.getState();
+  const layoutItems = buildLayoutTabMenuItems(layout, tabId, keybindings);
+  if (layoutItems.length === 0) return;
+  const own = surfaceTabMenu(findLayoutTab(layout, (tab) => tab.id === tabId)?.tab);
+  const action = await api.contextMenu.show<SurfaceTabMenuId | LayoutTabMenuId>(
+    [
+      ...own.items,
+      ...layoutItems.map((item, index) =>
+        index === 0 && own.items.length > 0 ? { ...item, separatorBefore: true } : item,
+      ),
+    ],
+    position,
+  );
+  if (action === null) return;
+  if (isLayoutTabMenuId(action)) runLayoutTabMenuAction(action, tabId);
+  else if (action === "rename") onRename();
+  else own.run(action);
+}
+
+const useLayoutTabRenameStore = create<{ tabId: string | null }>(() => ({ tabId: null }));
+
+function renameLayoutTab(tabId: string): void {
+  useLayoutStore.getState().focusTab(tabId);
+  useLayoutTabRenameStore.setState({ tabId });
+}
+
+export function useLayoutTabRenameRequested(tabId: string | null): boolean {
+  return useLayoutTabRenameStore((state) => tabId !== null && state.tabId === tabId);
+}
+
+export function finishLayoutTabRename(tabId: string | null): void {
+  if (tabId !== null && useLayoutTabRenameStore.getState().tabId === tabId) {
+    useLayoutTabRenameStore.setState({ tabId: null });
+  }
 }
 
 /** A middle click closes a tab, as in browsers and editors. */
@@ -348,7 +476,7 @@ export function LayoutTabCloseButton({ tabId, title }: { tabId: string; title: s
             variant="tab-close"
             type="button"
             aria-label={`Close ${title}`}
-            className="absolute start-2.25 top-1/2 -translate-y-1/2 group-data-icon-only/tab:hidden"
+            className="absolute start-2.25 top-1/2 -translate-y-1/2"
             data-tab-close=""
             onClick={() => closeLayoutTabByUser(tabId)}
           />
@@ -364,27 +492,67 @@ export function LayoutTabCloseButton({ tabId, title }: { tabId: string; title: s
 /**
  * A pane tab that is not the pane's active one (pen W6VyO): the same 28px
  * notch tab with its label in the muted tier. Click shows it, middle click
- * or its close button closes it, right click opens the layout menu, dragging
- * moves or splits it.
+ * or its close button closes it, right click opens the tab's own menu without
+ * showing it, dragging moves or splits it.
  */
 export const LayoutPaneTab = memo(function LayoutPaneTab({ tab }: { tab: LayoutTab }) {
-  const label = useLayoutTabLabel(tab);
+  if (tab.content.kind === "chat" && tab.content.target.kind === "server") {
+    return <ThreadLayoutPaneTab tab={tab} threadRef={tab.content.target.threadRef} />;
+  }
+  return <PlainLayoutPaneTab tab={tab} />;
+});
+
+function PlainLayoutPaneTab({ tab }: { tab: LayoutTab }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  return (
+    <LayoutPaneTabButton
+      tab={tab}
+      onOpenMenu={(position) => void showLayoutTabMenu(tab.id, position, keybindings)}
+    />
+  );
+}
+
+function ThreadLayoutPaneTab({ tab, threadRef }: { tab: LayoutTab; threadRef: ScopedThreadRef }) {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const canShareWithGuest = useAtomValue(canShareWithGuestAtom(threadRef.environmentId));
+  const thread = useQuietThreadShell(threadRef);
+  const project = useProject(
+    thread ? scopeProjectRef(thread.environmentId, thread.projectId) : null,
+  );
+  const { openMenu } = useThreadActionMenu({
+    threadRef,
+    projectCwd: project?.workspaceRoot ?? null,
+    onStartRename: () => renameLayoutTab(tab.id),
+    canShareWithGuest,
+    leadingItems: () =>
+      buildLayoutTabMenuItems(useLayoutStore.getState().layout, tab.id, keybindings),
+    onLeadingAction: (id) => {
+      if (isLayoutTabMenuId(id)) runLayoutTabMenuAction(id, tab.id);
+    },
+  });
+  return <LayoutPaneTabButton tab={tab} onOpenMenu={openMenu} />;
+}
+
+function LayoutPaneTabButton({
+  tab,
+  onOpenMenu,
+}: {
+  tab: LayoutTab;
+  onOpenMenu: (position: { x: number; y: number }) => void;
+}) {
+  const label = useLayoutTabLabel(tab);
   const focusTab = () => {
     useLayoutStore.getState().focusTab(tab.id);
   };
   const openMenu = (event: ReactMouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    void showLayoutTabMenu(tab.id, { x: event.clientX, y: event.clientY }, keybindings);
+    onOpenMenu({ x: event.clientX, y: event.clientY });
   };
   return (
     // Clipped to its box, so a squeezed tab never slides under its neighbor;
     // it keeps at least its icon, so a Settings or side tab stays findable.
-    <span
-      ref={showIconOnlyWhenClipped}
-      className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}
-    >
+    <span className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -405,10 +573,7 @@ export const LayoutPaneTab = memo(function LayoutPaneTab({ tab }: { tab: LayoutT
         >
           <span className={LAYOUT_TAB_ICON_CLASS}>{label.icon}</span>
           <span
-            className={cn(
-              "min-w-[4ch] group-data-icon-only/tab:invisible",
-              PANE_INACTIVE_TAB_TITLE_CLASS,
-            )}
+            className={cn("min-w-[4ch]", PANE_INACTIVE_TAB_TITLE_CLASS)}
             dir={textDirection(label.title)}
           >
             {label.title}
@@ -420,14 +585,6 @@ export const LayoutPaneTab = memo(function LayoutPaneTab({ tab }: { tab: LayoutT
       </Tooltip>
       <LayoutTabCloseButton tabId={tab.id} title={label.title} />
     </span>
-  );
-});
-
-export function showIconOnlyWhenClipped(slot: HTMLSpanElement) {
-  const tab = slot.firstElementChild;
-  if (!(tab instanceof HTMLElement)) return;
-  return observeResize([slot, tab], () =>
-    slot.toggleAttribute("data-icon-only", tab.scrollWidth > tab.clientWidth),
   );
 }
 
@@ -582,7 +739,7 @@ export function useLayoutTabLabel(tab: LayoutTab): {
       tooltip: [
         title,
         terminal?.state.summary?.label,
-        surface?.kind === "preview" && title !== "Browser" ? "Browser" : null,
+        surface?.kind === "preview" ? "Browser" : null,
         threadTitle,
         path,
         url,

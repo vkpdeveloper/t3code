@@ -194,6 +194,8 @@ export function useSettingsSearchTarget<T extends HTMLElement>(id: string | unde
 
 export function SettingsSearchTarget({
   children,
+  // `searchableSetting` names the target for search; as an HTML title it shows a native tooltip.
+  title: _searchTitle,
   ...targetProps
 }: ComponentPropsWithoutRef<"div">) {
   const targetRef = useSettingsSearchTarget<HTMLDivElement>(targetProps.id);
@@ -698,7 +700,7 @@ export function SettingsRow({
           {trailing}
         </div>
         {renderedControl ? (
-          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[26rem]/settings-row:w-auto @min-[26rem]/settings-row:justify-end">
+          <div className="flex w-full min-w-0 shrink-0 items-center gap-2 @min-[26rem]/settings-row:w-auto @min-[26rem]/settings-row:justify-end @min-[26rem]/settings-row:[&_[data-slot=select-trigger]]:min-w-40">
             {renderedControl}
           </div>
         ) : null}
@@ -905,11 +907,13 @@ export function SettingsPageContainer({
   children,
   className,
   width = "readable",
+  searchTargetFallbacks,
   centered = false,
 }: {
   children: ReactNode;
   className?: string;
   width?: WorkspacePageWidth;
+  searchTargetFallbacks?: Readonly<Record<string, string | undefined>>;
   /** Centers short content such as an empty state in the page's height. */
   centered?: boolean;
 }) {
@@ -936,7 +940,9 @@ export function SettingsPageContainer({
 
   return (
     <SettingsSearchTargetProvider
-      targetId={focused ? targetId : null}
+      targetId={
+        focused && targetId !== null ? (searchTargetFallbacks?.[targetId] ?? targetId) : null
+      }
       highlightTarget={highlightTarget}
       onTargetHandled={clearTargetHash}
     >

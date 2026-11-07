@@ -1076,9 +1076,21 @@ export default function GitActionsControl({
   );
 
   const changesSummary = (
-    <span className="ms-auto flex shrink-0 items-center gap-1 text-caption tabular-nums">
-      <span className="text-diff-addition">+{formatDiffCount(changesTotals?.insertions ?? 0)}</span>
-      <span className="text-diff-deletion">-{formatDiffCount(changesTotals?.deletions ?? 0)}</span>
+    <span className="ms-auto flex min-w-0 items-center gap-1 text-caption tabular-nums">
+      {changesBaseLabel ? (
+        <Tooltip>
+          <TooltipTrigger render={<span className="min-w-0 truncate text-muted-foreground" />}>
+            {changesBaseLabel}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{changesBaseLabel}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      <span className="shrink-0 text-diff-addition">
+        +{formatDiffCount(changesTotals?.insertions ?? 0)}
+      </span>
+      <span className="shrink-0 text-diff-deletion">
+        -{formatDiffCount(changesTotals?.deletions ?? 0)}
+      </span>
     </span>
   );
 
@@ -1231,11 +1243,6 @@ export default function GitActionsControl({
             <ThreadDetailsControl disabled={!onOpenChanges} onClick={onOpenChanges}>
               <FileDiffIcon aria-hidden />
               <MenuItemLabel>View changes</MenuItemLabel>
-              {changesBaseLabel ? (
-                <span className="min-w-0 truncate text-caption text-dim-foreground">
-                  {changesBaseLabel}
-                </span>
-              ) : null}
               {!showActions ? changesSummary : null}
               {keybindings && (
                 <MenuShortcut>

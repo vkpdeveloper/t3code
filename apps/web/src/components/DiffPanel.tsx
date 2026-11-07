@@ -159,8 +159,8 @@ function DiffFileCollapseToggle({
   filePath: string;
   fileKey: string;
   collapsed: boolean;
-  iconClassName: string;
   load?: () => void;
+  iconClassName: string;
   onToggle: (fileKey: string) => void;
 }) {
   return (
@@ -915,7 +915,7 @@ export default function DiffPanel({
               </span>
             )
           ) : null}
-          <DropdownMenuContent align="start" variant="scope" className="w-49">
+          <DropdownMenuContent align="start" className="w-49">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
               <DropdownMenuRadioItem value="unstaged" closeOnClick>
                 <span>Working tree</span>
@@ -930,7 +930,7 @@ export default function DiffPanel({
             <DropdownMenuSeparator />
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent variant="scope" className="w-50">
+              <DropdownMenuSubContent className="w-50">
                 <DropdownMenuRadioGroup value={selectedTurnValue} onValueChange={selectScopeValue}>
                   {orderedTurnDiffSummaries.map((summary) => {
                     const turnCount = summary.checkpointTurnCount;
@@ -1257,7 +1257,7 @@ export default function DiffPanel({
             className={cn(
               "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background",
               // The notice takes the band under a pane header the diff scrolls under.
-              (preview?.incomplete || (isSelectedPatchTruncated && !lazySource)) &&
+              ((isSelectedPatchTruncated && !lazySource) || preview?.incomplete) &&
                 "pt-under-header *:[--surface-top-inset:0px]",
             )}
           >
@@ -1409,8 +1409,9 @@ export default function DiffPanel({
                   }}
                 >
                   <AnnotatableCodeView
-                    {...(activeThread ? { environmentId: activeThread.environmentId } : {})}
                     key={collapseScopeKey ?? reviewSectionId}
+                    environmentId={activeThread?.environmentId}
+                    projectId={activeThread?.projectId}
                     viewerRef={codeViewReveal.attach}
                     codeViewKey={codeViewMountKey}
                     className="h-full min-h-0 overflow-auto"
@@ -1457,7 +1458,9 @@ export default function DiffPanel({
                             onToggle={toggleDiffFileCollapsed}
                             {...(fileDiff.cacheKey?.endsWith(":pending") &&
                             !collapsedDiffFileKeys.has(fileKey)
-                              ? { load: () => requestFile(filePath) }
+                              ? {
+                                  load: () => requestFile(filePath),
+                                }
                               : {})}
                           />
                           <DiffFileChangeIcon type={fileDiff.type} />

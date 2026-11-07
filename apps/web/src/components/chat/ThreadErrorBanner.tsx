@@ -101,7 +101,7 @@ export function threadErrorBannerItem({
     description: workspaceLimit
       ? "You've reached your workspace's limit for using your ChatGPT plan in other apps. Copy a request to ask your workspace admin for increased usage limits."
       : chatGptLimit
-        ? "Review your usage settings in ChatGPT."
+        ? null
         : message,
     descriptionDetails:
       !chatGptLimit && message !== error ? (

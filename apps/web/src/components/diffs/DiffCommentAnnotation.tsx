@@ -1,16 +1,18 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import {
-  SpeechTextField,
-  TextFieldSpeechControls,
-  type useTextFieldSpeech,
-} from "~/speech/useTextFieldSpeech";
-
+import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { Trash2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
-import { Textarea } from "~/components/ui/textarea";
+import {
+  PullRequestMarkdownTextarea,
+  type PullRequestCompletionScope,
+} from "~/components/pullRequest/PullRequestMarkdownTextarea";
+import {
+  SpeechTextField,
+  TextFieldSpeechControls,
+  type TextFieldSpeech,
+} from "~/speech/useTextFieldSpeech";
 import { textDirection } from "~/textDirection";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { formatElapsedDurationLabel } from "~/timestampFormat";
@@ -25,7 +27,9 @@ interface DiffCommentSecondaryAction {
 }
 
 interface DiffCommentAnnotationProps {
-  environmentId?: EnvironmentId;
+  /** With an environment, the draft can be dictated; its project supplies vocabulary. */
+  environmentId?: EnvironmentId | undefined;
+  projectId?: ProjectId | null | undefined;
   ownerKey?: string;
   kind: "draft" | "comment";
   rangeLabel: string;
@@ -39,6 +43,8 @@ interface DiffCommentAnnotationProps {
   pending?: boolean;
   secondaryAction?: DiffCommentSecondaryAction;
   focusOnMount?: boolean;
+  /** Set only for pull request comments, where `@` completes the repository's users. */
+  completionScope?: PullRequestCompletionScope | null;
   /** When a saved comment was written, shown beside the author as a relative time. */
   createdAt?: string | undefined;
   /** Where the comment lives now, such as "In composer", as a chip at the end of the head. */
@@ -97,6 +103,7 @@ export const COMMENT_CARD_CLASS =
 
 export function DiffCommentAnnotation({
   environmentId,
+  projectId,
   ownerKey,
   kind,
   rangeLabel,
@@ -110,6 +117,7 @@ export function DiffCommentAnnotation({
   pending = false,
   secondaryAction,
   focusOnMount = true,
+  completionScope = null,
   createdAt,
   stateLabel,
 }: DiffCommentAnnotationProps) {
@@ -165,8 +173,20 @@ export function DiffCommentAnnotation({
     );
   }
 
+  const submit = (
+    speech: TextFieldSpeech | undefined,
+    action: (text: string) => void,
+    allowEmpty = false,
+  ) => {
+    const finish = (value: string) => {
+      if (!pending && (allowEmpty || value.trim())) action(value.trim());
+    };
+    if (speech) speech.submitAfterDictation(finish);
+    else finish(displayedText);
+  };
+
   // Pierre hides native carets and selection; textarea comments need their own visible feedback.
-  const renderDraft = (speech?: ReturnType<typeof useTextFieldSpeech>) => (
+  const renderDraft = (speech?: TextFieldSpeech) => (
     <div
       data-diff-comment-annotation
       className={`flex flex-col gap-2 p-2.5 ${COMMENT_CARD_CLASS} caret-foreground selection:bg-primary selection:text-primary-foreground [--surface-tint-rim:var(--diff-comment-rim,var(--popover-rim))]`}
@@ -174,8 +194,9 @@ export function DiffCommentAnnotation({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <CommentCardHead meta={rangeLabel} stateLabel={stateLabel} />
-      <Textarea
+      <PullRequestMarkdownTextarea
         ref={textareaRef}
+        completionScope={completionScope}
         readOnly={speech?.freezesEditor}
         autoFocus={focusOnMount}
         size="sm"
@@ -183,7 +204,7 @@ export function DiffCommentAnnotation({
         dir={textDirection(displayedText)}
         placeholder={placeholder}
         aria-label={`Comment on lines ${rangeLabel}`}
-        onChange={(event) => (onTextChange ?? setLocalDraftText)(event.target.value)}
+        onValueChange={onTextChange ?? setLocalDraftText}
         onFocus={(event) => {
           const end = event.currentTarget.value.length;
           event.currentTarget.setSelectionRange(end, end);
@@ -191,17 +212,12 @@ export function DiffCommentAnnotation({
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
-            onCancel();
+            if (speech && speech.state.phase !== "idle") speech.cancel();
+            else onCancel();
           }
-          if (
-            isCommentSubmitShortcut(
-              event,
-              trimmedText,
-              pending || speech?.blocksSubmission === true,
-            )
-          ) {
+          if (isCommentSubmitShortcut(event, trimmedText, pending, speech?.blocksSubmission)) {
             event.preventDefault();
-            onComment(trimmedText);
+            submit(speech, onComment);
           }
         }}
       />
@@ -216,9 +232,11 @@ export function DiffCommentAnnotation({
             size="xs"
             variant="secondary"
             disabled={
-              pending || speech?.blocksSubmission || (!secondaryAction.allowEmpty && !trimmedText)
+              speech?.preparing ||
+              pending ||
+              (!speech?.blocksSubmission && !secondaryAction.allowEmpty && !trimmedText)
             }
-            onClick={() => secondaryAction.onAction(trimmedText)}
+            onClick={() => submit(speech, secondaryAction.onAction, secondaryAction.allowEmpty)}
           >
             {secondaryAction.icon}
             {secondaryAction.label}
@@ -226,17 +244,19 @@ export function DiffCommentAnnotation({
         ) : null}
         <Button
           size="xs"
-          disabled={pending || speech?.blocksSubmission || !trimmedText}
-          onClick={() => onComment(trimmedText)}
+          disabled={speech?.preparing || pending || (!speech?.blocksSubmission && !trimmedText)}
+          onClick={() => submit(speech, onComment)}
         >
           {submitLabel}
         </Button>
       </div>
     </div>
   );
+
   return environmentId ? (
     <SpeechTextField
       environmentId={environmentId}
+      projectId={projectId}
       ownerKey={ownerKey ?? rangeLabel}
       text={displayedText}
       textareaRef={textareaRef}

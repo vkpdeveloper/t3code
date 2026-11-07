@@ -23,8 +23,8 @@ import {
 import { museModelCapabilities, resolveMuseReasoningEffort } from "./modelCatalog.ts";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import {
-  TranscriptionPostProcessingOutput,
   investigationUnsupported,
+  TranscriptionPostProcessingOutput,
 } from "@t3tools/provider-core/server/textGenerationOperations";
 import {
   buildBranchNamePrompt,
@@ -366,7 +366,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
-    generateTranscriptionPostProcessing,
     generateReviewGuide,
+    generateTranscriptionPostProcessing,
   } satisfies ProviderTextGeneration;
 });

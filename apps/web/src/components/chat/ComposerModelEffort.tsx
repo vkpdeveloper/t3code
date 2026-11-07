@@ -102,8 +102,7 @@ export function describeComposerEffort(
     (descriptor) =>
       isReasoningControl(descriptor) ||
       descriptor.id === "serviceTier" ||
-      descriptor.id === "fastMode" ||
-      descriptor.id === "ultracode",
+      descriptor.id === "fastMode",
   );
   if (descriptors.length === 0) return { suffix: null, detail: null };
   const display = buildTraitsTriggerDisplay({
@@ -134,7 +133,11 @@ export function describeComposerEffort(
         ? `${reasoning.label} ${reasoning.currentValue === true ? "On" : "Off"}`
         : ultrathink
           ? "Ultrathink"
-          : getProviderOptionCurrentLabel(reasoning, modelSelection, traits.reportedModelSelection);
+          : (getProviderOptionCurrentLabel(
+              reasoning,
+              modelSelection,
+              traits.reportedModelSelection,
+            ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
   const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
   return {
     detail: display.label || "Fast mode",
@@ -218,13 +221,7 @@ export function ComposerReasoningPicker(props: {
         </TooltipTrigger>
         <TooltipPopup side="top">{display.detail}</TooltipPopup>
       </Tooltip>
-      <MenuPopup
-        side="top"
-        align="end"
-        width="wide"
-        spacing="compact"
-        {...composerFloatingLayerProps}
-      >
+      <MenuPopup side="top" align="end" width="wide" {...composerFloatingLayerProps}>
         <TraitsMenuContent {...props.traits} reasoningOnly />
       </MenuPopup>
     </Menu>

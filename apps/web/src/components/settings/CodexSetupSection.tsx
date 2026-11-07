@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { AuthProvidersManageScope, ProviderDriverKind } from "@t3tools/contracts";
 import { readPreparedConnection, useEnvironmentScope } from "../../state/session";
 import {
@@ -235,6 +236,10 @@ function ManagedCodexSetup({
   const completeAuth = useAtomCommand(serverEnvironment.completeProviderAuth, options);
   const cancelAuth = useAtomCommand(serverEnvironment.cancelProviderAuth, options);
   const logoutAuth = useAtomCommand(serverEnvironment.logoutProviderAuth, options);
+  const removeAuthMethod = useAtomCommand(serverEnvironment.removeProviderAuthMethod, options);
+  const canRemoveAuthMethod = useAtomValue(
+    serverEnvironment.removeProviderAuthMethod.permissionAtom(environmentId),
+  );
   const startInstall = useAtomCommand(serverEnvironment.startProviderInstall, options);
   const cancelInstall = useAtomCommand(serverEnvironment.cancelProviderInstall, options);
   const reconnectProfile = useAtomCommand(serverEnvironment.chatGptReconnectProfile, options);
@@ -715,6 +720,12 @@ function ManagedCodexSetup({
       open={accountPickerOpen}
       methods={auth?.methods ?? []}
       onClose={() => setAccountPickerOpen(false)}
+      disabled={unavailable || busy}
+      canRemove={canRemoveAuthMethod}
+      error={error}
+      onRemove={(methodId) => {
+        void run(() => removeAuthMethod({ environmentId, input: { instanceId, methodId } }));
+      }}
       onSelect={(methodId) => {
         setAccountPickerOpen(false);
         void setup(
@@ -885,6 +896,7 @@ export function CodexManagedRuntimeFields({
         control={
           <div className="w-full sm:w-80">
             <Input
+              size="settings"
               aria-label="Codex binary path"
               value={executablePath}
               title={executablePath}
@@ -900,6 +912,7 @@ export function CodexManagedRuntimeFields({
         control={
           <div className="w-full sm:w-80">
             <Input
+              size="settings"
               aria-label="Codex home path"
               value={provider?.runtimePaths?.homePath ?? ""}
               title={provider?.runtimePaths?.homePath}
@@ -919,6 +932,7 @@ export function CodexManagedRuntimeFields({
         control={
           <div className="w-full sm:w-80">
             <Input
+              size="settings"
               aria-label="Codex shadow home path"
               value={provider?.runtimePaths?.shadowHomePath ?? ""}
               title={provider?.runtimePaths?.shadowHomePath ?? undefined}

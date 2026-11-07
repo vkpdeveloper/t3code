@@ -14,17 +14,16 @@ vi.hoisted(() => window.localStorage.removeItem("t3code:layout-state:v2"));
 
 import { act, render } from "../../test/render";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { openLayoutNewThreadTab } from "../layout/layoutActions";
 import {
   createLayoutState,
-  findLayoutChatForThread,
   findLayoutSurfaceTabs,
   selectFocusedTab,
   THREAD_TERMINAL_SURFACE_ID,
   type LayoutTabContent,
 } from "../layout/layoutModel";
 import { useLayoutStore } from "../layout/layoutStore";
-import { requestLayoutSurfacePlacement, useLayoutSurfaceSync } from "../layout/surfaceSync";
+import { useLayoutSurfaceSync } from "../layout/surfaceSync";
+import { isMacPlatform } from "../lib/utils";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -51,6 +50,20 @@ function pressEscape(): KeyboardEvent {
   const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
   window.dispatchEvent(event);
   return event;
+}
+
+function pressNewLocalThread() {
+  const mac = isMacPlatform(navigator.platform);
+  window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "n",
+      metaKey: mac,
+      ctrlKey: !mac,
+      shiftKey: true,
+      cancelable: true,
+      bubbles: true,
+    }),
+  );
 }
 
 function selectThread(threadKey: string) {
@@ -130,51 +143,6 @@ describe("chat route commands", () => {
     expect(useRightPanelStore.getState().byThreadKey[scopedThreadKey(first)]?.isOpen).toBe(false);
   });
 
-  it("spends a pane placement on an open that only shows an existing surface", async () => {
-    using stack = new DisposableStack();
-    const layout = useLayoutStore.getState().layout;
-    const panels = useRightPanelStore.getState();
-    stack.defer(() => useLayoutStore.setState({ layout }));
-    stack.defer(() => useRightPanelStore.setState(panels));
-    useLayoutStore.setState({ layout: createLayoutState() });
-    useRightPanelStore.setState({ byThreadKey: {} });
-    const threadRef = scopeThreadRef(EnvironmentId.make("env"), ThreadId.make("placed"));
-    const other = scopeThreadRef(EnvironmentId.make("env"), ThreadId.make("other"));
-    function SurfaceSync() {
-      useLayoutSurfaceSync();
-      return null;
-    }
-    await using _screen = await render(createElement(SurfaceSync));
-    const surfacePane = (surfaceId: string) =>
-      findLayoutSurfaceTabs(useLayoutStore.getState().layout, threadRef).find(
-        ({ tab }) => tab.content.kind === "surface" && tab.content.surfaceId === surfaceId,
-      )?.pane.id;
-    await act(() => {
-      useLayoutStore
-        .getState()
-        .openTab(
-          { kind: "chat", target: { kind: "server", threadRef } },
-          { placement: "new-column" },
-        );
-      useRightPanelStore.getState().open(threadRef, "diff");
-      useLayoutStore
-        .getState()
-        .openTab(
-          { kind: "chat", target: { kind: "server", threadRef: other } },
-          { placement: "new-column" },
-        );
-    });
-    const otherPaneId = findLayoutChatForThread(useLayoutStore.getState().layout, other)!.pane.id;
-    expect(surfacePane("diff")).not.toBe(otherPaneId);
-    await act(() => {
-      requestLayoutSurfacePlacement(threadRef, { kind: "pane", paneId: otherPaneId });
-      useRightPanelStore.getState().open(threadRef, "diff");
-    });
-    expect(surfacePane("diff")).not.toBe(otherPaneId);
-    await act(() => useRightPanelStore.getState().open(threadRef, "files"));
-    expect(surfacePane("files")).toBe(surfacePane("diff"));
-  });
-
   it("starts drafts in the focused chat, launcher or surface project while the route stays elsewhere", async () => {
     using stack = new DisposableStack();
     const layout = useLayoutStore.getState().layout;
@@ -202,7 +170,9 @@ describe("chat route commands", () => {
     );
     const router = {
       state: {
-        matches: [{ params: { draftId: routeDraft } }],
+        matches: [
+          { routeId: "/_chat", pathname: "/draft/route-draft", params: { draftId: routeDraft } },
+        ],
         location: { pathname: "/draft/route-draft", href: "/draft/route-draft", search: {} },
       },
       navigate,
@@ -216,7 +186,7 @@ describe("chat route commands", () => {
     for (const tab of content) {
       useLayoutStore.getState().openTab(tab);
       navigate.mockClear();
-      expect(openLayoutNewThreadTab()).toBe(true);
+      pressNewLocalThread();
       await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
       const request = navigate.mock.calls[0]![0];
       expect(

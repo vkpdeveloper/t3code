@@ -105,7 +105,7 @@ import {
   copyPromptLink,
   promptLinkRepositoryOf,
 } from "./promptLinks/copyPromptLink";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useScrollingWorkspacesEnabled } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { readLocalApi } from "../localApi";
 import { configuredHostedAppUrl } from "../hostedPairing";
@@ -150,6 +150,7 @@ import {
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
+  isFilesystemBrowseQuery,
   isScratchProject,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
@@ -216,7 +217,7 @@ import {
 } from "./CommandPalette.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { isSidebarHiddenThread } from "./Sidebar.logic";
-import { CommandPaletteContent } from "./CommandPaletteContent";
+import { CommandPaletteContent, type PendingInputSelection } from "./CommandPaletteContent";
 import { buildLayoutPaletteItems, buildOpenBesidePaletteItem } from "../layout/layoutPaletteItems";
 import {
   selectCommandPaletteClientSettings,
@@ -471,11 +472,14 @@ function OpenCommandPaletteDialog(props: {
   const resultListRef = useRef<LegendListRef | null>(null);
   // A pushed view drops the typed highlight until the user moves it again.
   const highlightClearedRef = useRef(viewStack.length > 0);
+  // Entering or leaving browse mode remounts the input; carry the caret across it.
+  const remountSelectionRef = useRef<PendingInputSelection | null>(null);
   function clearTypedHighlight(): void {
     highlightClearedRef.current = true;
     setHighlightedItemValue(null);
   }
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
+  const scrollingWorkspaces = useScrollingWorkspacesEnabled();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
@@ -979,10 +983,25 @@ function OpenCommandPaletteDialog(props: {
     setHighlightedItemValue(null);
   }
 
-  function handleQueryChange(nextQuery: string): void {
+  function handleQueryChange(nextQuery: string, source: EventTarget | null): void {
     browseNavigation.invalidate();
     clearTypedHighlight();
-    setQuery(canBrowsePaths ? resolvePastedPath(query, nextQuery) : nextQuery);
+    const resolvedQuery = canBrowsePaths ? resolvePastedPath(query, nextQuery) : nextQuery;
+    // A rewritten paste has no matching offsets, so its caret lands at the end.
+    if (
+      source instanceof HTMLInputElement &&
+      resolvedQuery === nextQuery &&
+      (canBrowsePaths && isFilesystemBrowseQuery(resolvedQuery, browseEnvironmentPlatform)) !==
+        isBrowsing
+    ) {
+      remountSelectionRef.current = {
+        value: resolvedQuery,
+        start: source.selectionStart,
+        end: source.selectionEnd,
+        direction: source.selectionDirection,
+      };
+    }
+    setQuery(resolvedQuery);
     if (nextQuery === "" && currentView?.initialQuery) {
       popView();
     }
@@ -1530,7 +1549,7 @@ function OpenCommandPaletteDialog(props: {
   if (openBesideItem) actionItems.push(openBesideItem);
   // The index shows the layout too once there is a project.
   if (activeThread || activeDraftThread || (pathname === "/" && projects.length > 0)) {
-    actionItems.push(...buildLayoutPaletteItems());
+    actionItems.push(...buildLayoutPaletteItems(scrollingWorkspaces));
   }
 
   actionItems.push({
@@ -2954,7 +2973,8 @@ function OpenCommandPaletteDialog(props: {
           scrollCommandPaletteRowIntoView(resultListRef.current, rowIndex);
         }
       }}
-      onValueChange={handleQueryChange}
+      onValueChange={(nextQuery, { event }) => handleQueryChange(nextQuery, event.target)}
+      pendingSelectionRef={remountSelectionRef}
       showBackHint={isSubmenu}
       value={query}
     >

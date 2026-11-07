@@ -2,8 +2,8 @@ import {
   DesktopPreviewAnnotationSendEnabledInputSchema,
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewForwardedShortcutsInputSchema,
-  DesktopPreviewAnnotationVoiceInputSchema,
   DesktopPreviewAnnotationVoiceStateSchema,
+  DesktopPreviewPickElementInputSchema,
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewConfigInputSchema,
   DesktopPreviewNavigateInputSchema,
@@ -376,11 +376,21 @@ const setForwardedKeyChords = DesktopIpc.makeIpcMethod({
 
 const pickElement = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_PICK_ELEMENT_CHANNEL,
-  payload: DesktopPreviewAnnotationVoiceInputSchema,
+  payload: DesktopPreviewPickElementInputSchema,
   result: Schema.NullOr(PreviewAnnotationSubmissionResultSchema),
   handler: Effect.fn("desktop.ipc.preview.pickElement")(function* ({ tabId, voice }) {
     const manager = yield* PreviewManager.PreviewManager;
     return yield* manager.pickElement(tabId, voice);
+  }),
+});
+
+const updateAnnotationVoice = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_ANNOTATION_VOICE_STATE_CHANNEL,
+  payload: DesktopPreviewAnnotationVoiceStateSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.updateAnnotationVoice")(function* (state) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.updateAnnotationVoice(state);
   }),
 });
 
@@ -439,19 +449,9 @@ const saveRecording = DesktopIpc.makeIpcMethod({
   }),
 });
 
-const updateAnnotationVoice = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_ANNOTATION_VOICE_STATE_CHANNEL,
-  payload: DesktopPreviewAnnotationVoiceStateSchema,
-  result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.updateAnnotationVoice")(function* (state) {
-    const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.updateAnnotationVoice(state);
-  }),
-});
-
 export const methods = [
-  updateAnnotationVoice,
   setForwardedShortcuts,
+  updateAnnotationVoice,
   createTab,
   closeTab,
   registerWebview,

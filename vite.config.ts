@@ -96,7 +96,16 @@ const taskCacheConfig = {
 export default defineConfig({
   run: {
     cache: taskCacheConfig,
-    tasks: cachedTestTasks(process.env.T3_CACHED_TESTS),
+    tasks: {
+      ...cachedTestTasks(process.env.T3_CACHED_TESTS),
+      // The two knip passes read the same files and write nothing, so they run side by side.
+      // The `knip:check` script runs this task, so `vp run knip:check` and `pnpm run knip:check` both use it.
+      "knip:check:all": {
+        command: 'node -e ""',
+        dependsOn: ["knip:check:files", "knip:check:exports"],
+        cache: false,
+      },
+    },
   },
   resolve: {
     alias: {
@@ -185,6 +194,7 @@ export default defineConfig({
       // Vendored and generated C.
       "apps/mobile/modules/t3-highlights/Vendor/**",
       "apps/mobile/modules/t3-highlights/cpp/generated/**",
+      "apps/mobile/modules/t3-highlights/nitrogen/generated/**",
       "*.icon/**",
     ],
     sortPackageJson: {},
@@ -546,6 +556,10 @@ export default defineConfig({
         rules: { "t3code/no-outset-state-indicators": "error" },
       },
       {
+        files: ["apps/web/src/**"],
+        rules: { "t3code/max-settings-description-length": "error" },
+      },
+      {
         files: ["apps/*/src/**", "packages/*/src/**"],
         excludeFiles: [
           "**/*.{test,spec}.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
@@ -667,6 +681,7 @@ export default defineConfig({
           "apps/mobile/src/features/files/AttachmentFileScreen.tsx",
           "apps/mobile/src/features/files/ThreadFilesRouteScreen.tsx",
           "apps/mobile/src/features/files/thread-file-navigator-pane.tsx",
+          "apps/mobile/src/features/layout/nested-stacks.tsx",
           "apps/mobile/src/features/review/ReviewSheet.tsx",
           "apps/mobile/src/features/review/useNativeReviewDiffBridge.ts",
           "apps/mobile/src/features/settings/SettingsEnvironmentsRouteScreen.tsx",
@@ -674,8 +689,8 @@ export default defineConfig({
           "apps/mobile/src/features/threads/ThreadFeed.tsx",
           "apps/mobile/src/features/threads/ThreadQueueControl.tsx",
           "apps/mobile/src/features/review/ReviewCommentCard.tsx",
-          "apps/mobile/src/features/threads/ThreadSettingsSheet.tsx",
           "apps/mobile/src/features/threads/thread-list-v2-items.tsx",
+          "apps/mobile/src/components/ui/SecretTextInput.android.tsx",
           "apps/mobile/src/lib/useMobileNavigationTheme.ts",
           "apps/mobile/src/native/T3ComposerEditor.ios.tsx",
           "apps/mobile/src/native/T3ComposerEditor.native.tsx",
@@ -701,7 +716,7 @@ export default defineConfig({
         "apps/web/src/components/chat/TimelineWorkEntryRow.tsx": 2,
         "apps/web/src/components/chat/TimelineWorkGroupRows.tsx": 1,
         "apps/web/src/components/chat/UserMessageContextChips.tsx": 1,
-        "apps/web/src/components/chat/ChatComposer.tsx": 1,
+        "apps/web/src/components/chat/ChatComposer.tsx": 2,
         "apps/web/src/components/chat/ComposerAttachmentStrip.tsx": 3,
         "apps/web/src/components/chat/ComposerPrimaryActions.tsx": 3,
         "apps/web/src/components/settings/ThemeSettings.tsx": 5,
@@ -776,6 +791,7 @@ export default defineConfig({
         "apps/web/src/components/chat/TimelineWorkGroupRows.tsx": 1,
         "apps/web/src/components/chat/UserMessageContextChips.tsx": 14,
         "apps/web/src/components/settings/DiagnosticsSettings.tsx": 15,
+        "apps/web/src/components/settings/ConnectionsSettings.tsx": 2,
         "apps/web/src/components/settings/AuthorizedClientsSettings.tsx": 1,
         "apps/web/src/components/usage/UsagePage.tsx": 34,
         "apps/web/src/components/GitActionsControl.tsx": 1,
@@ -949,6 +965,7 @@ export default defineConfig({
         "apps/web/src/components/settings/RedactedSensitiveText.tsx": 1,
         "apps/web/src/components/sidebar/SidebarProviderUpdatePill.tsx": 1,
         "apps/web/src/components/ThreadCommandSubtitle.tsx": 1,
+        "apps/web/src/components/settings/SecretsSettings.tsx": 1,
       }).map(([file, maxOccurrences]) => {
         const rule: ["error", { maxOccurrences: number }] = ["error", { maxOccurrences }];
         return { files: [file], rules: { "t3code/no-raw-type-classes": rule } };

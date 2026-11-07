@@ -445,7 +445,7 @@ function FontFamilySettingsRow({
       />
     ) : (
       <Input
-        size="sm"
+        size="settings"
         aria-label={`${title} family`}
         aria-invalid={draftPending || undefined}
         autoCapitalize="off"
@@ -493,8 +493,8 @@ function FontFamilySettingsRow({
       />
     );
   const control = (
-    <div className="flex w-full items-center gap-2 sm:w-auto">
-      <div className="min-w-0 flex-1 sm:w-44 sm:flex-none">{familyControl}</div>
+    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto @min-[32rem]/settings-row:flex-nowrap">
+      <div className="min-w-36 flex-1 sm:w-44 sm:flex-none">{familyControl}</div>
       <Select
         value={String(size.value)}
         onValueChange={(next) => {
@@ -505,7 +505,12 @@ function FontFamilySettingsRow({
           }
         }}
       >
-        <SelectTrigger size="sm" className="w-22 shrink-0" aria-label={size.label}>
+        <SelectTrigger
+          variant="well"
+          size="compact"
+          className="w-22 shrink-0"
+          aria-label={size.label}
+        >
           <SelectValue>{size.value} px</SelectValue>
         </SelectTrigger>
         <SelectPopup align="end" alignItemWithTrigger={false}>

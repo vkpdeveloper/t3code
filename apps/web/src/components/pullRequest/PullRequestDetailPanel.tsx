@@ -17,11 +17,7 @@ import { useLayoutPaneFocusedRef } from "../../layout/layoutPaneContext";
 import { openPullRequestWorkspace } from "../../layout/openRules";
 import { useAtomValue } from "@effect/atom-react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";
-import {
-  scopedThreadKey,
-  scopeProjectRef,
-  scopeThreadRef,
-} from "@t3tools/client-runtime/environment";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -37,16 +33,11 @@ import {
   type PullRequestUpdateMethod,
   type PullRequestRef,
   type PullRequestReviewGuideStop,
+  type PullRequestSummary,
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import {
-  ArrowDownUpIcon,
-  ArrowLeftIcon,
-  FileDiffIcon,
-  GitCommitHorizontalIcon,
-  PanelRightIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, FileDiffIcon, PanelRightIcon } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -58,13 +49,17 @@ import {
 } from "react";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { type PullRequestDetailTab, useRightPanelStore } from "~/rightPanelStore";
-import { useEnvironmentSettings } from "~/hooks/useSettings";
+import { useEnvironmentSettings, useScrollingWorkspacesEnabled } from "~/hooks/useSettings";
+import { usePanelAnimationSettings } from "~/panelAnimations";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "~/commandPaletteBus";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
 import { primaryServerKeybindingsAtom } from "~/state/server";
-import { usePullRequestDefaultMergeMethodResolver } from "./usePullRequestActions";
+import {
+  usePullRequestDefaultMergeMethodResolver,
+  writeHandoffToComposer,
+} from "./usePullRequestActions";
 import { offHeadPullRequestCheckoutToast } from "./pullRequestCheckoutToast";
 import { usePreparePullRequestThreadAction } from "~/state/sourceControlActions";
 import { cn } from "~/lib/utils";
@@ -78,6 +73,7 @@ import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { pullRequestEnvironment, usePullRequestTurnRefresh } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { PullRequestStackMenu } from "./PullRequestStackMenu";
+import { pullRequestCompletionScope } from "./PullRequestMarkdownTextarea";
 import { PullRequestChangeBreakdownStat } from "./PullRequestChangeBreakdownStat";
 import {
   capitalizeTerm,
@@ -100,7 +96,7 @@ import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import { type PullRequestAgentSelectionInput } from "./PullRequestCodeTab";
 import { openOnHostLabel } from "./pullRequestLinkContextMenu";
 import { PullRequestMarkdownContext } from "./PullRequestMarkdown";
-import { pullRequestAutolinkPlugins } from "./pullRequestMarkdown.logic";
+import { pullRequestMarkdownPlugins } from "./pullRequestMarkdown.logic";
 import { PullRequestComposer } from "./PullRequestComposer";
 import { PullRequestSummaryTab } from "./PullRequestSummaryTab";
 import { PullRequestTimelineTab } from "./PullRequestTimelineTab";
@@ -111,10 +107,9 @@ import {
   buildExplainPullRequestHandoff,
   buildFixFindingHandoff,
   buildFixFindingsHandoff,
+  buildPullRequestCommentContext,
+  buildPullRequestContext,
   buildResolveConflictsPrompt,
-  handoffPrompt,
-  handoffReviewComments,
-  latestPullRequestReviewOutcomes,
   loadingPullRequestCheckoutCommand,
   isPullRequestNotFound,
   isStackedPullRequestBase,
@@ -133,19 +128,16 @@ import {
   isPullRequestConflicting,
   resolveBaseFreshness,
   resolvePullRequestMergeMethod,
+  type PullRequestChatSubject,
   type PullRequestFinding,
   shouldRefreshPullRequestActivity,
-  stripPullRequestHandoffReferences,
 } from "./pullRequestDetail.logic";
 import { resolvePickableEnvironments } from "./pullRequestProjectAssignment.logic";
 import { PullRequestReadinessCard } from "./PullRequestReadinessCard";
 import {
   PullRequestActorLabel,
-  PullRequestMetaLine,
-  PullRequestReviewOutcomeIcon,
   pullRequestChecksState,
   pullRequestChecksStatePresentation,
-  pullRequestReviewOutcomeToneClassName,
   resolvePullRequestState,
   summarizePullRequestChecks,
 } from "./pullRequestPresentation";
@@ -204,12 +196,6 @@ const TABS: ReadonlyArray<{ value: PullRequestDetailTab; label: string }> = [
 const loadCodeTab = () => import("./PullRequestCodeTab");
 const PullRequestCodeTab = lazy(loadCodeTab);
 
-// Persist handoffs across unmounts; replace only unchanged contributions to preserve user edits.
-const lastHandoffPromptByDraft = new Map<string, string>();
-
-const composerTargetKey = (target: ScopedThreadRef | DraftId): string =>
-  typeof target === "string" ? target : scopedThreadKey(target);
-
 function resolvePullRequestReference(
   requestedReference: PullRequestRef,
   repositoryIdentity: Parameters<typeof resolvePullRequestReferenceHost>[1],
@@ -229,7 +215,7 @@ function pullRequestMarkdownContext(
   threadRef: ScopedThreadRef | null,
 ) {
   return {
-    remarkPlugins: pullRequestAutolinkPlugins(detail),
+    remarkPlugins: pullRequestMarkdownPlugins(detail),
     lineBreaks: sourceControlClients.find(detail?.provider ?? "")?.hardLineBreaks ?? false,
     threadRef,
     repository: detail?.repository ?? null,
@@ -281,7 +267,11 @@ export function PullRequestDetailPanel({
    * notification can switch it.
    */
   tabOnPage?: boolean;
-  onActed?: (action?: PullRequestAction, phase?: "sent" | "done" | "failed") => void;
+  onActed?: (
+    action?: PullRequestAction,
+    phase?: "sent" | "done" | "failed",
+    reply?: PullRequestSummary,
+  ) => void;
   onClose?: () => void;
   context?: "page" | "thread";
   composerDraftTarget?: ScopedThreadRef | DraftId;
@@ -346,6 +336,7 @@ export function PullRequestDetailPanel({
     detail,
   } = usePullRequestDetail(environmentId, reference, matchingListEntry);
   const [selectedTab, setTab] = useState<PullRequestDetailTab>(initialTab);
+  const scrollingWorkspaces = useScrollingWorkspacesEnabled();
   const reviewGuidesEnabled = useEnvironmentSettings(
     environmentId,
     (settings) => settings.reviewGuidesEnabled,
@@ -365,8 +356,12 @@ export function PullRequestDetailPanel({
     else setTab(next);
     onTabChange?.(next);
   };
+  const { active: tabMotionActive, durationMs: tabMotionMs } = usePanelAnimationSettings();
+  // Opened panes stay mounted and the others are hidden, so scroll positions survive a switch.
+  const tabPaneProps = (value: PullRequestDetailTab) => ({
+    className: cn("absolute inset-0", value !== tab && "invisible"),
+  });
   const [codeToolbarContainer, setCodeToolbarContainer] = useState<HTMLDivElement | null>(null);
-  const [timelineOrder, setTimelineOrder] = useState<"newest" | "oldest">("newest");
   const [codeCommitScope, setCodeCommitScope] = useState<{
     readonly pullRequestKey: string;
     readonly oid: string | null;
@@ -692,9 +687,11 @@ export function PullRequestDetailPanel({
     if (pullRequestActionNeedsHostRefresh(action)) {
       void refreshFromHost();
     } else {
-      refreshDetail();
+      // The action command already showed the reply in the detail or re-read it.
+      activityQuery.refresh();
+      nativeStackQuery.refresh();
     }
-    onActed?.(action, "done");
+    onActed?.(action, "done", result.value);
     return true;
   };
 
@@ -745,43 +742,6 @@ export function PullRequestDetailPanel({
     if (guideWriter.data?.guide == null) selectTab("guide");
   };
 
-  const writeTaskToComposer = (target: ScopedThreadRef | DraftId, task: ThreadTask) => {
-    const store = useComposerDraftStore.getState();
-    const draft = store.getComposerDraft(target);
-    const key = composerTargetKey(target);
-    const previousCommentIds = new Set((draft?.reviewComments ?? []).map((comment) => comment.id));
-    const repeatedCommentIds = new Set(
-      (task.reviewComments ?? [])
-        .filter((comment) => previousCommentIds.has(comment.id))
-        .map((comment) => comment.id),
-    );
-    const promptWithoutPreviousHandoff = stripPullRequestHandoffReferences(
-      draft?.prompt ?? "",
-      draft?.reviewComments ?? [],
-      repeatedCommentIds,
-    );
-    const prompt = handoffPrompt(
-      {
-        prompt: promptWithoutPreviousHandoff,
-        lastHandoffPrompt: lastHandoffPromptByDraft.get(key),
-      },
-      task.prompt,
-    );
-    lastHandoffPromptByDraft.set(key, task.prompt);
-    store.setPrompt(target, prompt);
-    store.setReviewComments(
-      target,
-      handoffReviewComments(draft?.reviewComments ?? [], task.reviewComments ?? []),
-    );
-    for (const comment of task.reviewComments ?? []) {
-      if (!repeatedCommentIds.has(comment.id)) continue;
-      store.addReviewComment(target, comment, {
-        allowDuplicateReference: true,
-        insertAtCaret: false,
-      });
-    }
-  };
-
   const openThreadWithTask = async (
     projectRef: ReturnType<typeof scopeProjectRef>,
     task: ThreadTask | null,
@@ -795,7 +755,7 @@ export function PullRequestDetailPanel({
       ));
     if (session === null) return null;
     if (task === null) return session;
-    writeTaskToComposer(session.draftId, task);
+    writeHandoffToComposer(session.draftId, task);
     return session;
   };
 
@@ -806,7 +766,7 @@ export function PullRequestDetailPanel({
   ) => {
     if (!detail || handoff !== null) return;
     if (attachTarget !== null) {
-      writeTaskToComposer(attachTarget, task);
+      writeHandoffToComposer(attachTarget, task);
       toastManager.add({
         type: "success",
         title: "Added to the composer",
@@ -862,7 +822,7 @@ export function PullRequestDetailPanel({
   ) => {
     if (!handoffSummary || handoff !== null) return;
     if (attachTarget !== null && task !== null) {
-      writeTaskToComposer(attachTarget, task);
+      writeHandoffToComposer(attachTarget, task);
       toastManager.add({
         type: "success",
         title: "Added to the composer",
@@ -1047,6 +1007,43 @@ export function PullRequestDetailPanel({
     );
   };
 
+  /**
+   * Brings a remark into the composer beside this panel, with the pull request it belongs to,
+   * and nothing else: what to ask about it is the reader's to write. A remark on a line travels
+   * as its whole conversation, the way fixing one does.
+   */
+  const addCommentToChat = (subject: PullRequestChatSubject) => {
+    if (!detail || attachTarget === null) return;
+    const thread =
+      subject.kind === "comment"
+        ? detail.reviewThreads.find((candidate) =>
+            candidate.comments.some((comment) => comment.id === subject.comment.id),
+          )
+        : undefined;
+    const comment = buildPullRequestCommentContext(
+      detail,
+      thread === undefined ? subject : { kind: "thread", thread },
+    );
+    if (comment === null) return;
+    const store = useComposerDraftStore.getState();
+    const reference = buildPullRequestContext({
+      number: detail.number,
+      title: detail.title,
+      url: detail.url,
+      headBranch: detail.headBranch,
+      baseBranch: detail.baseBranch,
+      state: detail.state,
+      isDraft: detail.isDraft,
+    });
+    const hasReference = (store.getComposerDraft(attachTarget)?.reviewComments ?? []).some(
+      (existing) => existing.pullRequest?.url === detail.url,
+    );
+    // The active editor may be answering a provider question rather than editing this draft.
+    if (!hasReference) store.addReviewComment(attachTarget, reference, { insertAtCaret: false });
+    store.addReviewComment(attachTarget, comment, { insertAtCaret: false });
+    toastManager.add({ type: "success", title: "Added to the composer" });
+  };
+
   const startCheckout = (mode: "worktree" | "local") => {
     if (!handoffSummary) return;
     void startHandoff(`checkout:${mode}`, null, mode);
@@ -1062,6 +1059,8 @@ export function PullRequestDetailPanel({
         url: detail.url,
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
+        state: detail.state,
+        isDraft: detail.isDraft,
         finding,
       }),
     );
@@ -1077,6 +1076,8 @@ export function PullRequestDetailPanel({
         url: detail.url,
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
+        state: detail.state,
+        isDraft: detail.isDraft,
         reviewThreads: detail.reviewThreads,
         comments: detail.comments,
         checks: checksStale ? [] : detail.checks,
@@ -1200,12 +1201,6 @@ export function PullRequestDetailPanel({
     : detail
       ? summarizePullRequestChecks(detail.checks)
       : null;
-  const approvalCount =
-    detail && !detail.commentsTruncated
-      ? latestPullRequestReviewOutcomes(detail.comments, detail.commits).filter(
-          (entry) => entry.outcome === "approved" && !entry.stale,
-        ).length
-      : 0;
 
   // Checking the branch out, offered from the actions menu and the merge button's menu. Beside a
   // thread the branch is already under the reader's feet, so neither offers it there.
@@ -1517,7 +1512,7 @@ export function PullRequestDetailPanel({
                   (typeof composerDraftTarget === "object" ? composerDraftTarget : null)
                 }
                 onOpenAsWorkspace={
-                  threadRef !== null && context !== "page"
+                  threadRef !== null && context !== "page" && scrollingWorkspaces
                     ? () => openPullRequestWorkspace(threadRef, reference.number)
                     : undefined
                 }
@@ -1676,19 +1671,34 @@ export function PullRequestDetailPanel({
 
         {detail ? (
           <nav
-            className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-1.5 pb-3"
+            className="col-span-2 flex min-w-0 items-center px-4 pt-1.5 pb-3"
             aria-label={`${capitalizeTerm(terminology.singular)} tabs`}
           >
             <ToggleGroup
-              className="w-full"
+              className="relative w-full"
               size="segmented-wide"
-              variant="segmented"
+              variant="segmented-slide"
               value={[tab]}
               onValueChange={(next) => {
                 const nextTab = visibleTabs.find((item) => item.value === next[0])?.value;
                 if (nextTab) selectTab(nextTab);
               }}
             >
+              <span
+                aria-hidden
+                className={cn(
+                  "pointer-events-none absolute top-px left-0.5 h-6 rounded-lg surface-raised",
+                  tabMotionActive && "transition-transform ease-out",
+                )}
+                style={{
+                  width: `calc((100% - 0.25rem - ${visibleTabs.length - 1} * 0.125rem) / ${visibleTabs.length})`,
+                  transform: `translateX(calc(${Math.max(
+                    0,
+                    visibleTabs.findIndex((item) => item.value === tab),
+                  )} * (100% + 0.125rem)))`,
+                  ...(tabMotionActive ? { transitionDuration: `${tabMotionMs}ms` } : {}),
+                }}
+              />
               {visibleTabs.map((item) => (
                 <Toggle
                   key={item.value}
@@ -1701,69 +1711,18 @@ export function PullRequestDetailPanel({
                 </Toggle>
               ))}
             </ToggleGroup>
-            <div
-              ref={setCodeToolbarContainer}
-              className={cn("min-w-56 flex-1", tab === "code" ? "flex" : "hidden")}
-            />
-            {tab === "timeline" ? (
-              <div className="ml-auto flex shrink-0 items-center gap-2 text-meta text-muted-foreground">
-                <PullRequestMetaLine
-                  className={cn(
-                    "whitespace-nowrap text-caption transition-opacity",
-                    (activityPending || activityError) && "opacity-35",
-                  )}
-                >
-                  <span
-                    className="inline-flex items-center gap-1"
-                    aria-label={
-                      activityError
-                        ? "Commits unavailable"
-                        : `${detail.commits.length.toLocaleString()} ${
-                            detail.commits.length === 1 ? "commit" : "commits"
-                          }`
-                    }
-                  >
-                    <GitCommitHorizontalIcon aria-hidden className="size-3" />
-                    {activityError
-                      ? "-"
-                      : activityPending
-                        ? "…"
-                        : detail.commits.length.toLocaleString()}
-                  </span>
-                  {approvalCount > 0 ? (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1",
-                        pullRequestReviewOutcomeToneClassName("approved"),
-                      )}
-                    >
-                      <PullRequestReviewOutcomeIcon outcome="approved" className="size-3" />
-                      {approvalCount.toLocaleString()}
-                      <span className="sr-only">
-                        {approvalCount === 1 ? "approval" : "approvals"}
-                      </span>
-                    </span>
-                  ) : null}
-                </PullRequestMetaLine>
-                <Button
-                  size="xs"
-                  variant="ghost-muted"
-                  aria-label={
-                    timelineOrder === "newest"
-                      ? "Show oldest activity first"
-                      : "Show newest activity first"
-                  }
-                  onClick={() =>
-                    setTimelineOrder((value) => (value === "newest" ? "oldest" : "newest"))
-                  }
-                >
-                  <ArrowDownUpIcon aria-hidden className="size-3" />
-                  {timelineOrder === "newest" ? "Newest first" : "Oldest first"}
-                </Button>
-              </div>
-            ) : null}
           </nav>
         ) : null}
+      </div>
+      <div
+        className={cn(
+          "grid shrink-0",
+          tab === "code" && detail ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden" inert={tab !== "code" || !detail}>
+          <div ref={setCodeToolbarContainer} className="flex px-4 pt-3 pb-2.5" />
+        </div>
       </div>
 
       <SourceControlAppAccessNotice
@@ -1816,7 +1775,7 @@ export function PullRequestDetailPanel({
         ) : detail ? (
           <PullRequestMarkdownContext value={markdownContext}>
             {mountedTabs.has("summary") ? (
-              <div className={cn("absolute inset-0", tab !== "summary" && "invisible")}>
+              <div {...tabPaneProps("summary")}>
                 <PullRequestSummaryTab
                   scrollerRef={scrollerRefs.summary}
                   readiness={readinessCard}
@@ -1829,13 +1788,14 @@ export function PullRequestDetailPanel({
                   pendingFinding={handoff}
                   fixFindingLabel={handoffLabels.fixFinding}
                   {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
+                  {...(attachTarget === null ? {} : { onAddToChat: addCommentToChat })}
                   onRefresh={refreshDetail}
                 />
               </div>
             ) : null}
             {mountedTabs.has("guide") ? (
               <div
-                className={cn("absolute inset-0", tab !== "guide" && "invisible")}
+                {...tabPaneProps("guide")}
                 // Read by the guide run notifier, which stays quiet for a guide on screen.
                 data-guide-shown={tab === "guide" ? guideKey : undefined}
               >
@@ -1849,6 +1809,7 @@ export function PullRequestDetailPanel({
                     detail.capabilities.review.inlineComment && detail.viewerPermissions.comment
                   }
                   rangeComments={detail.capabilities.review.rangeComment === true}
+                  completionScope={pullRequestCompletionScope(detail, environmentId, reference)}
                   onAskAboutLines={(comment, request) =>
                     addSelectionToAgent({ comment, request }, { keepGuide: true })
                   }
@@ -1866,7 +1827,7 @@ export function PullRequestDetailPanel({
               </div>
             ) : null}
             {mountedTabs.has("timeline") ? (
-              <div className={cn("absolute inset-0", tab !== "timeline" && "invisible")}>
+              <div {...tabPaneProps("timeline")}>
                 {activityPending ? (
                   <PullRequestTimelineGhost />
                 ) : activityError ? (
@@ -1881,15 +1842,16 @@ export function PullRequestDetailPanel({
                     detail={detail}
                     environmentId={environmentId}
                     threadRef={threadRef}
-                    order={timelineOrder}
+                    order="newest"
                     onOpenCommit={openCommit}
+                    {...(attachTarget === null ? {} : { onAddToChat: addCommentToChat })}
                     onOpenCode={openFileInCode}
                   />
                 )}
               </div>
             ) : null}
             {mountedTabs.has("code") ? (
-              <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
+              <div {...tabPaneProps("code")}>
                 <Suspense
                   fallback={
                     <DiffPanelLoadingState label={`Loading ${terminology.singular} diff...`} />
@@ -1907,6 +1869,7 @@ export function PullRequestDetailPanel({
                     pendingFinding={handoff}
                     fixFindingLabel={handoffLabels.fixFinding}
                     {...(canFixFindings ? { onFixFinding: startFixFinding } : {})}
+                    {...(attachTarget === null ? {} : { onAddToChat: addCommentToChat })}
                     onRefresh={refreshDetail}
                     refreshToken={refreshToken}
                     backgroundRefreshToken={turnRefresh ?? 0}

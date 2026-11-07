@@ -38,6 +38,7 @@ import {
   useClientLayoutSettings,
   useClientSettings,
   useClientSettingsHydrated,
+  useScrollingWorkspacesEnabled,
   updateClientSettings,
 } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -101,6 +102,7 @@ const UNDO_LIMIT = 20;
 
 export function LayoutSettings() {
   const layout = useClientLayoutSettings();
+  const scrollingWorkspaces = useScrollingWorkspacesEnabled();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [steps, setSteps] = useState<LayoutTemplate[]>([]);
   const template = layout.template;
@@ -188,18 +190,22 @@ export function LayoutSettings() {
           options={NEW_TAB_OPTIONS}
           onChange={(newTabPosition) => setBehavior({ newTabPosition })}
         />
-        <PlacementRow
-          {...searchableSetting("layout-when-no-room")}
-          title="When it doesn't fit"
-          description="What happens when a new pane has no room."
-          value={layout.whenNoRoom}
-          defaultValue={DEFAULT_LAYOUT_SETTINGS.whenNoRoom}
-          options={WHEN_NO_ROOM_OPTIONS}
-          onChange={(whenNoRoom) => setBehavior({ whenNoRoom })}
-          onPreviewChange={setPreviewingNoRoom}
-        />
+        {scrollingWorkspaces ? (
+          <PlacementRow
+            {...searchableSetting("layout-when-no-room")}
+            title="When it doesn't fit"
+            description="What happens when a new pane has no room."
+            value={layout.whenNoRoom}
+            defaultValue={DEFAULT_LAYOUT_SETTINGS.whenNoRoom}
+            options={WHEN_NO_ROOM_OPTIONS}
+            onChange={(whenNoRoom) => setBehavior({ whenNoRoom })}
+            onPreviewChange={setPreviewingNoRoom}
+          />
+        ) : null}
       </SettingsSection>
-      {isElectron && isMacPlatform(navigator.platform) ? <TrackpadSection /> : null}
+      {scrollingWorkspaces && isElectron && isMacPlatform(navigator.platform) ? (
+        <TrackpadSection />
+      ) : null}
     </SettingsPageContainer>
   );
 }
@@ -259,11 +265,11 @@ function YourLayoutHeader({
       </div>
       {/* Ghost buttons hang by their 8px inline inset so the last label ends on the card edge. */}
       <div className="-me-2 flex shrink-0 items-center gap-1">
-        <Button size="xs" variant="ghost-muted" disabled={!canUndo} onClick={onUndo}>
+        <Button size="standard" variant="ghost-muted" disabled={!canUndo} onClick={onUndo}>
           <Undo2Icon aria-hidden />
           Undo
         </Button>
-        <Button size="xs" variant="ghost-muted" disabled={!canReset} onClick={onReset}>
+        <Button size="standard" variant="ghost-muted" disabled={!canReset} onClick={onReset}>
           <RotateCcwIcon aria-hidden />
           Reset
         </Button>
@@ -330,7 +336,7 @@ function PlacementRow<Value extends string>({
             if (option) onChange(option.value);
           }}
         >
-          <SelectTrigger size="sm" aria-label={title}>
+          <SelectTrigger variant="well" size="compact" aria-label={title}>
             <SelectValue>
               {(current: Value) => {
                 const option = byValue.get(current);

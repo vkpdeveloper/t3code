@@ -8,13 +8,12 @@ import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@t
 import { MessageSquareIcon, XIcon } from "lucide-react";
 import { useEffect, type RefObject } from "react";
 
-import { useTextFieldSpeech, TextFieldSpeechControls } from "~/speech/useTextFieldSpeech";
-
+import { TextFieldSpeechControls, useTextFieldSpeech } from "~/speech/useTextFieldSpeech";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
+import { isCommentSubmitShortcut } from "../diffs/commentSubmitShortcut";
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { readableFailure } from "./pullRequestDetail.logic";
 import { PullRequestSubmitKeyHint } from "./PullRequestSubmitKeyHint";
@@ -23,6 +22,10 @@ import {
   usePendingReviewComments,
   usePullRequestReviewStore,
 } from "./pullRequestReviewStore";
+import {
+  PullRequestMarkdownTextarea,
+  type PullRequestCompletionScope,
+} from "./PullRequestMarkdownTextarea";
 
 const sent = (term: string): Record<PullRequestReviewVerdict, string> => ({
   comment: "Review submitted",
@@ -34,6 +37,7 @@ export function PullRequestReviewForm({
   environmentId,
   active,
   reference,
+  completionScope,
   verdict,
   term,
   requestChangesSummaryRequired,
@@ -43,9 +47,12 @@ export function PullRequestReviewForm({
   onSubmitted,
 }: {
   environmentId: EnvironmentId;
+  /** False while the form stays mounted but hidden; dictation is cancelled then. */
   active: boolean;
   reference: PullRequestRef;
+  completionScope: PullRequestCompletionScope | null;
   verdict: PullRequestReviewVerdict;
+  /** The host's word for a change request, as in "pull request". */
   term: string;
   requestChangesSummaryRequired: boolean;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -60,6 +67,7 @@ export function PullRequestReviewForm({
   const setSummary = usePullRequestReviewStore((store) => store.setSummary);
   const speech = useTextFieldSpeech({
     environmentId,
+    projectId: reference.projectId,
     ownerKey: JSON.stringify(["pr-review", environmentId, reviewKey]),
     text: body,
     textareaRef,
@@ -67,24 +75,20 @@ export function PullRequestReviewForm({
     disabled: !active || pending,
   });
   const { cancel } = speech;
-  const closeSetup = speech.setup.setOpen;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Release microphone capture and its setup dialog when the review form becomes inactive.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- discards a recording when the hidden form can no longer be submitted
   useEffect(() => {
-    if (!active) {
-      cancel();
-      closeSetup(false);
-    }
-  }, [active, cancel, closeSetup]);
+    if (!active) cancel();
+  }, [active, cancel]);
   const clearSummary = usePullRequestReviewStore((store) => store.clearSummary);
   const clearComments = usePullRequestReviewStore((store) => store.clear);
   const submitReview = useAtomCommand(pullRequestEnvironment.submitReview, {
     reportFailure: false,
   });
 
-  const submit = async () => {
-    if (pending || !canSubmit || speech.blocksSubmission) return;
-    const submittedBody = body;
-    const submittedComments = comments;
+  const submit = async (text: string) => {
+    const submittedComments = usePullRequestReviewStore.getState().drafts[reviewKey] ?? [];
+    if (pending || !canSubmitReview(verdict, text, submittedComments.length)) return;
+    const submittedBody = text;
     onPendingChange(true);
     const result = await submitReview({
       environmentId,
@@ -118,12 +122,16 @@ export function PullRequestReviewForm({
   };
 
   // Forgejo requires a summary when requesting changes, even with inline comments.
-  const canSubmitReview = (verdict: PullRequestReviewVerdict, summary: string) =>
+  const canSubmitReview = (
+    verdict: PullRequestReviewVerdict,
+    summary: string,
+    commentCount: number,
+  ) =>
     verdict === "request-changes" && requestChangesSummaryRequired
       ? summary.trim().length > 0
-      : verdict === "approve" || summary.trim().length > 0 || comments.length > 0;
-  const canSubmit = canSubmitReview(verdict, body);
-  const placeholder = canSubmitReview(verdict, "")
+      : verdict === "approve" || summary.trim().length > 0 || commentCount > 0;
+  const canSubmit = canSubmitReview(verdict, body, comments.length);
+  const placeholder = canSubmitReview(verdict, "", comments.length)
     ? "Summarize your review (optional)"
     : verdict === "request-changes" && requestChangesSummaryRequired
       ? "Summarize your review (required to request changes)"
@@ -131,48 +139,50 @@ export function PullRequestReviewForm({
 
   return (
     <>
-      <Textarea
+      <PullRequestMarkdownTextarea
         ref={textareaRef}
+        completionScope={completionScope}
         rows={3}
         readOnly={speech.freezesEditor}
         value={body}
         placeholder={placeholder}
         aria-label="Review summary"
-        onChange={(event) => setSummary(reviewKey, event.target.value)}
+        onValueChange={(next) => setSummary(reviewKey, next)}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
+          if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return;
           // Approving takes no words, so the chord submits an empty summary too.
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !pending && canSubmit) {
+          if (isCommentSubmitShortcut(event, body, pending || speech.preparing, true)) {
             event.preventDefault();
             event.stopPropagation();
-            if (!event.repeat) void submit();
+            speech.submitAfterDictation((text) => void submit(text));
           }
         }}
       />
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {comments.length > 0 ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5 rounded-row border border-border py-0.5 pr-0.5 pl-2 text-meta text-muted-foreground">
-            <MessageSquareIcon aria-hidden className="size-3.5 shrink-0" />
-            <span className="truncate">
-              {comments.length} line {comments.length === 1 ? "comment" : "comments"}
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {comments.length > 0 ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5 rounded-row border border-border py-0.5 pr-0.5 pl-2 text-meta text-muted-foreground">
+              <MessageSquareIcon aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {comments.length} line {comments.length === 1 ? "comment" : "comments"}
+              </span>
+              <Button
+                size="icon-micro"
+                variant="ghost-muted"
+                aria-label="Discard pending line comments"
+                disabled={pending}
+                onClick={() => clearComments(reviewKey)}
+              >
+                <XIcon className="size-3" />
+              </Button>
             </span>
-            <Button
-              size="icon-micro"
-              variant="ghost-muted"
-              aria-label="Discard pending line comments"
-              disabled={pending}
-              onClick={() => clearComments(reviewKey)}
-            >
-              <XIcon className="size-3" />
-            </Button>
-          </span>
-        ) : null}
-        <TextFieldSpeechControls speech={speech} disabled={pending} />
+          ) : null}
+          <TextFieldSpeechControls speech={speech} disabled={pending} />
+        </div>
         <Button
           size="xs"
-          className="ml-auto"
-          disabled={pending || speech.blocksSubmission || !canSubmit}
-          onClick={() => void submit()}
+          disabled={speech.preparing || pending || (!canSubmit && !speech.blocksSubmission)}
+          onClick={() => speech.submitAfterDictation((text) => void submit(text))}
         >
           {pending ? "Submitting..." : "Submit review"}
           <PullRequestSubmitKeyHint />

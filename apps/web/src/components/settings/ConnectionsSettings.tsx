@@ -157,12 +157,10 @@ function LocalVersionStatusLabel() {
 
 /** Environments lists the machines this app connects to; access covers who may reach one of them. */
 export function ConnectionsSettings({ view }: { readonly view: "environments" | "access" }) {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  // Environments keeps the primary environment's card, which links to its access page.
   return view === "access" ? (
     <AccessSettings />
   ) : (
-    <ConnectionsSettingsContent view="environments" accessEnvironmentId={primaryEnvironmentId} />
+    <ConnectionsSettingsContent view="environments" accessEnvironmentId={null} />
   );
 }
 
@@ -185,7 +183,7 @@ function AccessSettings() {
   });
   const picker =
     candidates.length > 1 && accessEnvironmentId !== null ? (
-      <div className="flex min-w-0 items-center gap-1.5 px-3 text-body text-muted-foreground sm:px-4">
+      <div className="flex min-w-0 items-center gap-1.5 px-3 text-sm text-muted-foreground sm:px-4">
         <span className="shrink-0">Showing access for</span>
         <Select
           value={accessEnvironmentId}
@@ -220,7 +218,7 @@ function AccessSettings() {
                     {settingsScopeEnvironmentLabel(environment, candidates)}
                   </span>
                   {environment.connection.phase !== "connected" ? (
-                    <span className="shrink-0 text-caption text-muted-foreground">Offline</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">Offline</span>
                   ) : null}
                 </span>
               </SelectItem>
@@ -956,7 +954,8 @@ function ConnectionsSettingsContent({
               }}
             >
               <SelectTrigger
-                size="sm"
+                variant="well"
+                size="compact"
                 className="w-full sm:w-56"
                 aria-label="WSL backend"
                 disabled={isUpdatingWslBackend}

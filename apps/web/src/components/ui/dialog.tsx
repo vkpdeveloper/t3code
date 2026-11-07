@@ -1,7 +1,9 @@
+import { tooltipSafeFinalFocus } from "./focus-return";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
-import { type ComponentProps, createContext, type ReactNode, use, useState } from "react";
+import { type ComponentProps, createContext, type ReactNode, use, useId, useState } from "react";
 import { cn } from "~/lib/utils";
+import { useNativeTitlebarHeight } from "~/lib/windowControlsOverlay";
 import { Button } from "~/components/ui/button";
 import {
   DIALOG_APP_POPUP_CLASS,
@@ -88,7 +90,7 @@ function DialogViewport({
       className={cn(
         "fixed inset-0 z-50 grid justify-items-center",
         variant === "app"
-          ? "grid-rows-1 items-center sm:p-6 lg:p-10"
+          ? "grid-rows-1 items-center sm:p-6 sm:pt-(--app-modal-sm-top) lg:p-10"
           : "grid-rows-[1fr_auto_1fr] p-4",
         className,
       )}
@@ -117,6 +119,19 @@ function DialogPopup({
   contentInset?: number;
 }) {
   const [parts, registerPart] = useParts();
+  const defaultId = useId();
+  const popupId = props.id ?? defaultId;
+  const appSurface = variant === "app" || variant === "app-panel";
+  // App surfaces clear the native window controls (macOS traffic lights, the Windows and Linux
+  // caption buttons). Below sm they fill the window; up to lg their 1.5rem inset is shorter.
+  const nativeTitlebarHeight = useNativeTitlebarHeight();
+  const titlebarStyle = appSurface
+    ? {
+        "--app-modal-titlebar-height": `${nativeTitlebarHeight}px`,
+        "--app-modal-top-inset": `max(env(safe-area-inset-top), ${nativeTitlebarHeight}px)`,
+        "--app-modal-sm-top": `max(1.5rem, ${nativeTitlebarHeight}px)`,
+      }
+    : {};
   return (
     <DialogPortal>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
@@ -129,12 +144,14 @@ function DialogPopup({
         {...viewportProps}
         style={{
           ...viewportProps?.style,
+          ...titlebarStyle,
           ...(placement === "content-top" ? { "--dialog-content-inset": `${contentInset}px` } : {}),
         }}
         className={cn(
           placement === "content-top" &&
             "sm:grid-rows-[0_auto_1fr] sm:pt-[min(23.611dvh,170px)] sm:ps-[calc(var(--dialog-content-inset)+1rem)]",
-          variant === "app-panel" && "max-sm:p-2",
+          variant === "app-panel" &&
+            "max-sm:p-2 max-sm:pt-[max(--spacing(2),var(--app-modal-top-inset))]",
           bottomStickOnMobile && "max-sm:grid-rows-[1fr_auto] max-sm:p-0 max-sm:pt-12",
           variant === "media" &&
             "z-[60] grid-rows-1 place-items-center px-4 pb-6 pt-[calc(var(--native-titlebar-height,0px)+1.5rem)] [-webkit-app-region:no-drag]",
@@ -163,7 +180,16 @@ function DialogPopup({
           data-slot="dialog-popup"
           render={renderRetainedPopup}
           {...props}
+          id={popupId}
+          finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         >
+          {variant === "app" ? (
+            // The emptied strip still moves the window, as the titlebar it replaces does.
+            <div
+              aria-hidden
+              className="absolute inset-x-0 top-0 hidden h-(--app-modal-titlebar-height) [-webkit-app-region:drag] max-sm:block"
+            />
+          ) : null}
           <PartPresenceContext value={registerPart}>{children}</PartPresenceContext>
           {showCloseButton && (
             <DialogPrimitive.Close

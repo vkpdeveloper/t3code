@@ -45,11 +45,11 @@ export function surfaceTabTitle(
           : surface.resourceId
             ? surface.url
             : undefined;
-      if (!url) return "Browser";
+      if (!url) return "New tab";
       try {
-        return new URL(url).host || "Browser";
+        return new URL(url).host || "New tab";
       } catch {
-        return "Browser";
+        return "New tab";
       }
     }
   }

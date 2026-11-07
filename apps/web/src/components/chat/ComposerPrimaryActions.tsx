@@ -49,6 +49,8 @@ interface ComposerPrimaryActionsProps {
   showPlanFollowUpPrompt: boolean;
   onImplementPlanInNewThread?: (() => void) | undefined;
   promptHasText: boolean;
+  /** Dictation is running; Send finishes it and submits once the transcript lands. */
+  voiceInputActive?: boolean;
   isSendBusy: boolean;
   sendDisabledReason: string | null;
   isEnvironmentUnavailable: boolean;
@@ -57,14 +59,12 @@ interface ComposerPrimaryActionsProps {
   canResume?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
+  /** The dictation mic: a slot in the send and stop pill, a quiet icon before the other actions. */
+  renderSpeechAction?: ((inPill: boolean) => ReactNode) | undefined;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
-  /** Set while dictation records: the stop slot finishes it instead of sending. */
-  onStopDictation?: (() => void) | undefined;
-  /** Leads the send and stop pill, for the dictation mic. */
-  leadingAction?: ReactNode;
   compactBeforeSendTokens?: number | null;
   keepFullHistory?: boolean;
   onToggleKeepFullHistory?: () => void;
@@ -95,17 +95,16 @@ const messageActionPillClassName =
 
 // The mic + send pill: light gray in light mode, black in dark mode.
 const COMPOSER_PILL_CLASS_NAME =
-  "relative isolate inline-flex h-8 shrink-0 items-center rounded-composer-pill surface-pill";
+  "relative isolate inline-flex h-8 shrink-0 items-center rounded-lg surface-pill";
 
-// One 32px button slot inside the pill (send, stop, and the dictation mic), concentric
+// One 32px button slot inside the pill (send, stop, and later the mic), concentric
 // with the pill inside its 1px rim.
-const COMPOSER_PILL_SLOT_CLASS_NAME =
-  "relative isolate flex h-full shrink-0 cursor-pointer items-center justify-center rounded-composer-pill-button outline-none transition-colors duration-150 hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:pointer-events-none";
-
-// An icon button inside the pill: send and the dictation mic share it, concentric with
-// the pill inside its 1px rim.
+// An icon button inside the pill, shared by send and the pane thumbnail's mock composer.
 export const COMPOSER_PILL_BUTTON_CLASS_NAME =
-  "relative isolate flex h-full items-center justify-center gap-1 overflow-hidden rounded-composer-pill-button text-foreground transition-colors duration-150 enabled:cursor-pointer enabled:hover:bg-foreground/8 disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none";
+  "relative isolate flex h-full items-center justify-center gap-1 overflow-hidden rounded-md text-foreground outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background enabled:cursor-pointer enabled:hover:bg-foreground/8 disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none";
+
+const COMPOSER_PILL_SLOT_CLASS_NAME =
+  "relative isolate flex h-full shrink-0 cursor-pointer items-center justify-center rounded-item outline-none transition-colors duration-150 hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:pointer-events-none";
 
 /** A labeled primary action on the message-action pill; callers add height, padding and split edges. */
 function MessageActionPill({ className, type = "button", ...props }: ComponentProps<"button">) {
@@ -128,6 +127,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   showPlanFollowUpPrompt,
   onImplementPlanInNewThread,
   promptHasText,
+  voiceInputActive = false,
   isSendBusy,
   sendDisabledReason,
   isEnvironmentUnavailable,
@@ -136,12 +136,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   canResume = false,
   preserveComposerFocusOnPointerDown = false,
   isEditingQueuedMessage = false,
+  renderSpeechAction,
   onSubmitMessage,
   onResume,
   onPreviousPendingQuestion,
   onInterrupt,
-  onStopDictation,
-  leadingAction,
   compactBeforeSendTokens = null,
   keepFullHistory = false,
   onToggleKeepFullHistory,
@@ -162,11 +161,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
 
   // The stop square sits in the same pill as send, so the pill never changes shape.
-  // While dictating it ends the recording instead; a running turn's stop returns after.
-  const stopsDictation = onStopDictation !== undefined && !pendingAction;
   const renderStopGenerationButton = (insidePendingAction: boolean) => (
     <ComposerSendPill key="interrupt" className={cn(insidePendingAction && "sm:h-7")}>
-      {insidePendingAction ? null : leadingAction}
+      {insidePendingAction ? null : renderSpeechAction?.(true)}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -178,18 +175,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 insidePendingAction && "sm:w-6.5",
               )}
               {...pointerFocusProps}
-              disabled={!stopsDictation && !canOperateThread}
+              disabled={!canOperateThread}
               onClick={() => {
-                if (stopsDictation) onStopDictation();
-                else if (canOperateThread) onInterrupt();
+                if (canOperateThread) onInterrupt();
               }}
-              aria-label={stopsDictation ? "Stop voice input" : "Stop generation"}
+              aria-label="Stop generation"
             />
           }
         >
           <span aria-hidden className="size-2.5 rounded-xs bg-error-foreground" />
         </TooltipTrigger>
-        <TooltipPopup>{stopsDictation ? "Stop voice input" : "Interrupt"}</TooltipPopup>
+        <TooltipPopup>Interrupt</TooltipPopup>
       </Tooltip>
     </ComposerSendPill>
   );
@@ -197,6 +193,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+        {renderSpeechAction?.(false)}
         {canInterrupt ? renderStopGenerationButton(true) : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
@@ -229,8 +226,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           disabled={
             !canOperateThread ||
             isEnvironmentUnavailable ||
+            isSendDisabled ||
             pendingAction.isResponding ||
-            (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
+            (!voiceInputActive &&
+              (pendingAction.isLastQuestion
+                ? !pendingAction.isComplete
+                : !pendingAction.canAdvance))
           }
         >
           {formatPendingPrimaryActionLabel({
@@ -244,34 +245,39 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (stopsDictation || (canInterrupt && !hasSendableContent && !isEditingQueuedMessage)) {
+  if (canInterrupt && !hasSendableContent && !isEditingQueuedMessage) {
     return renderStopGenerationButton(false);
   }
 
   if (showPlanFollowUpPrompt && onImplementPlanInNewThread) {
     return (
-      <Group data-chat-composer-implement-actions="true">
-        <Button
-          type="submit"
-          size="sm"
-          variant="default"
-          disabled={isSendBusy || isSendDisabled || isEnvironmentUnavailable}
-        >
-          {isSendBusy ? "Sending…" : promptHasText ? "Refine" : "Implement"}
-        </Button>
-        <GroupSeparator />
-        <Menu>
-          <MenuTrigger
+      <>
+        {renderSpeechAction?.(false)}
+        <Group data-chat-composer-implement-actions="true">
+          <Button
+            type="submit"
+            size="sm"
+            variant="default"
             disabled={isSendBusy || isSendDisabled || isEnvironmentUnavailable}
-            render={<Button size="icon-sm" variant="default" aria-label="Implementation actions" />}
           >
-            <ChevronDownIcon />
-          </MenuTrigger>
-          <MenuPopup side="top" align="end" {...composerFloatingLayerProps}>
-            <MenuItem onClick={onImplementPlanInNewThread}>Implement in a new thread</MenuItem>
-          </MenuPopup>
-        </Menu>
-      </Group>
+            {isSendBusy ? "Sending…" : promptHasText ? "Refine" : "Implement"}
+          </Button>
+          <GroupSeparator />
+          <Menu>
+            <MenuTrigger
+              disabled={isSendBusy || isSendDisabled || isEnvironmentUnavailable}
+              render={
+                <Button size="icon-sm" variant="default" aria-label="Implementation actions" />
+              }
+            >
+              <ChevronDownIcon />
+            </MenuTrigger>
+            <MenuPopup side="top" align="end" {...composerFloatingLayerProps}>
+              <MenuItem onClick={onImplementPlanInNewThread}>Implement in a new thread</MenuItem>
+            </MenuPopup>
+          </Menu>
+        </Group>
+      </>
     );
   }
   const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
@@ -315,14 +321,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         ? `Click to ${followUpBehavior}, ${isMacPlatform(navigator.platform) ? "⌘" : "Ctrl"}-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
         : submitLabel);
 
-  const showQueueLabel = isQueuing && !isSendBusy;
   const sendButton = (
     <button
       type={showResume ? "button" : "submit"}
-      className={cn(
-        COMPOSER_PILL_BUTTON_CLASS_NAME,
-        showQueueLabel ? "ps-1.5 pe-2.5 text-label" : "w-8",
-      )}
+      className={cn(COMPOSER_PILL_BUTTON_CLASS_NAME, "w-8")}
       {...pointerFocusProps}
       onClick={showResume ? onResume : onSubmitMessage}
       disabled={
@@ -340,10 +342,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       ) : isEditingQueuedMessage ? (
         <CheckIcon className="size-3.5" aria-hidden="true" />
       ) : isQueuing ? (
-        <>
-          <ListPlusIcon className="size-3.5" aria-hidden="true" />
-          Queue
-        </>
+        <ListPlusIcon className="size-3.5" aria-hidden="true" />
       ) : isRunning ? (
         <CornerUpRightIcon className="size-3.5" aria-hidden="true" />
       ) : (
@@ -354,7 +353,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 
   const submit = (
     <ComposerSendPill>
-      {leadingAction}
+      {renderSpeechAction?.(true)}
       <Tooltip>
         {/* A span trigger keeps the tooltip reachable while send is disabled. */}
         <TooltipTrigger render={<span className="flex h-full" />}>{sendButton}</TooltipTrigger>
@@ -404,7 +403,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
 /**
  * The mic + send pill. Send and stop render inside it, and dictation's mic
  * joins as a sibling slot before them, so the pill keeps one shape in every state.
- * The phone composer's collapsed row renders it too, with the same slots.
  */
 export function ComposerSendPill({
   className,
@@ -419,3 +417,11 @@ export function ComposerSendPill({
     </span>
   );
 }
+
+// A 32px button slot of the send pill for the dictation mic and the collapsed row's send.
+export const COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME =
+  "relative isolate flex h-full w-8 items-center justify-center overflow-hidden rounded-md text-foreground outline-none transition-colors duration-150 enabled:cursor-pointer enabled:hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none";
+export const COMPOSER_PILL_SLOT_BUTTON_UNAVAILABLE_CLASS_NAME = cn(
+  COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME,
+  "opacity-64 enabled:cursor-default enabled:hover:bg-transparent",
+);

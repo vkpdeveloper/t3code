@@ -85,8 +85,9 @@ list to unpin it. Dragging a thread onto the **Settled** header settles it, and 
 thread into the active list un-settles it. A snoozed thread can be dragged out of the snoozed
 shelf, which wakes it, but threads cannot be dragged into the shelf because snoozing needs a wake
 time. Dragging a pinned thread out of the pinned section does not ask for unpin confirmation.
-Pinned and active boundary labels appear only while dragging, without moving the rows. The
-other rows slide aside to show where the thread will land. When you cross into another section,
+Pinned and active boundary labels appear only while dragging, without moving the rows. List
+rows and pinned tiles slide aside to show where the thread will land. Within the pinned grid,
+the dragged tile takes its destination cell's width. When you cross into another section,
 the dragged thread shows the action the drop performs, with its icon: **Pin**, **Unpin**,
 **Settle**, **Un-settle**, or **Wake**. Its status and hover actions hide during the drag. A pinned
 thread keeps its pin only while it stays in the pinned section; once it leaves, the badge takes
@@ -95,8 +96,8 @@ edge to pin a thread. Section labels stay readable for the whole drag, and the s
 thread is over takes the accent color. Section labels also
 identify empty sections and a collapsed settled shelf.
 
-Drag within the pinned or active section to change its order. Other rows slide aside to show the
-spot where the thread will land. Drops into either section keep the position you choose. On
+Drag within the pinned or active section to change its order. Drops into either section keep
+the position you choose. On
 mobile, open a thread's menu and choose **Arrange threads**. Drag a handle within or between
 **Pinned** and **Active** to reorder, pin, or unpin. Drop onto the **Settled** divider to
 settle a thread. The dragged card shows the action before you release it. Expand **Snoozed**
@@ -167,7 +168,11 @@ and prevents automatic settlement until new activity resumes the usual rules.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
 terminals that wait at an idle prompt, and keeps their output. A terminal that
-runs a command, such as a dev server, stays open.
+runs a command, such as a dev server, stays open unless its action has **Stop this action
+when the thread settles** enabled in Settings > Projects > Actions. You can also set
+`"stopOnSettle": true` on a `t3.json` action and import it there. Start the command through
+that action so T3 can stop its terminal and child processes. Commands started through an
+agent's own shell tools are managed by the provider.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a
@@ -181,7 +186,7 @@ settle every thread in that section between it and the one you release on.
 The **Un-settle** and **Wake** buttons work the same way in their sections.
 Press `Escape` while dragging to cancel.
 
-By default, environments settle inactive threads after three days and settle
+By default, environments settle inactive threads after seven days and settle
 threads whose pull request merged. A closed pull request can also settle an idle
 thread. An empty thread's inactivity counts from when it was created.
 Work in progress, pending questions or approvals, and background work the agent
@@ -300,9 +305,10 @@ You can also choose **Side chat** from the **+** menu in the right panel. The si
 chat opens as a tab there, with its own composer. Side chats do not show in the
 sidebar. Find one again under **Side chats** in thread details.
 
-A side chat works in the same folder as the thread and inherits its permissions
-when created, including for its first reply. Change permissions for an individual
-side chat in its composer. Later changes to the parent do not change existing side chats.
+A side chat works in the same folder as the thread and starts with the permissions,
+model, and reasoning level shown in the thread's composer, including for its first
+reply. Change them for an individual side chat in its composer. Later changes to the
+parent do not change existing side chats.
 
 To use what you learned, choose **Bring back**. The thread gets the side chat with
 your next message there. Bring back is available while the thread is idle.

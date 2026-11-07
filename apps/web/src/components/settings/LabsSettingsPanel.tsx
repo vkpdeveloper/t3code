@@ -1,10 +1,13 @@
 import { useAuth } from "@clerk/react";
 import { Link } from "@tanstack/react-router";
 import { managedCapabilityDenial } from "@t3tools/contracts";
+import { ToolCallVisibility } from "@t3tools/contracts/settings";
+import * as Schema from "effect/Schema";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { Button, InlineButton } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -19,8 +22,10 @@ export function LabsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection id="beta" title="Beta">
+        <ScrollingWorkspacesRow />
         <BoringSidebarRow />
         <BoringSidebarMultilineRow />
+        <ToolCallVisibilityRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
@@ -28,6 +33,26 @@ export function LabsSettingsPanel() {
       </SettingsSection>
       <LegacyFeaturesSection />
     </SettingsPageContainer>
+  );
+}
+
+function ScrollingWorkspacesRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("scrolling-workspaces")}
+      description="Panes scroll sideways instead of shrinking, and you can keep several workspaces with an overview, swipes and a layout tour. Splits, tabs and layout templates work either way."
+      control={
+        <Switch
+          checked={settings.scrollingWorkspacesEnabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ scrollingWorkspacesEnabled: Boolean(checked) })
+          }
+          aria-label="Scrolling workspaces"
+        />
+      }
+    />
   );
 }
 
@@ -72,6 +97,46 @@ function BoringSidebarMultilineRow() {
   );
 }
 
+const TOOL_CALL_VISIBILITY_LABELS: Record<ToolCallVisibility, string> = {
+  showAll: "Show all",
+  hideSuccessful: "Hide successful",
+  hideAll: "Hide all",
+  zen: "Zen",
+};
+
+const isToolCallVisibility = Schema.is(ToolCallVisibility);
+
+function ToolCallVisibilityRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("tool-call-visibility")}
+      description="Hide the commands, edits, and searches agents run. Hide successful keeps failures. Zen shows only final answers. Approvals, questions, and errors always show."
+      control={
+        <div className="w-full sm:w-40">
+          <Select
+            value={settings.toolCallVisibility}
+            onValueChange={(value) => {
+              if (isToolCallVisibility(value)) updateSettings({ toolCallVisibility: value });
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Tool calls in chat">
+              <SelectValue>{TOOL_CALL_VISIBILITY_LABELS[settings.toolCallVisibility]}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem value="showAll">Show all</SelectItem>
+              <SelectItem value="hideSuccessful">Hide successful</SelectItem>
+              <SelectItem value="hideAll">Hide all</SelectItem>
+              <SelectItem value="zen">Zen</SelectItem>
+            </SelectPopup>
+          </Select>
+        </div>
+      }
+    />
+  );
+}
+
 /** Signed out of T3 Connect, the row offers to sign in instead of its switch. */
 function GuestLinksRowWithSignIn() {
   const { isSignedIn } = useAuth();
@@ -81,7 +146,7 @@ function GuestLinksRowWithSignIn() {
   return (
     <SettingsRow
       {...searchableSetting("guest-links")}
-      description="Share a thread with a guest who watches it live in their browser and sends messages you approve. Sign in to T3 Connect to use guest links."
+      description="Share a thread with a guest who watches it live in a browser and sends messages you approve. Sign in to T3 Connect to use guest links."
       control={
         <Button size="sm" variant="secondary" onClick={openAuthPrompt}>
           Sign in
@@ -112,10 +177,10 @@ function GuestLinksRow() {
       managed={settings.guestSharingEnabled ? undefined : connectDenial}
       description={
         <>
-          Share a thread with a guest who watches it live in their browser and sends messages you
+          Share a thread with a guest who watches it live in a browser and sends messages you
           approve. Needs T3 Connect: sign in and link this machine in{" "}
           <InlineButton render={<Link to="/settings/access" />}>Sharing & access</InlineButton>.
-          While it is off, every guest link stops working.
+          Turning it off stops every guest link.
         </>
       }
       control={
@@ -143,7 +208,7 @@ function LinkedEnvironmentsRow() {
           Let agents here work on your other machines, and theirs here. Turn it on for each machine,
           then link them in{" "}
           <InlineButton render={<Link to="/settings/connections" />}>Connections</InlineButton>.
-          While it is off, nothing new starts over a link; tasks already running finish.
+          While off, nothing new starts over a link; running tasks finish.
         </>
       }
       control={

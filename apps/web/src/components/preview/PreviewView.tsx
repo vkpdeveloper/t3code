@@ -1,9 +1,6 @@
+import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { settlePromise } from "@t3tools/client-runtime/state/runtime";
-import { randomUUID } from "~/lib/utils";
-import { useAtomValue } from "@effect/atom-react";
-import { primaryServerKeybindingsAtom } from "~/state/server";
-import { PreviewAnnotationSpeech } from "./PreviewAnnotationSpeech";
 import type { DesktopPreviewAnnotationVoiceConfig } from "@t3tools/contracts";
 import { previewStreamDownloadUrl } from "@t3tools/client-runtime/preview/server-browser-stream";
 import { useLayoutPaneFocusedRef } from "../../layout/layoutPaneContext";
@@ -67,6 +64,10 @@ import {
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 import { useRightPanelStore } from "~/rightPanelStore";
 
+import { effectiveShortcutsForCommand } from "~/keybindings";
+import { randomUUID } from "~/lib/utils";
+import { primaryServerKeybindingsAtom } from "~/state/server";
+import { PreviewAnnotationSpeech } from "./PreviewAnnotationSpeech";
 import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
 import { reopenBrowserSurface } from "./addBrowserSurface";
@@ -163,15 +164,14 @@ export function PreviewView({
 }: Props) {
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const [pickActive, setPickActive] = useState(false);
-  const [annotationVoice, setAnnotationVoice] =
-    useState<DesktopPreviewAnnotationVoiceConfig | null>(null);
-  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const canSendAnnotation =
     useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope) &&
     Boolean(onSendAnnotation);
   const activeRecordingTabIds = useActiveBrowserRecordingTabIds();
-  const pickOwnerKey = scopedThreadKey(threadRef);
-  const pickActiveRef = useRef<{ cancelled: boolean; ownerKey: string } | null>(null);
+  const pickActiveRef = useRef<{ cancelled: boolean } | null>(null);
+  const [annotationVoice, setAnnotationVoice] =
+    useState<DesktopPreviewAnnotationVoiceConfig | null>(null);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const previewState = useThreadPreviewState(threadRef);
   const recentHistoryEntries = useThreadRecentHistory(
     threadRef,
@@ -814,11 +814,17 @@ export function PreviewView({
     // Capture app focus before main moves it into guest webContents.
     const previouslyFocused =
       typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
-    const pickRequest = { cancelled: false, ownerKey: pickOwnerKey };
+    const pickRequest = { cancelled: false };
     let submitted = false;
     pickActiveRef.current = pickRequest;
     setPickActive(true);
-    const voice = { sessionId: randomUUID(), keybindings };
+    // The guest learns only the dictation chords, never the whole keybinding config.
+    const voice: DesktopPreviewAnnotationVoiceConfig = {
+      sessionId: randomUUID(),
+      shortcuts: effectiveShortcutsForCommand(keybindings, "composer.dictation", {
+        context: { previewFocus: true, previewOpen: true, editableFocus: true },
+      }),
+    };
     setAnnotationVoice(voice);
     const finishPick = () => {
       const isCurrentPick = pickActiveRef.current === pickRequest;
@@ -907,7 +913,7 @@ export function PreviewView({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- cancels an in-progress element pick on the preview bridge when the tab changes or on unmount
   useEffect(() => {
     return () => {
-      if (pickActiveRef.current?.ownerKey !== pickOwnerKey) return;
+      if (!pickActiveRef.current) return;
       pickActiveRef.current.cancelled = true;
       pickActiveRef.current = null;
       if (previewBridge && runtimeTabId) {
@@ -916,7 +922,7 @@ export function PreviewView({
       setPickActive(false);
       setAnnotationVoice(null);
     };
-  }, [runtimeTabId, pickOwnerKey]);
+  }, [runtimeTabId]);
 
   // Subscribe only while visible; ChatView always owns URL-aware toggle-panel handling.
   const paneFocusedRef = useLayoutPaneFocusedRef();
@@ -964,10 +970,11 @@ export function PreviewView({
     >
       {pickActive && runtimeTabId && annotationVoice ? (
         <PreviewAnnotationSpeech
-          key={JSON.stringify([annotationVoice.sessionId, threadRef])}
-          environmentId={threadRef.environmentId}
+          key={annotationVoice.sessionId}
+          threadRef={threadRef}
           tabId={runtimeTabId}
           config={annotationVoice}
+          keybindings={keybindings}
         />
       ) : null}
       <PreviewChromeRow

@@ -2,6 +2,7 @@ import { AppWindowIcon, Columns2Icon, Layers2Icon, Rows2Icon } from "lucide-reac
 import { createPortal } from "react-dom";
 
 import { PANE_TAB_CLASS } from "../components/PaneNotch";
+import { useScrollingWorkspacesEnabled } from "../hooks/useSettings";
 import { cn } from "../lib/utils";
 import {
   LAYOUT_DROP_CHROME_HEIGHT,
@@ -24,12 +25,6 @@ const GRIP_THICKNESS = 4;
 /** Pen ZyA9S/JYBD5: window-edge bars are 6px, 4px outside the strip. */
 const EXTEND_THICKNESS = 6;
 const EXTEND_GAP = 4;
-const GHOST_OFFSET_X = 24;
-const GHOST_OFFSET_Y = 14;
-const PILL_GAP = 8;
-const MARKER_GAP = 3;
-const PILL_CLASS =
-  "flex h-6.5 items-center gap-1.5 rounded-control bg-strong-foreground px-2.5 text-meta whitespace-nowrap text-background shadow-drag-label";
 
 type Box = { left: number; top: number; width: number; height: number };
 
@@ -60,6 +55,14 @@ function targetZone(state: LayoutDragState, target: LayoutDropTarget): Box | nul
   if (!pane) return null;
   const { rect } = pane;
   if (target.kind === "into") {
+    if (pane.tabRow) {
+      return box({
+        left: pane.tabRow.left - ZONE_INSET / 2,
+        top: pane.tabRow.top - ZONE_INSET / 2,
+        right: pane.tabRow.right + ZONE_INSET / 2,
+        bottom: pane.tabRow.bottom + ZONE_INSET / 2,
+      });
+    }
     return box({
       left: rect.left + ZONE_INSET / 2,
       top: rect.top + ZONE_INSET / 2,
@@ -86,43 +89,6 @@ function targetZone(state: LayoutDragState, target: LayoutDropTarget): Box | nul
     case "down":
       return box({ ...body, top: midY + half });
   }
-}
-
-function intoTabs(state: LayoutDragState, target: LayoutDropTarget) {
-  if (target.kind !== "into") return null;
-  const tabs = state.panes.find((pane) => pane.paneId === target.paneId)?.tabs ?? [];
-  const sourceTabId = state.source.kind === "tab" ? state.source.tabId : null;
-  return {
-    tabs: tabs.filter((tab) => tab.id !== sourceTabId),
-    reorder: tabs.some((tab) => tab.id === sourceTabId),
-    index: target.index,
-  };
-}
-
-function InsertionMarker({
-  tabs,
-  index,
-}: {
-  tabs: readonly { rect: LayoutDragRect }[];
-  index: number | undefined;
-}) {
-  if (index === undefined) return null;
-  const before = tabs[index - 1];
-  const after = tabs[index];
-  const anchor = after ?? before;
-  if (!anchor) return null;
-  const left =
-    before && after
-      ? (before.rect.right + after.rect.left) / 2
-      : after
-        ? after.rect.left - MARKER_GAP
-        : anchor.rect.right + MARKER_GAP;
-  return (
-    <div
-      className="absolute w-0.5 -translate-x-1/2 rounded-full bg-strong-foreground"
-      style={{ left, top: anchor.rect.top, height: anchor.rect.bottom - anchor.rect.top }}
-    />
-  );
 }
 
 function PillIcon({ target }: { target: LayoutDropTarget }) {
@@ -186,6 +152,7 @@ function PaneGrips({ pane, target }: { pane: LayoutDragPane; target: LayoutDropT
 }
 
 function ExtendBars({ state }: { state: LayoutDragState }) {
+  const scrollingWorkspaces = useScrollingWorkspacesEnabled();
   const { strip, target } = state;
   const active = target?.kind === "extend" ? target.edge : null;
   const maxX = window.innerWidth - EXTEND_THICKNESS;
@@ -213,18 +180,20 @@ function ExtendBars({ state }: { state: LayoutDragState }) {
       height: EXTEND_THICKNESS,
     },
   ] as const;
-  return bars.map((bar) => (
-    <div
-      key={bar.edge}
-      className={cn(
-        "absolute rounded-model-tag inset-ring",
-        bar.edge === active
-          ? "bg-foreground/35 inset-ring-foreground/50"
-          : "bg-foreground/12 inset-ring-foreground/20",
-      )}
-      style={{ left: bar.left, top: bar.top, width: bar.width, height: bar.height }}
-    />
-  ));
+  return bars
+    .filter((bar) => bar.edge !== "bottom" || scrollingWorkspaces)
+    .map((bar) => (
+      <div
+        key={bar.edge}
+        className={cn(
+          "absolute rounded-model-tag inset-ring",
+          bar.edge === active
+            ? "bg-foreground/35 inset-ring-foreground/50"
+            : "bg-foreground/12 inset-ring-foreground/20",
+        )}
+        style={{ left: bar.left, top: bar.top, width: bar.width, height: bar.height }}
+      />
+    ));
 }
 
 /** The lifted, tilted tab under the pointer (pen G1JJK). */
@@ -241,9 +210,7 @@ function DraggedTabGhostBody({ tab, point }: { tab: LayoutTab; point: { x: numbe
   return (
     <div
       className={cn(PANE_TAB_CLASS, "absolute left-0 top-0 surface-popover")}
-      style={{
-        transform: `translate(${point.x - GHOST_OFFSET_X}px, ${point.y - GHOST_OFFSET_Y}px) rotate(-2deg)`,
-      }}
+      style={{ transform: `translate(${point.x - 24}px, ${point.y - 14}px) rotate(-2deg)` }}
     >
       {label.icon}
       <span className="min-w-0 truncate">{label.title}</span>
@@ -256,7 +223,6 @@ export function LayoutDropZones() {
   const state = useLayoutDragState();
   if (!state) return null;
   const zone = state.target ? targetZone(state, state.target) : null;
-  const into = state.target ? intoTabs(state, state.target) : null;
   return createPortal(
     <div
       data-layout-drag-overlay=""
@@ -277,27 +243,13 @@ export function LayoutDropZones() {
         {state.source.kind === "tab" ? (
           <DraggedTabGhost tabId={state.source.tabId} point={state.point} />
         ) : null}
-        {into ? <InsertionMarker tabs={into.tabs} index={into.index} /> : null}
         {zone && state.target ? (
           <div
-            className={cn(
-              "absolute flex",
-              into ? "justify-end-safe" : "-translate-x-1/2 -translate-y-1/2",
-            )}
-            style={
-              into
-                ? {
-                    left: PILL_GAP,
-                    top: zone.top + zone.height + PILL_GAP,
-                    width: Math.max(0, state.point.x - GHOST_OFFSET_X - PILL_GAP * 2),
-                  }
-                : { left: zone.left + zone.width / 2, top: zone.top + zone.height / 2 }
-            }
+            className="absolute flex h-6.5 -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-control bg-strong-foreground px-2.5 text-meta whitespace-nowrap text-background shadow-drag-label"
+            style={{ left: zone.left + zone.width / 2, top: zone.top + zone.height / 2 }}
           >
-            <div className={PILL_CLASS}>
-              <PillIcon target={state.target} />
-              {layoutDropLabel(state.target, into?.reorder ?? false)}
-            </div>
+            <PillIcon target={state.target} />
+            {layoutDropLabel(state.target)}
           </div>
         ) : null}
       </div>

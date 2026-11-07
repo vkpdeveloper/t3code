@@ -1,5 +1,4 @@
 import { toggleThreadTerminalPane } from "../../layout/openRules";
-import { terminalTabTitle } from "../../layout/surfaceTabLabels";
 import type { TerminalLaunchContext } from "../ThreadTerminalSurfaces";
 export type { TerminalLaunchContext } from "../ThreadTerminalSurfaces";
 import type {
@@ -11,6 +10,7 @@ import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { selectThreadTerminalUiState } from "../../terminalUiStateStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useThreadTerminalActions } from "../terminal/useThreadTerminalActions";
+import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   AuthTerminalReadScope,
   AuthTerminalOperateScope,
@@ -213,6 +213,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
     }
     const targetCwd = options?.cwd ?? gitCwd ?? activeProject.workspaceRoot;
     const reusableTerminalId =
+      script.stopOnSettle ||
       options?.preferNewTerminal ||
       !canReuseTerminal ||
       !readEnvironmentScope(environmentId, AuthTerminalReadScope)
@@ -249,6 +250,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
         ? { size: { cols: SCRIPT_TERMINAL_COLS, rows: SCRIPT_TERMINAL_ROWS } }
         : { terminalId: reusableTerminalId }),
       location: { cwd: targetCwd, worktreePath: targetWorktreePath },
+      stopOnSettle: script.stopOnSettle ?? false,
       ...(options?.env ? { extraEnv: options.env } : {}),
     });
     if (!launched) return;
@@ -318,7 +320,7 @@ export function useChatTerminalActions(input: ChatTerminalActionsInput) {
   const runShellCommandStable = useStableCallback(runShellCommand);
   const requestCloseTerminal = (terminalId: string) => {
     if (!hasTerminalWriteAccess()) return;
-    const label = terminalTabTitle(terminalId, activeTerminalLabelsById.get(terminalId));
+    const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
     void confirmTerminalClose([label]).then((confirmed) => {
       if (confirmed && readEnvironmentScope(environmentId, AuthTerminalOperateScope)) {
         closeTerminal(terminalId);
