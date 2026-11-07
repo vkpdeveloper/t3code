@@ -50,6 +50,7 @@ import { CircleAlertIcon, XIcon, RotateCcwIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrls } from "../../assets/assetUrls";
 import { useThreadShell } from "../../state/entities";
+import { RunningFor } from "./RunningFor";
 import {
   threadReadLabelPrefix,
   threadReadTargetId,
@@ -442,6 +443,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               ) : (
                 previewText
               )}
+              {workEntry.itemType === "command_execution" &&
+              workEntry.command?.trim() &&
+              workEntry.toolLifecycleStatus === "inProgress" ? (
+                <RunningFor startedAt={workEntry.createdAt} />
+              ) : null}
             </span>
             {editCounts ? (
               <span
