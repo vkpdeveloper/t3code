@@ -254,6 +254,8 @@ interface MessagesTimelineProps {
   ) => boolean;
   isWorking: boolean;
   runlessWorkActive?: boolean;
+  /** The latest turn ended, but its agent still awaits background work. */
+  awaitingBackgroundWork?: boolean;
   activeTurnStartedAt?: string | null;
   worktreeSetup?: WorktreeSetupSnapshot | null;
   onCancelWorktreeSetup?: () => void;
@@ -376,6 +378,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onCiteAssistantText,
   isWorking,
   runlessWorkActive = false,
+  awaitingBackgroundWork = false,
   activeTurnStartedAt = null,
   worktreeSetup = null,
   footer = null,
@@ -668,6 +671,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     timelineEntries,
     pendingApprovalRequestIds,
     latestRun,
+    awaitingBackgroundWork,
     runningRunId,
     expandedRunIds: visibleExpandedRunIds,
     expandedAttemptIds: visibleExpandedAttemptIds,
