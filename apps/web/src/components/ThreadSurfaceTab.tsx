@@ -601,6 +601,7 @@ function ThreadSurfacePane({
           context={context}
           visible={visible}
           openers={openers}
+          openInPane={add}
           getShortcutContext={getShortcutContext}
         />
       )}
@@ -637,6 +638,7 @@ function ThreadSurfaceContent({
   context,
   visible,
   openers,
+  openInPane,
   getShortcutContext,
 }: {
   threadRef: ScopedThreadRef;
@@ -644,6 +646,7 @@ function ThreadSurfaceContent({
   context: ReturnType<typeof useThreadSurfaceContext>;
   visible: boolean;
   openers: ReturnType<typeof useThreadSurfaceOpeners>;
+  openInPane: (kind: LauncherSurfaceKind) => void;
   getShortcutContext: () => {
     terminalFocus: boolean;
     terminalOpen: boolean;
@@ -729,7 +732,7 @@ function ThreadSurfaceContent({
           }
           onSplitTerminal={terminal.split}
           onSplitTerminalVertical={terminal.splitVertical}
-          onNewTerminal={() => openers.open("terminal")}
+          onNewTerminal={() => openInPane("terminal")}
           onActiveTerminalChange={terminal.activate}
           onCloseTerminal={terminal.close}
           {...shortcutLabels}
@@ -793,7 +796,7 @@ function ThreadSurfaceContent({
             onBack={
               openers.available["pull-requests"] &&
               visibleThreadPullRequests(shell?.pullRequests ?? []).length > 1
-                ? () => openers.open("pull-requests")
+                ? () => openInPane("pull-requests")
                 : undefined
             }
           />
