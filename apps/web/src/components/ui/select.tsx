@@ -192,7 +192,10 @@ function SelectPopup({
             }
           >
             <SelectPrimitive.List
-              className={cn("max-h-(--available-height) overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-card)-5px)]", className)}
+              className={cn(
+                "max-h-(--available-height) overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-card)-5px)]",
+                className,
+              )}
               data-slot="select-list"
             >
               {children}
