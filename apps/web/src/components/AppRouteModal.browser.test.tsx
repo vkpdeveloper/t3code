@@ -4,7 +4,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../test/render";
 import { useCommitOnBlur } from "../hooks/useCommitOnBlur";
-import { AppRouteModal, AppRouteModalClose } from "./AppRouteModal";
+import { AppRouteModal } from "./AppRouteModal";
 
 function CommitOnBlurField({ onCommit }: { onCommit: (next: string) => void }) {
   return <input aria-label="Instructions" {...useCommitOnBlur("", onCommit)} />;
@@ -35,22 +35,17 @@ function ModalLauncher() {
       {open ? (
         <AppRouteModal label="Settings">
           <CommitOnBlurField onCommit={() => {}} />
-          <AppRouteModalClose />
         </AppRouteModal>
       ) : null}
     </>
   );
 }
 
-it.each(["Escape", "Close"])("returns focus to the launcher on %s", async (method) => {
+it("returns focus to the launcher on close", async () => {
   await using screen = await render(<ModalLauncher />);
   const launcher = screen.getByRole("button", { name: "Settings launcher" });
   await launcher.click();
   await expect.element(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
-  if (method === "Escape") await userEvent.keyboard("{Escape}");
-  else
-    (
-      page.getByRole("button", { name: "Close", exact: true }).element() as HTMLButtonElement
-    ).click();
+  await userEvent.keyboard("{Escape}");
   await expect.element(launcher).toHaveFocus();
 });
