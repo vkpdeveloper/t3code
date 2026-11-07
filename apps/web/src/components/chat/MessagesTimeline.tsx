@@ -261,6 +261,8 @@ interface MessagesTimelineProps {
   onReplyToResponse?: TimelineRowSharedState["onReplyToResponse"];
   isWorking: boolean;
   runlessWorkActive?: boolean;
+  /** The latest turn ended, but its agent still awaits background work. */
+  awaitingBackgroundWork?: boolean;
   activeTurnStartedAt?: string | null;
   /** Replaces "Thinking" while the active run's provider has not started a turn. */
   providerStartingLabel?: string | null;
@@ -390,6 +392,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
+  awaitingBackgroundWork = false,
   activeTurnStartedAt = null,
   providerStartingLabel = null,
   worktreeSetup = null,
@@ -697,6 +700,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     timelineEntries,
     pendingApprovalRequestIds,
     latestRun,
+    awaitingBackgroundWork,
     runningRunId,
     expandedRunIds: visibleExpandedRunIds,
     expandedAttemptIds: visibleExpandedAttemptIds,
