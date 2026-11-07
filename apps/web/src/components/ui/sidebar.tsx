@@ -811,7 +811,11 @@ function SidebarInset({
         data-slot="sidebar-inset"
         {...props}
       />
-      <div aria-hidden data-slot="sidebar-slide-frame" />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-y-0 hidden bg-(--app-chrome-background) opacity-0 surface-grain md:peer-data-[variant=inset]:block"
+        data-slot="sidebar-slide-frame"
+      />
     </>
   );
 }
