@@ -37,6 +37,7 @@ import { useLayoutPane } from "../layout/layoutPaneContext";
 import { copyLayoutFilePath } from "../layout/PaneTabs";
 import type { LauncherSurfaceKind } from "./SurfaceLauncher";
 import { THREAD_TERMINAL_SURFACE_ID } from "../layout/layoutModel";
+import { terminalTabTitle } from "../layout/surfaceTabLabels";
 import { runInNewLayoutTab } from "../layout/layoutStore";
 import {
   useThreadChatBridge,
@@ -993,7 +994,9 @@ export async function closeThreadSurface(
         useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
         threadRef,
       );
-      const [first, ...rest] = terminalIds.map((terminalId) => getTerminalLabel(terminalId));
+      const [first, ...rest] = terminalIds.map((terminalId) =>
+        terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
+      );
       if (first !== undefined) {
         if (!options.bulk && !(await confirmTerminalClose([first, ...rest]))) return;
         surfaceServices?.endTerminals(threadRef, terminalIds);
@@ -1030,8 +1033,8 @@ export async function closeThreadSurface(
     !options.bulk &&
     readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
   ) {
-    const [first = getTerminalLabel(surface.activeTerminalId), ...rest] = surface.terminalIds.map(
-      (terminalId) => getTerminalLabel(terminalId),
+    const [first = "Terminal", ...rest] = surface.terminalIds.map((terminalId) =>
+      terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
     );
     if (!(await confirmTerminalClose([first, ...rest]))) return;
   }
