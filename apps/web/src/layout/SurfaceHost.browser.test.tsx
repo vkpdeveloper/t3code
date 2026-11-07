@@ -9,13 +9,21 @@ import {
   selectFocusedTab,
   selectVisibleLayoutTabs,
 } from "./layoutModel";
+import { useLayoutBehaviorStore } from "./layoutBehavior";
 import { useLayoutStore } from "./layoutStore";
 import { LayoutSurfaceHost } from "./SurfaceHost";
+
+// Panes only run off screen when the strip scrolls, so the test owns the layout behavior.
+vi.mock(import("./useSyncLayoutBehavior"), () => ({ useSyncLayoutBehavior: () => {} }));
 
 const TOUR_KEY = "t3code:layout-tour:v1";
 
 function setup() {
   const original = useLayoutStore.getState().layout;
+  const behavior = useLayoutBehaviorStore.getState().behavior;
+  useLayoutBehaviorStore.setState({
+    behavior: { ...behavior, scrollingWorkspaces: true, whenNoRoom: "always-scroll" },
+  });
   const tour = localStorage.getItem(TOUR_KEY);
   localStorage.setItem(TOUR_KEY, "true");
   useLayoutStore.setState({ layout: createLayoutState() });
@@ -40,6 +48,7 @@ function setup() {
     third: third!,
     [Symbol.dispose]: () => {
       useLayoutStore.setState({ layout: original });
+      useLayoutBehaviorStore.setState({ behavior });
       if (tour === null) localStorage.removeItem(TOUR_KEY);
       else localStorage.setItem(TOUR_KEY, tour);
     },
