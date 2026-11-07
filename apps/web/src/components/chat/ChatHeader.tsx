@@ -52,6 +52,7 @@ import {
   LayoutPaneTab,
   LayoutPaneTabStrip,
   LayoutTabCloseButton,
+  showIconOnlyWhenClipped,
   buildLayoutTabMenuItems,
   closeLayoutTabOnMiddleClick,
   finishLayoutTabRename,
@@ -451,7 +452,10 @@ export const ChatHeader = memo(function ChatHeader({
           ))}
           {hiddenTerminal ? (
             // The hidden terminal keeps a tab like any other pane tab.
-            <span className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}>
+            <span
+              ref={showIconOnlyWhenClipped}
+              className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}
+            >
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -473,7 +477,9 @@ export const ChatHeader = memo(function ChatHeader({
                       hiddenTerminal.running && "text-success-foreground",
                     )}
                   />
-                  <span className="min-w-0 truncate">Terminal</span>
+                  <span className="min-w-[4ch] truncate group-data-icon-only/tab:invisible">
+                    Terminal
+                  </span>
                 </TooltipTrigger>
                 <TooltipPopup side="bottom">
                   Show the terminal

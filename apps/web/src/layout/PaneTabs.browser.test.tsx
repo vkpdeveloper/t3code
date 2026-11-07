@@ -1,7 +1,8 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, type ContextMenuItem } from "@t3tools/contracts";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { expect, it, vi } from "vite-plus/test";
+import "~/index.css";
 
 import { render } from "../../test/render";
 
@@ -36,7 +37,13 @@ vi.mock(import("../state/session"), async (original) => ({
 }));
 
 import { useRightPanelStore } from "../rightPanelStore";
-import { createLayoutState, findLayoutTab, type LayoutTabContent } from "./layoutModel";
+import {
+  createLayoutLauncherContent,
+  createLayoutState,
+  findLayoutTab,
+  selectFocusedTab,
+  type LayoutTabContent,
+} from "./layoutModel";
 import { useLayoutStore } from "./layoutStore";
 import { LayoutPaneTab } from "./PaneTabs";
 
@@ -86,4 +93,39 @@ it("an inactive tab beside an active browser opens its own menu without being sh
   expect(findLayoutTab(useLayoutStore.getState().layout, (tab) => tab.id === activeTabId)).toEqual(
     expect.objectContaining({ pane: expect.objectContaining({ activeTabId }) }),
   );
+});
+
+function setupSqueezedLaunchers() {
+  const original = useLayoutStore.getState().layout;
+  useLayoutStore.setState({ layout: createLayoutState() });
+  for (let index = 0; index < 7; index++) {
+    useLayoutStore.getState().openTab(createLayoutLauncherContent(null));
+  }
+  const tabs = useLayoutStore.getState().layout.workspaces[0]!.columns[0]!.panes[0]!.tabs;
+  return {
+    tabs,
+    [Symbol.dispose]: () => useLayoutStore.setState({ layout: original }),
+  };
+}
+
+it("selects a squeezed tab clicked in its middle instead of closing it", async () => {
+  using layout = setupSqueezedLaunchers();
+  await using screen = await render(
+    <div className="flex w-60 gap-1 overflow-hidden">
+      {layout.tabs.map((tab) => (
+        <LayoutPaneTab key={tab.id} tab={tab} />
+      ))}
+    </div>,
+  );
+  const target = layout.tabs[2]!;
+  const slot = screen.container.querySelector(
+    `[data-layout-pane-tab="${target.id}"]`,
+  )!.parentElement!;
+  expect(slot.getBoundingClientRect().width).toBeLessThan(40);
+
+  await userEvent.click(slot);
+
+  const state = useLayoutStore.getState().layout;
+  expect(state.workspaces[0]!.columns[0]!.panes[0]!.tabs).toHaveLength(7);
+  expect(selectFocusedTab(state)?.id).toBe(target.id);
 });

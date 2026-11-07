@@ -476,7 +476,7 @@ export function LayoutTabCloseButton({ tabId, title }: { tabId: string; title: s
             variant="tab-close"
             type="button"
             aria-label={`Close ${title}`}
-            className="absolute start-2.25 top-1/2 -translate-y-1/2"
+            className="absolute start-2.25 top-1/2 -translate-y-1/2 group-data-icon-only/tab:hidden"
             data-tab-close=""
             onClick={() => closeLayoutTabByUser(tabId)}
           />
@@ -552,7 +552,10 @@ function LayoutPaneTabButton({
   return (
     // Clipped to its box, so a squeezed tab never slides under its neighbor;
     // it keeps at least its icon, so a Settings or side tab stays findable.
-    <span className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}>
+    <span
+      ref={showIconOnlyWhenClipped}
+      className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}
+    >
       <Tooltip>
         <TooltipTrigger
           render={
@@ -573,7 +576,10 @@ function LayoutPaneTabButton({
         >
           <span className={LAYOUT_TAB_ICON_CLASS}>{label.icon}</span>
           <span
-            className={cn("min-w-[4ch]", PANE_INACTIVE_TAB_TITLE_CLASS)}
+            className={cn(
+              "min-w-[4ch] group-data-icon-only/tab:invisible",
+              PANE_INACTIVE_TAB_TITLE_CLASS,
+            )}
             dir={textDirection(label.title)}
           >
             {label.title}
@@ -585,6 +591,14 @@ function LayoutPaneTabButton({
       </Tooltip>
       <LayoutTabCloseButton tabId={tab.id} title={label.title} />
     </span>
+  );
+}
+
+export function showIconOnlyWhenClipped(slot: HTMLSpanElement) {
+  const tab = slot.firstElementChild;
+  if (!(tab instanceof HTMLElement)) return;
+  return observeResize([slot, tab], () =>
+    slot.toggleAttribute("data-icon-only", tab.scrollWidth > tab.clientWidth),
   );
 }
 
