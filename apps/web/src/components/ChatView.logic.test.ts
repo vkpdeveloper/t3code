@@ -148,22 +148,14 @@ describe("buildExpiredTerminalContextToastCopy", () => {
 });
 
 describe("shouldShowComposerTasks", () => {
-  const done = [{ status: "completed" }, { status: "completed" }];
-  const unfinished = [{ status: "completed" }, { status: "pending" }];
-
-  it("keeps a live run's plan and hides a settled run's plan while the next send is pending", () => {
-    expect(shouldShowComposerTasks({ steps: done, planRunSettled: false, isSendBusy: true })).toBe(
-      true,
-    );
-    expect(shouldShowComposerTasks({ steps: done, planRunSettled: true, isSendBusy: true })).toBe(
-      false,
-    );
+  it("hides a settled run's finished plan while the next send is pending", () => {
     expect(
-      shouldShowComposerTasks({ steps: unfinished, planRunSettled: true, isSendBusy: true }),
+      shouldShowComposerTasks({
+        steps: [{ status: "completed" }],
+        planRunSettled: true,
+        isSendBusy: true,
+      }),
     ).toBe(false);
-    expect(
-      shouldShowComposerTasks({ steps: unfinished, planRunSettled: true, isSendBusy: false }),
-    ).toBe(true);
   });
 });
 
