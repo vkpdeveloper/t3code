@@ -219,6 +219,11 @@ export function useThreadSurfaceOpeners(threadRef: ScopedThreadRef) {
       context.serverConfig?.environment.capabilities.sideChats === true
         ? threadRef
         : null,
+    // Opened outside the composer, so the parent's saved settings are the closest match.
+    readSettings: () => ({
+      runtimeMode: context.serverThread?.runtimeMode ?? "full-access",
+      modelSelection: context.serverThread?.modelSelection,
+    }),
     onError: (description) =>
       toastManager.add({ type: "error", title: "Could not open side chat", description }),
   });

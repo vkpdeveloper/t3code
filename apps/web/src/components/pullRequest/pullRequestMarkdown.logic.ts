@@ -8,7 +8,10 @@ import {
 } from "@t3tools/client-runtime/source-control-clients";
 import type { PluggableList } from "unified";
 import { chatMarkdownImageSources } from "@t3tools/shared/markdownPipeline";
-import { splitPullRequestBody } from "@t3tools/client-runtime/pull-request-markdown";
+import {
+  splitPullRequestBody,
+  type PullRequestBodySegment,
+} from "@t3tools/client-runtime/pull-request-markdown";
 
 export {
   splitPullRequestBody,
@@ -110,12 +113,17 @@ export function pullRequestAttachments(body: string) {
       caption: caption || `${media === "image" ? "Image" : "Video"} ${attachments.length + 1}`,
     });
   };
-  for (const segment of splitPullRequestBody(body)) {
-    if (segment.kind === "attachment") {
-      if (segment.media !== "unknown") add(segment.url, segment.media, "");
-      continue;
+  const visit = (segments: readonly PullRequestBodySegment[]) => {
+    for (const segment of segments) {
+      if (segment.kind === "attachment") {
+        if (segment.media !== "unknown") add(segment.url, segment.media, "");
+      } else if (segment.kind === "table") {
+        for (const cells of segment.rows) for (const cell of cells) visit(cell.segments);
+      } else {
+        for (const url of chatMarkdownImageSources(segment.text)) add(url, "image", "");
+      }
     }
-    for (const url of chatMarkdownImageSources(segment.text)) add(url, "image", "");
-  }
+  };
+  visit(splitPullRequestBody(body));
   return attachments;
 }
