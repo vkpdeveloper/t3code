@@ -651,6 +651,7 @@ function ModelFolderSettings({
       control={
         <div className="flex w-full max-w-80 items-center gap-1.5">
           <Input
+            size="settings"
             value={draft}
             placeholder="Add a folder path"
             aria-label="Add a model folder"
@@ -664,7 +665,7 @@ function ModelFolderSettings({
             }}
           />
           <Button
-            size="sm"
+            size="standard"
             disabled={controlsDisabled || !valid || directories.length >= 20}
             onClick={add}
           >
