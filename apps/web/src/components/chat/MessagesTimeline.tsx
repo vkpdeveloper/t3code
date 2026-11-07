@@ -1358,6 +1358,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
     },
   );
 
+  const keepEndOnViewportResize = useStableCallback(() => {
+    const list = listRef.current;
+    const scrollNode = list?.getScrollableNode();
+    if (!maintainScrollAtEnd || !scrollNode) return;
+    if (!list?.getState().isWithinMaintainScrollAtEndThreshold) return;
+    scrollNode.scrollTop = scrollNode.scrollHeight - scrollNode.clientHeight;
+  });
+
   const canvas = useChatCanvas();
   const registerTimeline = canvas?.registerTimeline;
   // Stable so the list attaches once per mount, not on every render.
@@ -1365,6 +1373,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
     listRef.current = list;
     const scrollNode: HTMLElement | null = list?.getScrollableNode() ?? null;
     registerTimeline?.(scrollNode);
+    const stopKeepingEndOnResize = scrollNode
+      ? observeResize(scrollNode, keepEndOnViewportResize)
+      : undefined;
     const viewport = scrollNode
       ? attachTimelineViewport(scrollNode, () => layoutPaneFocusedRef.current)
       : null;
@@ -1399,6 +1410,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     scheduleContentSizeChanged();
     return () => {
       rememberPositionOnUnmount();
+      stopKeepingEndOnResize?.();
       stopListeningToContentSize?.();
       stopRevealingNewMessages?.();
       stopRememberingRelease?.();
