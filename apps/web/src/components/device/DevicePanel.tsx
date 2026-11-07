@@ -674,14 +674,13 @@ function DeviceDiscoveryWarning(props: {
       <TriangleAlert />
       <AlertTitle>
         {platforms.length > 0
-          ? `${platforms.join(" and ")} ${platforms.length > 1 ? "lists" : "list"} may be incomplete`
-          : "Device discovery warning"}
+          ? `${platforms.join(" and ")} ${platforms.length > 1 ? "lists" : "list"} on ${props.label} may be incomplete.`
+          : `Device discovery on ${props.label} reported a warning.`}
       </AlertTitle>
       <AlertDescription
         className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words"
         tabIndex={0}
       >
-        <span className="block">{props.label}</span>
         {props.detail}
       </AlertDescription>
       <AlertAction>
