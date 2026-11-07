@@ -16,14 +16,8 @@ describe("resolveComposerMenuActiveItemId", () => {
         items: [{ id: "new-result" }, { id: "second" }],
       }),
     ).toBe("new-result");
+    expect(
+      resolveComposerMenuActiveItemId({ ...search, items: [{ id: "first" }, { id: "second" }] }),
+    ).toBe("second");
   });
-});
-
-it("keeps the highlighted item when a new query still contains it", () => {
-  expect(
-    resolveComposerMenuActiveItemId({
-      items: [{ id: "first" }, { id: "second" }],
-      highlightedItemId: "second",
-    }),
-  ).toBe("second");
 });
