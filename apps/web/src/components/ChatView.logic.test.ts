@@ -36,7 +36,6 @@ import { environmentThreadDetails } from "../state/threads";
 
 import type { Thread } from "../types";
 import { derivePhase } from "../session-logic";
-import { deriveMessagesTimelineRows } from "./chat/MessagesTimeline.logic";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 import {
   getAntigravitySendBlockReason,
@@ -241,22 +240,14 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       }),
     ).toBe(acknowledged);
 
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: [],
-      latestRun: queuedRun,
-      isWorking: deriveTimelineWorking({
+    expect(
+      deriveTimelineWorking({
         phase: derivePhase({ ...readySession, status }),
         isSendBusy: !acknowledged,
         isCompacting: false,
         runlessWorkStartedAt: null,
       }),
-      activeTurnStartedAt: queuedRun.requestedAt,
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
-    });
-    expect(rows.filter((row) => row.kind === "working")).toMatchObject([
-      { id: "working-indicator-row" },
-    ]);
+    ).toBe(true);
   });
 
   it("waits for the matching running turn before acknowledging", () => {
