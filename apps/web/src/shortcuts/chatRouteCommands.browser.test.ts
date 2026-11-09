@@ -22,8 +22,14 @@ import {
   THREAD_TERMINAL_SURFACE_ID,
   type LayoutTabContent,
 } from "../layout/layoutModel";
+import { getLayoutBehavior, useLayoutBehaviorStore } from "../layout/layoutBehavior";
 import { useLayoutStore } from "../layout/layoutStore";
-import { requestLayoutSurfacePlacement, useLayoutSurfaceSync } from "../layout/surfaceSync";
+import { toggleThreadDiff } from "../layout/openRules";
+import {
+  findThreadChat,
+  requestLayoutSurfacePlacement,
+  useLayoutSurfaceSync,
+} from "../layout/surfaceSync";
 import { isMacPlatform } from "../lib/utils";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -187,6 +193,51 @@ describe("chat route commands", () => {
     expect(surfacePane("diff")).not.toBe(otherPaneId);
     await act(() => useRightPanelStore.getState().open(threadRef, "files"));
     expect(surfacePane("files")).toBe(surfacePane("diff"));
+  });
+
+  it("opens the diff where Settings puts the side pane and brings a hidden diff tab forward", async () => {
+    using stack = new DisposableStack();
+    const layout = useLayoutStore.getState().layout;
+    const panels = useRightPanelStore.getState();
+    const behavior = getLayoutBehavior();
+    stack.defer(() => useLayoutStore.setState({ layout }));
+    stack.defer(() => useRightPanelStore.setState(panels));
+    stack.defer(() => useLayoutBehaviorStore.setState({ behavior }));
+    useLayoutStore.setState({ layout: createLayoutState() });
+    useRightPanelStore.setState({ byThreadKey: {} });
+    const threadRef = scopeThreadRef(EnvironmentId.make("env"), ThreadId.make("diff-thread"));
+    function SurfaceSync() {
+      useLayoutSurfaceSync();
+      return null;
+    }
+    await using _screen = await render(createElement(SurfaceSync));
+    await act(() =>
+      useLayoutStore.getState().openTab({ kind: "chat", target: { kind: "server", threadRef } }),
+    );
+    const chat = () => findThreadChat(useLayoutStore.getState().layout, threadRef)!;
+    const diff = () =>
+      findLayoutSurfaceTabs(useLayoutStore.getState().layout, threadRef).find(
+        ({ tab }) => tab.content.kind === "surface" && tab.content.surfaceId === "diff",
+      );
+    const pressDiff = () =>
+      act(() =>
+        toggleThreadDiff(threadRef, () => useRightPanelStore.getState().toggle(threadRef, "diff")),
+      );
+
+    await pressDiff();
+    const columns = chat().workspace.columns;
+    expect(columns.indexOf(diff()!.column)).toBe(columns.indexOf(chat().column) + 1);
+    await pressDiff();
+    expect(diff()).toBeUndefined();
+
+    useLayoutBehaviorStore.setState({ behavior: { ...behavior, sidePanePlacement: "new-tab" } });
+    await pressDiff();
+    expect(diff()!.pane.id).toBe(chat().pane.id);
+    await act(() => useLayoutStore.getState().focusTab(chat().tab.id));
+    await pressDiff();
+    expect(diff()!.pane.activeTabId).toBe(diff()!.tab.id);
+    await pressDiff();
+    expect(diff()).toBeUndefined();
   });
 
   it("starts drafts in the focused chat, launcher or surface project while the route stays elsewhere", async () => {

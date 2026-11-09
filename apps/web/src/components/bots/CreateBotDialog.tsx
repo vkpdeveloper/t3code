@@ -236,7 +236,6 @@ function MachineBotForm({
           model: model.model,
           modelOptions: model.options ?? [],
           allowPromptInjectedEffort: false,
-          planModeEnabled: settings.planModeEnabled,
           onModelOptionsChange: (options) =>
             setChosenModel(createModelSelection(model.instanceId, model.model, options)),
         }

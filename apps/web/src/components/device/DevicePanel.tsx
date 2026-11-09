@@ -56,6 +56,7 @@ import {
 } from "~/components/ui/select";
 import { Switch } from "~/components/ui/switch";
 import { Dialog } from "~/components/ui/dialog";
+import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { WizardPopup } from "~/components/ui/wizard";
 import { Spinner } from "~/components/ui/spinner";
 import { cn } from "~/lib/utils";
@@ -660,6 +661,7 @@ function DeviceDiscoveryWarning(props: {
   readonly incompletePlatforms: readonly DevicePlatform[];
   readonly onRetry: () => Promise<unknown>;
 }) {
+  const [open, setOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [dismissedCause, setDismissedCause] = useState<string | null>(null);
   const cause = `${props.incompletePlatforms.join()}\u0000${props.detail}`;
@@ -670,19 +672,13 @@ function DeviceDiscoveryWarning(props: {
     platform === "ios" ? "iOS" : "Android",
   );
   return (
-    <Alert variant="warning" controlAlignment="first-line">
+    <Alert variant="warning" controlAlignment="first-line" role="status">
       <TriangleAlert />
       <AlertTitle>
         {platforms.length > 0
           ? `${platforms.join(" and ")} ${platforms.length > 1 ? "lists" : "list"} on ${props.label} may be incomplete.`
           : `Device discovery on ${props.label} reported a warning.`}
       </AlertTitle>
-      <AlertDescription
-        className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words"
-        tabIndex={0}
-      >
-        {props.detail}
-      </AlertDescription>
       <AlertAction>
         {platforms.length > 0 ? (
           <Button
@@ -698,11 +694,27 @@ function DeviceDiscoveryWarning(props: {
             {retrying ? "Retrying…" : "Retry"}
           </Button>
         ) : null}
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger
+            aria-label={`Details for ${props.label}`}
+            render={<Button size="xs" variant="ghost" />}
+          >
+            Details
+          </PopoverTrigger>
+          <PopoverPopup side="bottom" align="end" width="lg" padding="compact">
+            <p className="whitespace-pre-wrap break-words font-mono text-meta text-muted-foreground">
+              {props.detail}
+            </p>
+          </PopoverPopup>
+        </Popover>
         <Button
           size="icon-xs"
           variant="ghost"
           aria-label={`Dismiss device warning for ${props.label}`}
-          onClick={() => setDismissedCause(cause)}
+          onClick={() => {
+            setOpen(false);
+            setDismissedCause(cause);
+          }}
         >
           <X />
         </Button>

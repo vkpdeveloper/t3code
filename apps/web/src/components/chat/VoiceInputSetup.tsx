@@ -94,7 +94,7 @@ export function VoiceInputSetup(props: {
                 <div className="rounded-card surface-card p-4">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-label">{model.name}</h3>
-                    {model.recommended && props.language ? (
+                    {model?.recommended && props.language ? (
                       <Text variant="meta" tone="muted">
                         Recommended for {languageLabel(props.language)}
                       </Text>
@@ -125,7 +125,7 @@ export function VoiceInputSetup(props: {
                         />
                       </div>
                       <Text variant="meta" tone="muted" render={<p />}>
-                        {model.state === "verifying"
+                        {model?.state === "verifying"
                           ? "Verifying download…"
                           : progress === null
                             ? "Starting download…"

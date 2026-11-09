@@ -14,7 +14,6 @@ import {
   type TerminalSessionState,
 } from "@t3tools/client-runtime/state/terminal";
 import {
-  ChevronDown,
   Copy,
   MessageSquarePlus,
   Plus,
@@ -60,7 +59,6 @@ import { beginLayoutTabDrag } from "~/layout/layoutDrag";
 import { useLayoutPane, useLayoutPaneFocusedRef } from "~/layout/layoutPaneContext";
 import { LayoutPaneTab, LayoutPaneTabStrip, useLayoutPaneSiblingTabs } from "~/layout/PaneTabs";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readTextFromClipboard, writeTextToClipboard } from "~/hooks/useCopyToClipboard";
@@ -106,7 +104,6 @@ import { useLocalStorage } from "../hooks/useLocalStorage";
 import { attachedTerminalSessionAtom } from "../state/terminalSessions";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useRevealActiveTab } from "../hooks/useRevealActiveTab";
-import { FOLDED_TAB_CLASS, usePaneTabStripFit } from "../hooks/usePaneTabStripFit";
 import { serverEnvironment } from "../state/server";
 import { previewEnvironment } from "../state/preview";
 import { readEnvironmentScope } from "../state/session";
@@ -1439,36 +1436,42 @@ interface TerminalActionButtonProps {
   unavailable?: boolean;
   children: ReactNode;
   disabled?: boolean;
+  /** "bare" for the notch's "+", which matches the chat tab strip's. */
+  variant?: "ghost-muted" | "bare";
 }
 
 /**
  * The terminal pane's tabs: in a layout pane they sit in the pane's notch with
- * "+" as its last child, like a chat's tabs; the drawer keeps a plain row.
+ * "+" as its last child, like a chat's tabs, and the split and close actions
+ * sit in the mirrored right notch. The drawer keeps a plain row.
  */
 function TerminalTabsNotch({
   notch,
   newTerminalButton,
+  actions,
   children,
 }: {
   notch: boolean;
   newTerminalButton: ReactNode;
+  actions: ReactNode;
   children: ReactNode;
 }) {
   if (!notch) return children;
   return (
-    <PaneNotch>
-      <LayoutPaneTabStrip>{children}</LayoutPaneTabStrip>
-      <span data-pane-notch-add="" className="flex shrink-0">
-        {newTerminalButton}
-      </span>
-    </PaneNotch>
+    <>
+      <PaneNotch>
+        <LayoutPaneTabStrip>{children}</LayoutPaneTabStrip>
+        <span data-pane-notch-add="" className="flex shrink-0">
+          {newTerminalButton}
+        </span>
+      </PaneNotch>
+      <PaneNotch side="right" className="ms-auto shrink-0">
+        {actions}
+      </PaneNotch>
+    </>
   );
 }
 
-/**
- * The terminal tabs' row: in a pane's notch it clips and the tabs fit it
- * (usePaneTabStripFit); the drawer's row scrolls.
- */
 function TerminalTabStrip({
   notch,
   ref,
@@ -1484,7 +1487,7 @@ function TerminalTabStrip({
       <div
         ref={ref}
         data-layout-pane-tab={tabId ?? undefined}
-        className="flex min-w-15 items-center gap-1 overflow-hidden"
+        className="flex shrink-0 items-center gap-1"
         role="tablist"
         aria-label="Terminals"
       >
@@ -1510,6 +1513,7 @@ function TerminalActionButton({
   onClick,
   unavailable,
   children,
+  variant = "ghost-muted",
 }: TerminalActionButtonProps) {
   return (
     <Popover>
@@ -1518,7 +1522,7 @@ function TerminalActionButton({
         render={
           <Button
             size="icon-xs"
-            variant="ghost-muted"
+            variant={variant}
             onClick={() => {
               if (!unavailable) onClick();
             }}
@@ -1581,7 +1585,7 @@ export default function ThreadTerminalDrawer({
   const fillsContainer = mode !== "drawer";
   const terminalOwner = mode === "panel" ? "right-panel" : "drawer";
   // As a pane, this is a layout tab: dragging one of its terminals moves it.
-  const { tabId: layoutTabId, leadingEdge } = useLayoutPane();
+  const { tabId: layoutTabId, leadingEdge, trailingEdge } = useLayoutPane();
   const siblingTabs = useLayoutPaneSiblingTabs();
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
@@ -1724,15 +1728,6 @@ export default function ThreadTerminalDrawer({
   const isSplitView = visibleTerminalIds.length > 1;
   const tabStripRef = useRef<HTMLDivElement>(null);
   useRevealActiveTab(tabStripRef, resolvedActiveTerminalId);
-  const fitTabs = resolvedTerminalGroups.flatMap((group) =>
-    group.terminalIds.map((terminalId) => ({
-      key: terminalId,
-      title: terminalLabelById.get(terminalId) ?? "Terminal",
-    })),
-  );
-  // In a pane's notch the tabs fold and overflow into a menu instead of scrolling.
-  const tabFit = usePaneTabStripFit(tabStripRef, fitTabs, resolvedActiveTerminalId);
-  const hiddenTerminalTabs = fitTabs.filter((tab) => tabFit.hidden.has(tab.key));
   const resolveTerminalLaunchLocation = (terminalId: string): TerminalLaunchLocation =>
     terminalLaunchLocationsById?.get(terminalId) ?? {
       cwd,
@@ -1952,9 +1947,8 @@ export default function ThreadTerminalDrawer({
     </TerminalActionButton>
   );
 
-  // Keep every terminal action in the header so controls never cover shell output.
-  const terminalActions = (
-    <div className="flex items-center gap-0.5">
+  const splitButtons = (
+    <>
       <TerminalActionButton
         label={splitTerminalActionLabel}
         onClick={onSplitTerminalAction}
@@ -1969,14 +1963,23 @@ export default function ThreadTerminalDrawer({
       >
         <SquareSplitVertical className="size-3.5" />
       </TerminalActionButton>
+    </>
+  );
+  const closeButton = (
+    <TerminalActionButton
+      label={closeTerminalActionLabel}
+      onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
+      unavailable={!canOperateTerminal}
+    >
+      <Trash2 className="size-3.5" />
+    </TerminalActionButton>
+  );
+  // Keep every terminal action in the header so controls never cover shell output.
+  const terminalActions = (
+    <div className="flex items-center gap-0.5">
+      {splitButtons}
       {newTerminalButton}
-      <TerminalActionButton
-        label={closeTerminalActionLabel}
-        onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
-        unavailable={!canOperateTerminal}
-      >
-        <Trash2 className="size-3.5" />
-      </TerminalActionButton>
+      {closeButton}
     </div>
   );
 
@@ -2006,26 +2009,43 @@ export default function ThreadTerminalDrawer({
         <div
           className={cn(
             "flex h-11 shrink-0 items-center gap-1",
-            // A layout pane's tabs sit in its notch (pen hRbzg), from the pane's
-            // edge; the notch stops short of the pane's top-right corner.
-            mode === "pane" ? "relative pe-10 ps-1.5 md:ps-0" : "px-1.5 pt-1",
+            // A layout pane's tabs sit in its notch (pen hRbzg) from the pane's
+            // left edge, its actions in the mirrored notch, as a panel pane's do.
+            mode === "pane" ? "relative ps-1.5 pe-2 md:ps-0" : "px-1.5 pt-1",
             mode === "pane" && leadingEdge && COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
+            mode === "pane" && trailingEdge && "wco:pr-(--workspace-native-controls-inset)",
           )}
           data-terminal-tab-strip
           // In a pane the strip is the pane's header: the shared rule centers its tabs on
           // the chrome row's line like every other pane header.
           data-pane-header={mode === "pane" ? "" : undefined}
         >
-          <TerminalTabsNotch notch={mode === "pane"} newTerminalButton={terminalActions}>
+          <TerminalTabsNotch
+            notch={mode === "pane"}
+            newTerminalButton={
+              <TerminalActionButton
+                label={newTerminalActionLabel}
+                onClick={onNewTerminalAction}
+                unavailable={!canOperateTerminal}
+                variant="bare"
+              >
+                <Plus />
+              </TerminalActionButton>
+            }
+            actions={
+              <div className="flex items-center gap-0.5">
+                {splitButtons}
+                {closeButton}
+              </div>
+            }
+          >
             {mode === "pane"
               ? siblingTabs.before.map((tab) => <LayoutPaneTab key={tab.id} tab={tab} />)
               : null}
             <TerminalTabStrip notch={mode === "pane"} ref={tabStripRef}>
               {resolvedTerminalGroups.flatMap((terminalGroup, groupIndex) =>
                 terminalGroup.terminalIds.map((terminalId) => {
-                  if (tabFit.hidden.has(terminalId)) return null;
                   const isActive = terminalId === resolvedActiveTerminalId;
-                  const folded = tabFit.folded && !isActive;
                   // Split siblings of the active tab are on screen too.
                   const isOnScreen = isSplitView && groupIndex === resolvedActiveGroupIndex;
                   const terminalLabel = terminalLabelById.get(terminalId) ?? "Terminal";
@@ -2062,9 +2082,7 @@ export default function ThreadTerminalDrawer({
                           : undefined
                       }
                       className={cn(
-                        "group/tab flex h-7 items-center gap-1.75 rounded-control px-2.5 text-label",
-                        isActive && tabFit.squeezed ? "min-w-0" : "shrink-0",
-                        folded && FOLDED_TAB_CLASS,
+                        "group/tab flex h-7 shrink-0 items-center gap-1.75 rounded-control px-2.5 text-label",
                         isActive
                           ? "text-strong-foreground"
                           : isOnScreen
@@ -2072,101 +2090,46 @@ export default function ThreadTerminalDrawer({
                             : "text-muted-foreground hover:surface-ghost-hover hover:text-foreground",
                       )}
                     >
-                      {folded ? (
-                        // A folded tab is its icon alone, so a click shows it
-                        // rather than turning the icon into its close button.
+                      <>
+                        {/* The terminal icon turns into the close button on hover, like the panel tabs. */}
+                        <PanelTabCloseButton
+                          label={closeTerminalLabel}
+                          onClick={() => confirmCloseTerminal(terminalId)}
+                        >
+                          <SquareTerminal
+                            aria-hidden
+                            className={cn(
+                              "size-3.5 shrink-0",
+                              status === "running"
+                                ? "text-success-foreground"
+                                : isActive && "text-foreground",
+                            )}
+                          />
+                        </PanelTabCloseButton>
                         <Tooltip>
                           <TooltipTrigger
                             render={
                               <button
                                 type="button"
                                 role="tab"
-                                aria-selected={false}
-                                aria-label={[terminalLabel, threadTitle, statusLabel]
+                                aria-selected={isActive}
+                                aria-label={[tabTitle, threadTitle, statusLabel]
                                   .filter(Boolean)
                                   .join(", ")}
-                                className="flex size-full cursor-pointer items-center justify-center rounded-[inherit] outline-none focus-visible:inset-ring-2 focus-visible:inset-ring-ring"
+                                className="flex min-w-0 cursor-pointer items-center rounded-kbd outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
                                 onClick={() => onActiveTerminalChange(terminalId)}
                               />
                             }
                           >
-                            <SquareTerminal
-                              aria-hidden
-                              className={cn(
-                                "size-3.5 shrink-0",
-                                status === "running" && "text-success-foreground",
-                              )}
-                            />
+                            <span className="max-w-40 truncate">{tabTitle}</span>
                           </TooltipTrigger>
                           <TooltipPopup className="whitespace-pre-line">{tooltip}</TooltipPopup>
                         </Tooltip>
-                      ) : (
-                        <>
-                          {/* The terminal icon turns into the close button on hover, like the panel tabs. */}
-                          <PanelTabCloseButton
-                            label={closeTerminalLabel}
-                            onClick={() => confirmCloseTerminal(terminalId)}
-                          >
-                            <SquareTerminal
-                              aria-hidden
-                              className={cn(
-                                "size-3.5 shrink-0",
-                                status === "running"
-                                  ? "text-success-foreground"
-                                  : isActive && "text-foreground",
-                              )}
-                            />
-                          </PanelTabCloseButton>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <button
-                                  type="button"
-                                  role="tab"
-                                  aria-selected={isActive}
-                                  aria-label={[tabTitle, threadTitle, statusLabel]
-                                    .filter(Boolean)
-                                    .join(", ")}
-                                  className="flex min-w-0 cursor-pointer items-center rounded-kbd outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
-                                  onClick={() => onActiveTerminalChange(terminalId)}
-                                />
-                              }
-                            >
-                              <span className="max-w-40 truncate">{tabTitle}</span>
-                            </TooltipTrigger>
-                            <TooltipPopup className="whitespace-pre-line">{tooltip}</TooltipPopup>
-                          </Tooltip>
-                        </>
-                      )}
+                      </>
                     </div>
                   );
                 }),
               )}
-              {hiddenTerminalTabs.length > 0 ? (
-                <Menu>
-                  <MenuTrigger
-                    render={
-                      <Button
-                        aria-label="More terminals"
-                        className="shrink-0"
-                        data-tab-overflow=""
-                        size="icon-xs"
-                        variant="ghost-muted"
-                      />
-                    }
-                  >
-                    <ChevronDown className="size-3.5" />
-                  </MenuTrigger>
-                  <MenuPopup align="start" side="bottom" sideOffset={6} className="max-w-64">
-                    {hiddenTerminalTabs.map((tab) => (
-                      <MenuItem key={tab.key} onClick={() => onActiveTerminalChange(tab.key)}>
-                        <SquareTerminal aria-hidden />
-                        <span className="min-w-0 truncate">{tab.title}</span>
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </Menu>
-              ) : null}
               {mode === "pane" ? null : terminalActions}
             </TerminalTabStrip>
             {mode === "pane"
@@ -2180,9 +2143,10 @@ export default function ThreadTerminalDrawer({
         <div
           className={cn(
             "flex h-full min-h-0 bg-(--terminal-background)",
-            // Text sits 16px in from the pane's edge, in line with its tabs; a
-            // panel terminal's starts below its floating actions.
-            mode === "panel" ? "px-4 pt-1" : "px-4 pt-1 pb-1",
+            // A pane's text starts right under its notch, 10px in (with the
+            // surface's own 4px) in line with the tab icons; a panel terminal's
+            // starts below its floating actions.
+            mode === "pane" ? "px-1.5" : mode === "panel" ? "px-4 pt-1" : "px-4 pt-1 pb-1",
           )}
         >
           <div className="min-w-0 flex-1">

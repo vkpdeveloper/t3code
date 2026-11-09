@@ -39,6 +39,7 @@ import { useEnvironment } from "../state/environments";
 import { useEnvironmentScope, usePreparedConnection } from "../state/session";
 import { createBrowserVoiceInputPlatform } from "./browserVoiceInput";
 import { preferredSpeechLanguages } from "./preferredSpeechLanguages";
+import { playRecordingCue, preloadRecordingCue } from "./recordingCue";
 import { runEnvironmentSpeech } from "./runEnvironmentSpeech";
 import { bindAudioGrant, readCleanupGrant, useAudioChoice } from "./voiceConsent";
 
@@ -151,6 +152,7 @@ export function useSpeechUnavailableReason(speech: {
 }) {
   const hydrated = useClientSettingsHydrated();
   const choice = useAudioChoice();
+  const grant = choice === "off" ? null : choice;
   const destination = useVoiceTranscriptionDestination();
   const environment = useEnvironment(destination.environmentId);
   const connection = Option.getOrNull(usePreparedConnection(destination.environmentId));
@@ -164,13 +166,11 @@ export function useSpeechUnavailableReason(speech: {
     return speech.status?.supported === false ? speech.status.reason : "Checking voice input.";
   }
   if (!hydrated) return "Loading voice settings.";
-  if (choice === null || choice === "off")
-    return "Voice input is off. Turn it on in Settings > Voice.";
+  if (!grant) return "Voice input is off. Turn it on in Settings > Voice.";
   if (!connection || !environment?.serverConfig) {
     return `${where} is not connected. Check Settings > Voice.`;
   }
-  const capability = destination.cloudProvider ? "cloudVoiceTranscription" : "voiceTranscription";
-  if (environment.serverConfig.environment.capabilities[capability] !== true) {
+  if (environment.serverConfig.environment.capabilities.voiceTranscription !== true) {
     return `${where} can't transcribe voice. Pick another destination in Settings > Voice.`;
   }
   return `Voice input is not ready on ${where}. Check Settings > Voice.`;
@@ -395,6 +395,11 @@ export function useEnvironmentSpeechInput(input: HookInput) {
       onStateChange: (value) => {
         if (disposed) return;
         if (value.phase === "error") pendingSubmissionRef.current = null;
+        const { speechRecordingCue, speechRecordingCueSound } = latestRef.current.clientSettings;
+        if (speechRecordingCue && value.phase === "preparing")
+          preloadRecordingCue(speechRecordingCueSound);
+        if (speechRecordingCue && value.phase === "recording")
+          playRecordingCue(speechRecordingCueSound);
         setControllerState({ prepared, grantId, value });
         if (value.phase !== "recording" && value.phase !== "transcribing") setPreview(null);
       },

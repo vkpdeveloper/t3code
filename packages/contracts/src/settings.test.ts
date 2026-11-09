@@ -45,18 +45,6 @@ const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
 const decodeProjectSettingsOverrides = Schema.decodeUnknownSync(ProjectSettingsOverrides);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
-describe("client onboarding completion", () => {
-  it("preserves onboarding completion through settings decoding and subsequent writes", () => {
-    const onboardingCompletedAt = "2026-10-01T12:00:00.000Z";
-    expect(decodeClientSettings({}).onboardingCompletedAt).toBeNull();
-    const settings = decodeClientSettings({ onboardingCompletedAt });
-    expect(decodeClientSettings(encodeClientSettings(settings)).onboardingCompletedAt).toBe(
-      onboardingCompletedAt,
-    );
-    expect(decodeClientSettingsPatch({ onboardingCompletedAt })).toEqual({ onboardingCompletedAt });
-  });
-});
-
 describe("client layout settings", () => {
   it("preserves absence so old clients can migrate their primary environment's layout", () => {
     expect(decodeClientSettings({}).layout).toBeUndefined();
@@ -605,6 +593,15 @@ describe("voice settings", () => {
   it("keeps the correction cue personal and project vocabulary on the environment", () => {
     expect(decodeClientSettings({}).speechCorrectionWord).toBe("");
     expect(() => decodeClientSettingsPatch({ speechCorrectionWord: "x".repeat(51) })).toThrow();
+    expect(decodeClientSettings({}).speechRecordingCue).toBe(false);
+    expect(decodeClientSettingsPatch({ speechRecordingCue: true })).toEqual({
+      speechRecordingCue: true,
+    });
+    expect(decodeClientSettings({}).speechRecordingCueSound).toBe("classic");
+    expect(decodeClientSettingsPatch({ speechRecordingCueSound: "thock" })).toEqual({
+      speechRecordingCueSound: "thock",
+    });
+    expect(() => decodeClientSettingsPatch({ speechRecordingCueSound: "shutter" })).toThrow();
     expect(DEFAULT_SERVER_SETTINGS.speechProjectCustomWords).toEqual([]);
     expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("speechProjectCustomWords");
   });

@@ -32,7 +32,7 @@ import * as Schema from "effect/Schema";
 import { announceSidebarVisibility } from "~/lib/accessibilityAnnouncements";
 
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
+const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing) * 3)";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 const SIDEBAR_TITLEBAR_CONTROL_SIZE = "max-sm:[--workspace-titlebar-control-size:--spacing(8)]";
@@ -305,7 +305,7 @@ interface SidebarOpenState {
 }
 
 /** Per-provider open state, kept outside React so shortcuts can toggle it at event time. */
-function createSidebarOpenStore(defaultOpen: boolean, storageKey?: string) {
+function createSidebarOpenStore(defaultOpen: boolean, storageKey: string | undefined) {
   let state: SidebarOpenState = {
     open: readStoredSidebarOpen(storageKey) ?? defaultOpen,
     openMobile: false,
@@ -352,16 +352,16 @@ function createSidebarOpenStore(defaultOpen: boolean, storageKey?: string) {
 
 function SidebarProvider({
   defaultOpen = true,
-  store: providedStore,
   storageKey,
+  store: providedStore,
   className,
   style,
   children,
   ...props
 }: React.ComponentProps<"div"> & {
   defaultOpen?: boolean;
-  store?: ReturnType<typeof createSidebarOpenStore>;
   storageKey?: string;
+  store?: ReturnType<typeof createSidebarOpenStore>;
 }) {
   const isMobile = useMediaQuery(SIDEBAR_MOBILE_QUERY);
   const [store] = React.useState(
@@ -811,7 +811,11 @@ function SidebarInset({
         data-slot="sidebar-inset"
         {...props}
       />
-      <div aria-hidden data-slot="sidebar-slide-frame" />
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-y-0 hidden bg-(--app-chrome-background) opacity-0 surface-grain md:peer-data-[variant=inset]:block"
+        data-slot="sidebar-slide-frame"
+      />
     </>
   );
 }

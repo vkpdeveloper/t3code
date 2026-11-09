@@ -31,7 +31,7 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronDown, ChevronLeft, ChevronRight, Files, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Files, Plus } from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -51,7 +51,7 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
 import { MorphIcon } from "~/components/MorphIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import { Menu, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
@@ -59,7 +59,6 @@ import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
 import type { PreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 import { useRevealActiveTab } from "~/hooks/useRevealActiveTab";
-import { FOLDED_TAB_CLASS, usePaneTabStripFit } from "~/hooks/usePaneTabStripFit";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./preview/PreviewPanelShell";
@@ -74,7 +73,6 @@ import { previewBridge } from "./preview/previewBridge";
 import { observeResize } from "~/lib/observeResize";
 import {
   previewFaviconOf,
-  sideChatTabState,
   SurfaceIcon,
   surfaceTitle,
   type PullRequestTabStatusSeed,
@@ -204,30 +202,18 @@ function tabAudioState(overlay: DesktopPreviewOverlay | null): TabAudioState {
  * A layout pane's tabs sit in its notch with "+" as the notch's last child,
  * like a chat's and the terminal's; the sheet and inline panel keep a plain row.
  */
-/**
- * The row the tabs sit in: in a notch it clips and the tabs fit it
- * (usePaneTabStripFit); elsewhere it scrolls, with arrows on overflow.
- */
 function PanelTabStrip({
   notched,
-  embedded,
   ref,
   children,
 }: {
   notched: boolean;
-  embedded: boolean;
   ref: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
   if (notched) {
     return (
-      // Sized by its tabs like the layout tabs beside it, which give way first,
-      // so a narrow pane never squeezes its shown tab away.
-      <div
-        ref={ref}
-        className={cn("flex items-center gap-1", embedded ? "shrink-0" : "min-w-0 flex-auto")}
-        data-right-panel-tab-list
-      >
+      <div ref={ref} className="flex shrink-0 items-center gap-1" data-right-panel-tab-list>
         {children}
       </div>
     );
@@ -442,8 +428,6 @@ function RightPanelTab(
     renaming: boolean;
     canRename: boolean;
     ownsDesktopTitleBar: boolean;
-    folded: boolean;
-    squeezed: boolean;
     notched: boolean;
     layoutTabId: string | null;
     threadTitle: string | null;
@@ -452,7 +436,6 @@ function RightPanelTab(
 ) {
   const {
     dragDisabled,
-    squeezed,
     previewUrl,
     previewCapturedUrl,
     theme,
@@ -467,7 +450,6 @@ function RightPanelTab(
     audioRuntimeTabId,
     active,
     pending,
-    folded,
     notched,
     layoutTabId,
     ownsDesktopTitleBar,
@@ -499,7 +481,6 @@ function RightPanelTab(
     : [title, threadTitle, previewUrl, surface.kind === "file" ? surface.relativePath : null]
         .filter(Boolean)
         .join("\n");
-  const sideChatState = sideChatTabState(sideChatShell);
   // An open workspace file reads "Files › file.tsx": its breadcrumb names it.
   const filesCrumb = active && surface.kind === "file" && !surface.attachment;
   return (
@@ -519,14 +500,12 @@ function RightPanelTab(
       onContextMenu={(event) => onContextMenu(event, surface)}
       {...listeners}
       className={cn(
-        "cursor-pointer group/tab flex items-center",
+        "cursor-pointer group/tab flex shrink-0 items-center",
         isDragging && "relative z-10",
-        active && squeezed && !filesCrumb ? "min-w-0" : "shrink-0",
         // In the notch a tab is the chat's 28px notch tab (pen JiaZk).
         notched
           ? "h-7 gap-1.75 rounded-control px-2.5 text-label"
           : "h-6 gap-0.5 rounded-item pr-2 pl-1.5 text-xs",
-        folded && FOLDED_TAB_CLASS,
         // The active tab grows with its breadcrumb; its title caps below.
         !active && !notched && "max-w-36",
         ownsDesktopTitleBar && "[-webkit-app-region:no-drag]",
@@ -535,20 +514,13 @@ function RightPanelTab(
           : "text-muted-foreground hover:surface-ghost-hover hover:text-foreground",
       )}
     >
-      {folded ? (
-        // A folded tab is its icon alone, so a click shows it
-        // rather than turning the icon into its close button.
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label={sideChatState === null ? title : `${title}, ${sideChatState}`}
-                className="cursor-pointer relative flex size-full items-center justify-center rounded-control outline-none focus-visible:inset-ring-2 focus-visible:inset-ring-ring"
-                onClick={() => onActivate(surface)}
-              />
-            }
-          >
+      <>
+        <PanelTabCloseButton label={`Close ${title}`} onClick={() => onClose(surface)}>
+          {filesCrumb ? (
+            <Files className="size-3.5 shrink-0 text-foreground" />
+          ) : surface.kind === "terminal" && layoutTab ? (
+            layoutLabel.icon
+          ) : (
             <SurfaceIcon
               surface={surface}
               previewUrl={previewUrl}
@@ -557,147 +529,117 @@ function RightPanelTab(
               environmentId={environmentId}
               pullRequestStatusSeed={pullRequestStatusSeed}
             />
-            {pending ? (
-              <span
-                className="absolute right-1.5 bottom-1.5 size-1.5 rounded-full bg-current"
-                aria-hidden
-              />
-            ) : null}
-          </TooltipTrigger>
-          <TooltipPopup className="whitespace-pre-line">{tooltip}</TooltipPopup>
-        </Tooltip>
-      ) : (
-        <>
-          <PanelTabCloseButton label={`Close ${title}`} onClick={() => onClose(surface)}>
-            {filesCrumb ? (
-              <Files className="size-3.5 shrink-0 text-foreground" />
-            ) : surface.kind === "terminal" && layoutTab ? (
-              layoutLabel.icon
-            ) : (
-              <SurfaceIcon
-                surface={surface}
-                previewUrl={previewUrl}
-                previewCapturedUrl={previewCapturedUrl}
-                theme={theme}
-                environmentId={environmentId}
-                pullRequestStatusSeed={pullRequestStatusSeed}
-              />
-            )}
-            {pending ? (
-              <span
-                className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                aria-hidden
-              />
-            ) : null}
-          </PanelTabCloseButton>
-          {audio === "none" || !audioRuntimeTabId ? null : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-kbd hover:surface-ghost-hover"
-                    aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void previewBridge
-                        ?.setAudioMuted(audioRuntimeTabId, audio !== "muted")
-                        .catch(() => undefined);
-                    }}
-                  >
-                    <MorphIcon className="size-3" icon={audio === "muted" ? VolumeOff : Volume2} />
-                  </button>
-                }
-              />
-              <TooltipPopup>{audio === "muted" ? "Unmute tab" : "Mute tab"}</TooltipPopup>
-            </Tooltip>
           )}
-          {renaming ? (
-            <input
-              aria-label="Device tab name"
-              className="w-24 min-w-0 rounded-kbd surface-well px-1 outline-none focus:surface-focus"
-              defaultValue={title}
-              ref={(element) => {
-                element?.focus();
-                element?.select();
-              }}
-              onBlur={(event) => onFinishRename(surface.id, event.currentTarget.value)}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === "Enter") event.currentTarget.blur();
-                if (event.key === "Escape") {
-                  event.currentTarget.value = title;
-                  event.currentTarget.blur();
-                }
-              }}
-            />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onDoubleClick={() => {
-                      if (surface.kind === "device" && canRename) onStartRename(surface.id);
-                    }}
-                    className={cn(
-                      "cursor-pointer flex min-w-0 items-center",
-                      active && surface.kind === "diff" && "shrink-0",
-                    )}
-                    aria-label={
-                      surface.kind === "terminal" && threadTitle
-                        ? `${title}, ${threadTitle}`
-                        : undefined
-                    }
-                    onClick={() => onActivate(surface)}
-                  >
-                    <span
-                      className={
-                        notched
-                          ? active
-                            ? PANE_TAB_TITLE_CLASS
-                            : PANE_INACTIVE_TAB_TITLE_CLASS
-                          : cn("truncate", active && "max-w-60")
-                      }
-                    >
-                      {filesCrumb ? "Files" : title}
-                    </span>
-                  </button>
-                }
-              />
-              <TooltipPopup className="whitespace-pre-line">
-                {surface.kind === "device" ? (
-                  <>
-                    {threadTitle ? (
-                      <>
-                        {threadTitle}
-                        <br />
-                      </>
-                    ) : null}
-                    <DeviceTabTooltip
-                      surface={surface}
-                      environmentId={environmentId}
-                      title={title}
-                    />
-                  </>
-                ) : (
-                  tooltip
-                )}
-              </TooltipPopup>
-            </Tooltip>
-          )}
-          {active ? (
+          {pending ? (
             <span
-              ref={onBreadcrumbSlotChange}
-              className={cn(
-                "flex min-w-0 items-center empty:hidden",
-                filesCrumb && "min-w-[8ch]",
-                notched ? "gap-1" : "gap-0.5",
-              )}
+              className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+              aria-hidden
             />
           ) : null}
-        </>
-      )}
+        </PanelTabCloseButton>
+        {audio === "none" || !audioRuntimeTabId ? null : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="cursor-pointer flex size-4 shrink-0 items-center justify-center rounded-kbd hover:surface-ghost-hover"
+                  aria-label={audio === "muted" ? `Unmute ${title}` : `Mute ${title}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void previewBridge
+                      ?.setAudioMuted(audioRuntimeTabId, audio !== "muted")
+                      .catch(() => undefined);
+                  }}
+                >
+                  <MorphIcon className="size-3" icon={audio === "muted" ? VolumeOff : Volume2} />
+                </button>
+              }
+            />
+            <TooltipPopup>{audio === "muted" ? "Unmute tab" : "Mute tab"}</TooltipPopup>
+          </Tooltip>
+        )}
+        {renaming ? (
+          <input
+            aria-label="Device tab name"
+            className="w-24 min-w-0 rounded-kbd surface-well px-1 outline-none focus:surface-focus"
+            defaultValue={title}
+            ref={(element) => {
+              element?.focus();
+              element?.select();
+            }}
+            onBlur={(event) => onFinishRename(surface.id, event.currentTarget.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === "Enter") event.currentTarget.blur();
+              if (event.key === "Escape") {
+                event.currentTarget.value = title;
+                event.currentTarget.blur();
+              }
+            }}
+          />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onDoubleClick={() => {
+                    if (surface.kind === "device" && canRename) onStartRename(surface.id);
+                  }}
+                  className={cn(
+                    "cursor-pointer flex min-w-0 items-center",
+                    active && surface.kind === "diff" && "shrink-0",
+                  )}
+                  aria-label={
+                    surface.kind === "terminal" && threadTitle
+                      ? `${title}, ${threadTitle}`
+                      : undefined
+                  }
+                  onClick={() => onActivate(surface)}
+                >
+                  <span
+                    className={
+                      notched
+                        ? active
+                          ? PANE_TAB_TITLE_CLASS
+                          : PANE_INACTIVE_TAB_TITLE_CLASS
+                        : cn("truncate", active && "max-w-60")
+                    }
+                  >
+                    {filesCrumb ? "Files" : title}
+                  </span>
+                </button>
+              }
+            />
+            <TooltipPopup className="whitespace-pre-line">
+              {surface.kind === "device" ? (
+                <>
+                  {threadTitle ? (
+                    <>
+                      {threadTitle}
+                      <br />
+                    </>
+                  ) : null}
+                  <DeviceTabTooltip surface={surface} environmentId={environmentId} title={title} />
+                </>
+              ) : (
+                tooltip
+              )}
+            </TooltipPopup>
+          </Tooltip>
+        )}
+        {active ? (
+          <span
+            ref={onBreadcrumbSlotChange}
+            className={cn(
+              "flex min-w-0 items-center empty:hidden",
+              filesCrumb && "min-w-[8ch]",
+              notched ? "gap-1" : "gap-0.5",
+            )}
+          />
+        ) : null}
+      </>
     </div>
   );
 }
@@ -941,16 +883,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     finishLayoutTabRename(layoutTabId);
   });
 
-  useRevealActiveTab(tabListRef, props.activeSurfaceId);
-  const fitTabs = props.surfaces.map((surface) => ({
-    key: surface.id,
-    title: surfaceTitle(surface, props.previewSessions, props.terminalLabelsById),
-  }));
-  // In the notch the tabs fold and overflow into a menu instead of scrolling.
-  const tabFit = usePaneTabStripFit(tabListRef, fitTabs, props.activeSurfaceId);
-  const hiddenSurfaces = notched
-    ? props.surfaces.filter((surface) => tabFit.hidden.has(surface.id))
-    : [];
+  useRevealActiveTab(tabListRef, layoutTabId === null ? props.activeSurfaceId : null);
 
   const attachTabList = (root: HTMLDivElement | null) => {
     tabListRef.current = root;
@@ -1062,10 +995,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           {layoutTabId !== null
             ? siblingTabs.before.map((tab) => <LayoutPaneTab key={tab.id} tab={tab} />)
             : null}
-          <PanelTabStrip notched={notched} embedded={layoutTabId !== null} ref={attachTabList}>
+          <PanelTabStrip notched={notched} ref={attachTabList}>
             <SortableTabList surfaces={props.surfaces} onMove={props.onMoveSurface}>
               {props.surfaces.map((surface) => {
-                if (tabFit.hidden.has(surface.id)) return null;
                 const previewTabId = previewTabIdOf(surface, props.previewSessions);
                 const favicon = previewFaviconOf(
                   surface,
@@ -1099,8 +1031,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     renaming={renamingDeviceId === surface.id}
                     canRename={props.onRenameDevice !== undefined}
                     ownsDesktopTitleBar={ownsDesktopTitleBar}
-                    folded={tabFit.folded && surface.id !== props.activeSurfaceId}
-                    squeezed={tabFit.squeezed}
                     notched={notched}
                     layoutTabId={layoutTabId}
                     threadTitle={props.threadTitle ?? null}
@@ -1115,47 +1045,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 );
               })}
             </SortableTabList>
-            {hiddenSurfaces.length > 0 ? (
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      aria-label="More panel tabs"
-                      className="shrink-0"
-                      data-tab-overflow=""
-                      size="icon-xs"
-                      variant="ghost-muted"
-                    />
-                  }
-                >
-                  <ChevronDown className="size-3.5" />
-                </MenuTrigger>
-                <MenuPopup align="start" side="bottom" sideOffset={6} className="max-w-64">
-                  {hiddenSurfaces.map((surface) => {
-                    const favicon = previewFaviconOf(
-                      surface,
-                      props.previewSessions,
-                      props.desktopByTabId,
-                    );
-                    return (
-                      <MenuItem key={surface.id} onClick={() => props.onActivate(surface)}>
-                        <SurfaceIcon
-                          surface={surface}
-                          previewUrl={favicon.url}
-                          previewCapturedUrl={favicon.capturedUrl}
-                          theme={resolvedTheme}
-                          environmentId={props.environmentId}
-                          pullRequestStatusSeed={props.pullRequestStatusSeeds?.[surface.id]}
-                        />
-                        <span className="min-w-0 truncate">
-                          {surfaceTitle(surface, props.previewSessions, props.terminalLabelsById)}
-                        </span>
-                      </MenuItem>
-                    );
-                  })}
-                </MenuPopup>
-              </Menu>
-            ) : null}
             {notched ? null : addSurfaceMenu}
           </PanelTabStrip>
           {layoutTabId !== null

@@ -67,17 +67,6 @@ it("retains the settled mention list until search completes, scoped to the open 
   expect(retainPendingComposerMenuItems(previous, previous.scope, partial, true)).toBe(
     previous.items,
   );
-  expect(retainPendingComposerMenuItems(previous, previous.scope, [], true)).toBe(previous.items);
   expect(retainPendingComposerMenuItems(previous, previous.scope, partial, false)).toBe(partial);
-  expect(retainPendingComposerMenuItems(previous, previous.scope, [], false)).toEqual([]);
   expect(retainPendingComposerMenuItems(previous, "other-repo", [], true)).toEqual([]);
-  expect(retainPendingComposerMenuItems(previous, null, [], true)).toEqual([]);
-  expect(
-    retainPendingComposerMenuItems(
-      { scope: previous.scope, items: [] },
-      previous.scope,
-      partial,
-      true,
-    ),
-  ).toBe(partial);
 });

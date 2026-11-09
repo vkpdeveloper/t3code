@@ -24,6 +24,7 @@ import {
   type SpeechAcceleration,
   type SpeechCustomWords,
   type SpeechModelUnloadTimeout,
+  SpeechRecordingCueSound,
   type VoiceShortcutMode,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -54,13 +55,14 @@ import {
   chooseTranscriptCleanup,
   useCleanupGrant,
 } from "../../speech/voiceConsent";
+import { playRecordingCue, RECORDING_CUE_SOUNDS } from "../../speech/recordingCue";
 import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import { runEnvironmentSpeech } from "../../speech/runEnvironmentSpeech";
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
-import { providerInstanceEntriesFor } from "../../providerInstances";
+import { useTextGenerationTargets } from "../../textGenerators";
 import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
 import { useEnvironmentScope } from "../../state/session";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
@@ -112,7 +114,6 @@ import { filterSpeechModels, type SpeechModelSort } from "./speechModelBrowser";
 import { AdvancedSettings } from "./AdvancedSettings";
 import {
   SETTINGS_PICKER_TRIGGER_CLASSNAME,
-  SettingResetButton,
   SettingsNote,
   SettingsPageContainer,
   SettingsRow,
@@ -466,10 +467,18 @@ function CleanupModelRow() {
     (environment?.serverConfig
       ? providersByEnvironment.get(environment.environmentId)
       : undefined) ?? EMPTY_SERVER_PROVIDERS;
-  const textGenerationProviders = providers.filter(
-    (provider) => provider.supportsTextGeneration !== false,
-  );
-  const instanceEntries = providerInstanceEntriesFor(textGenerationProviders, settings, null);
+  const targets = useTextGenerationTargets({
+    environmentId: environment?.environmentId ?? null,
+    settings,
+    providers: providers.filter((provider) => provider.supportsTextGeneration !== false),
+    projectId: null,
+    selections: [
+      settings.speechPostProcessingModelSelection,
+      settings.textGenerationModelSelection,
+    ],
+  });
+  const textGenerationProviders = targets.providers;
+  const instanceEntries = targets.entries;
   const hasProvider = instanceEntries.some((entry) => entry.enabled && entry.isAvailable);
   const dedicated = settings.speechPostProcessingModelSelection !== null;
   const selection = resolveAppModelSelectionState(
@@ -504,50 +513,58 @@ function CleanupModelRow() {
       settingKeys={["speechPostProcessingModelSelection"]}
       {...searchableSetting("speech-post-processing-model")}
       title="Cleanup model"
-      description={
-        dedicated
-          ? `Drafts on ${environment?.label ?? "this environment"} use this model for cleanup instead of the environment’s text generation model.`
-          : `Cleanup currently uses the text generation model on ${environment?.label ?? "this environment"}. Pick another model if you want a cheaper or faster one.`
-      }
-      resetAction={
-        dedicated ? (
-          <SettingResetButton
-            label="cleanup model"
-            onClick={() => updateSettings({ speechPostProcessingModelSelection: null })}
-          />
-        ) : null
-      }
+      description="Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model configured for this environment."
       control={
         connectedEnvironments.length === 0 ? (
           <Text tone="muted">Connect an environment first.</Text>
-        ) : !hasProvider || !instanceEntry ? (
-          <Text tone="muted">No providers available.</Text>
         ) : (
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-            <ProviderModelPicker
-              environmentId={environment?.environmentId ?? null}
-              activeInstanceId={selection.instanceId}
-              model={selection.model}
-              lockedProvider={null}
-              instanceEntries={instanceEntries}
-              modelOptionsByInstance={modelOptionsByInstance}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              getModelDisabledReason={modelDisabledReason}
-              onInstanceModelChange={(instanceId, model) =>
-                setModel(createModelSelection(instanceId, model))
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            {dedicated && (!hasProvider || !instanceEntry) ? (
+              <Text tone="muted">No text generation providers available.</Text>
+            ) : null}
+            {dedicated && hasProvider && instanceEntry ? (
+              <>
+                <ProviderModelPicker
+                  environmentId={environment?.environmentId ?? null}
+                  activeInstanceId={selection.instanceId}
+                  model={selection.model}
+                  lockedProvider={null}
+                  instanceEntries={instanceEntries}
+                  modelOptionsByInstance={modelOptionsByInstance}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  getModelDisabledReason={modelDisabledReason}
+                  onInstanceModelChange={(instanceId, model) =>
+                    setModel(createModelSelection(instanceId, model))
+                  }
+                />
+                <TraitsPicker
+                  provider={instanceEntry.driverKind}
+                  models={instanceEntry.models}
+                  model={selection.model}
+                  modelOptions={selection.options ?? []}
+                  allowPromptInjectedEffort={false}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  onModelOptionsChange={(options) =>
+                    setModel(createModelSelection(selection.instanceId, selection.model, options))
+                  }
+                />
+              </>
+            ) : null}
+            <Switch
+              checked={dedicated}
+              disabled={!dedicated && !hasProvider}
+              onCheckedChange={(checked) =>
+                updateSettings({
+                  speechPostProcessingModelSelection: checked
+                    ? createModelSelection(
+                        settings.textGenerationModelSelection.instanceId,
+                        settings.textGenerationModelSelection.model,
+                        settings.textGenerationModelSelection.options,
+                      )
+                    : null,
+                })
               }
-            />
-            <TraitsPicker
-              provider={instanceEntry.driverKind}
-              models={instanceEntry.models}
-              model={selection.model}
-              modelOptions={selection.options ?? []}
-              allowPromptInjectedEffort={false}
-              planModeEnabled={settings.planModeEnabled}
-              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-              onModelOptionsChange={(options) =>
-                setModel(createModelSelection(selection.instanceId, selection.model, options))
-              }
+              aria-label="Use a separate cleanup model"
             />
           </div>
         )
@@ -903,7 +920,7 @@ function SpeechModelBrowser(props: {
                   Languages
                 </Text>
                 <Input
-                  size="settings"
+                  size="compact"
                   aria-label="Search languages"
                   placeholder="Search languages"
                   value={languageSearch}
@@ -948,7 +965,7 @@ function SpeechModelBrowser(props: {
                 </Text>
                 <InputGroup>
                   <InputGroupInput
-                    size="settings"
+                    size="compact"
                     aria-label="Search transcription models"
                     placeholder="Search models"
                     value={search}
@@ -1268,6 +1285,8 @@ export function VoiceSettingsPanel() {
           model || destination.cloudProvider ? undefined : "voice-transcription-destination",
         "speech-models": prepared ? undefined : "voice-transcription-destination",
         "speech-hardware": prepared && model ? undefined : "voice-transcription-destination",
+        "speech-model-folders":
+          model?.modelDirectories !== undefined ? undefined : "voice-transcription-destination",
         "transcription-test": !prepared
           ? "voice-transcription-destination"
           : !model || model.state === "missing-model"
@@ -1359,21 +1378,61 @@ export function VoiceSettingsPanel() {
             </Select>
           }
         />
+        <SettingsRow
+          {...searchableSetting("speech-recording-cue")}
+          title="Sound cue"
+          description="Play a short sound when recording starts."
+          control={
+            <div className="flex items-center gap-2">
+              <Select
+                value={settings.speechRecordingCueSound}
+                disabled={!settings.speechRecordingCue}
+                onValueChange={(value) => {
+                  const sound = SpeechRecordingCueSound.literals.find(
+                    (literal) => literal === value,
+                  );
+                  if (!sound) return;
+                  // Choosing a sound previews it, matching the Snap Shot sound picker.
+                  playRecordingCue(sound);
+                  void updateClientSettings({ speechRecordingCueSound: sound });
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Recording cue sound" className="w-32">
+                  <SelectValue>
+                    {RECORDING_CUE_SOUNDS[settings.speechRecordingCueSound].label}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {SpeechRecordingCueSound.literals.map((sound) => (
+                    <SelectItem key={sound} value={sound}>
+                      {RECORDING_CUE_SOUNDS[sound].label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+              <Switch
+                aria-label="Sound cue"
+                checked={settings.speechRecordingCue}
+                onCheckedChange={(checked) => {
+                  if (checked) playRecordingCue(settings.speechRecordingCueSound);
+                  void updateClientSettings({ speechRecordingCue: checked });
+                }}
+              />
+            </div>
+          }
+        />
       </SettingsSection>
 
       <SettingsSection id="voice-transcription" title="Transcription">
-        <SettingsRow
+        <SettingsSearchTarget
           {...searchableSetting("voice-transcription-destination")}
-          title="Transcribe with"
-          status={
-            destination.environmentId && chosenUnsupported ? (
-              <span className="text-destructive-foreground">
-                {chosenEnvironment.label} can’t transcribe audio locally. Choose a different
-                destination.
-              </span>
-            ) : null
-          }
-          control={
+          className="@container/destination px-3 py-3 sm:px-4"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="shrink-0 text-label text-foreground">
+              <span className="@max-[18rem]/destination:hidden">Transcribe with</span>
+              <span className="@min-[18rem]/destination:hidden">Use</span>
+            </h3>
             <div className="flex min-w-0 items-center justify-end gap-1">
               <Select
                 value={destinationValue}
@@ -1502,8 +1561,14 @@ export function VoiceSettingsPanel() {
                   </Tooltip>
                 )}
             </div>
-          }
-        />
+          </div>
+          {destination.environmentId && chosenUnsupported ? (
+            <p className="mt-2 text-meta text-destructive-foreground">
+              {chosenEnvironment.label} can’t transcribe audio locally. Choose a different
+              destination.
+            </p>
+          ) : null}
+        </SettingsSearchTarget>
 
         {pendingCloud && cloudEnvironment && (
           <CloudVoiceConfiguration
@@ -1629,11 +1694,11 @@ export function VoiceSettingsPanel() {
 
       <SettingsSection id={searchableSetting("speech-post-processing").id} title="Cleanup">
         <SettingsRow
-          title="Clean up transcripts with a provider"
-          description="Sends the transcript and nearby draft text to the text generation provider on the draft’s environment to fix punctuation, numbers, and spoken corrections. Sends text only; off by default."
+          title="Clean up transcripts"
+          description="Fixes punctuation, numbers, and spoken corrections with the cleanup model on the draft’s environment. Sends the transcript and nearby draft text, never audio."
           control={
             <Switch
-              aria-label="Clean up transcripts with a provider"
+              aria-label="Clean up transcripts"
               checked={cleanupEnabled}
               onCheckedChange={chooseTranscriptCleanup}
             />

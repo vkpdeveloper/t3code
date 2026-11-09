@@ -433,26 +433,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           };
         }}
         initialFocus={searchInputRef}
-        align={props.isComposerOwned ? "start" : (props.popupAlign ?? "start")}
-        anchor={
-          props.isComposerOwned
-            ? () =>
-                triggerRef.current?.closest<HTMLElement>('[data-slot="composer-shell"]') ??
-                triggerRef.current
-            : undefined
-        }
-        sideOffset={props.isComposerOwned ? 8 : 4}
+        align={props.popupAlign ?? "start"}
         // Docked, the popup opens above the composer and slides over it when that space is short,
         // so a short window gets its full height (Floating UI sizes to the viewport) instead of a sliver.
-        {...(docked || props.isComposerOwned
+        {...(docked
           ? { side: "top" as const, collisionAvoidance: { side: "shift", align: "shift" } as const }
           : {})}
-        className={cn(
-          "before:hidden",
-          props.isComposerOwned &&
-            "max-w-(--anchor-width) [&_[data-model-picker-content]]:max-w-full",
-          props.isComposerOwned && (docked ? "w-138" : "w-90"),
-        )}
+        className="before:hidden"
         padding="none"
         touchBackdrop
       >

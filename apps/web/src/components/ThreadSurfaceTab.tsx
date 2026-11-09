@@ -1,6 +1,7 @@
 import type { SideChatParentPanel } from "~/lib/sideChatPane";
 import { useSideChat } from "./chat/useSideChat";
 import { threadEnvironment } from "../state/threads";
+import { DEFAULT_RUNTIME_MODE } from "../types";
 /** Resolve surface context independently of ChatView so tabs remain usable after the chat closes,
  * and report when their thread is gone. */
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -20,8 +21,11 @@ import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from "@t3tools/shared/projectScripts";
-import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
-import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
+import {
+  getTerminalLabel,
+  nextTerminalId,
+  resolveTerminalSessionLabel,
+} from "@t3tools/shared/terminalLabels";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { FolderX, Unlink2Icon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -37,7 +41,6 @@ import { useLayoutPane } from "../layout/layoutPaneContext";
 import { copyLayoutFilePath } from "../layout/PaneTabs";
 import type { LauncherSurfaceKind } from "./SurfaceLauncher";
 import { THREAD_TERMINAL_SURFACE_ID } from "../layout/layoutModel";
-import { terminalTabTitle } from "../layout/surfaceTabLabels";
 import { runInNewLayoutTab } from "../layout/layoutStore";
 import {
   useThreadChatBridge,
@@ -81,7 +84,8 @@ import {
   useEnvironmentSessionStatus,
 } from "../state/session";
 import { terminalEnvironment } from "../state/terminal";
-import { useKnownTerminalSessions } from "../state/terminalSessions";
+import { knownTerminalSessionsAtom, useKnownTerminalSessions } from "../state/terminalSessions";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useEnvironmentQuery } from "../state/query";
 import { focusActivePanelTerminal, focusTerminal } from "../lib/terminalFocus";
 import type { TerminalContextSelection } from "../lib/terminalContext";
@@ -221,9 +225,9 @@ export function useThreadSurfaceOpeners(threadRef: ScopedThreadRef) {
       context.serverConfig?.environment.capabilities.sideChats === true
         ? threadRef
         : null,
-    // Opened outside the composer, so the parent's saved settings are the closest match.
+    // No composer here, so the side chat takes the parent's saved mode and model.
     readSettings: () => ({
-      runtimeMode: context.serverThread?.runtimeMode ?? "full-access",
+      runtimeMode: context.serverThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
       modelSelection: context.serverThread?.modelSelection,
     }),
     onError: (description) =>
@@ -992,6 +996,18 @@ let surfaceServices: {
   endTerminals: (threadRef: ScopedThreadRef, terminalIds: readonly string[]) => void;
 } | null = null;
 
+function readTerminalLabels(threadRef: ScopedThreadRef, terminalIds: readonly string[]): string[] {
+  const sessions = readEnvironmentScope(threadRef.environmentId, AuthTerminalReadScope)
+    ? appAtomRegistry.get(knownTerminalSessionsAtom(threadRef.environmentId, threadRef.threadId))
+    : null;
+  return terminalIds.map((terminalId) =>
+    resolveTerminalSessionLabel(
+      terminalId,
+      sessions?.find((session) => session.target.terminalId === terminalId)?.state.summary,
+    ),
+  );
+}
+
 /** Closing a surface ends its resources; cmd+J preserves the thread terminal's shells. */
 export async function closeThreadSurface(
   threadRef: ScopedThreadRef,
@@ -1004,9 +1020,7 @@ export async function closeThreadSurface(
         useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
         threadRef,
       );
-      const [first, ...rest] = terminalIds.map((terminalId) =>
-        terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
-      );
+      const [first, ...rest] = readTerminalLabels(threadRef, terminalIds);
       if (first !== undefined) {
         if (!options.bulk && !(await confirmTerminalClose([first, ...rest]))) return;
         surfaceServices?.endTerminals(threadRef, terminalIds);
@@ -1043,8 +1057,9 @@ export async function closeThreadSurface(
     !options.bulk &&
     readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
   ) {
-    const [first = "Terminal", ...rest] = surface.terminalIds.map((terminalId) =>
-      terminalTabTitle(terminalId, getTerminalLabel(terminalId)),
+    const [first = getTerminalLabel(surface.activeTerminalId), ...rest] = readTerminalLabels(
+      threadRef,
+      surface.terminalIds,
     );
     if (!(await confirmTerminalClose([first, ...rest]))) return;
   }

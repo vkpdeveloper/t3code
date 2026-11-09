@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
+import { useNativeTitlebarHeight } from "../lib/windowControlsOverlay";
 import { useCloseAppModal } from "./sidebar/mainAppLocation";
 import { useThemeEditorStore } from "./settings/themeEditorStore";
 import { Button } from "./ui/button";
@@ -24,6 +25,10 @@ export function AppRouteModal({
   const backdropPressRef = useRef(false);
   // Focus the surface, not its first control: no stray focus ring, no phone keyboard.
   const popupRef = useRef<HTMLDivElement>(null);
+  // Clear the native window controls (macOS traffic lights, the Windows and Linux caption
+  // buttons). Below sm the modal fills the window and leaves that strip empty; up to lg its
+  // 1.5rem inset is shorter than the strip.
+  const nativeTitlebarHeight = useNativeTitlebarHeight();
 
   return (
     <Dialog
@@ -53,6 +58,11 @@ export function AppRouteModal({
         aria-label={label}
         data-app-modal=""
         viewportProps={{
+          style: {
+            "--app-modal-titlebar-height": `${nativeTitlebarHeight}px`,
+            "--app-modal-top-inset": `max(env(safe-area-inset-top), ${nativeTitlebarHeight}px)`,
+            "--app-modal-sm-top": `max(1.5rem, ${nativeTitlebarHeight}px)`,
+          } as CSSProperties,
           onPointerDown: (event) => {
             backdropPressRef.current = event.target === event.currentTarget;
           },
@@ -62,6 +72,11 @@ export function AppRouteModal({
           },
         }}
       >
+        {/* The emptied strip still moves the window, as the titlebar it replaces does. */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 hidden h-(--app-modal-titlebar-height) [-webkit-app-region:drag] max-sm:block"
+        />
         {children}
       </DialogPopup>
     </Dialog>

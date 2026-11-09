@@ -1,6 +1,5 @@
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
 import { ArchiveIcon, ArchiveRestoreIcon, CheckCheckIcon, Trash2Icon } from "lucide-react";
-import { useRef, useState } from "react";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
@@ -31,6 +30,8 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+
+import { useRef, useState } from "react";
 
 const ARCHIVE_ACTIONS = [
   { action: "unarchive", label: "Unarchive", Icon: ArchiveRestoreIcon },

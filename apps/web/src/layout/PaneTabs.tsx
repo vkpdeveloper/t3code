@@ -13,6 +13,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import {
   ChartNoAxesColumnIcon,
+  GitForkIcon,
   PanelRightIcon,
   SettingsIcon,
   SquareDashedIcon,
@@ -43,7 +44,8 @@ import { useThreadActionMenu } from "../hooks/useThreadActionMenu";
 
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { ContentButton } from "../components/ui/button";
-import { PANE_INACTIVE_TAB_TITLE_CLASS } from "../components/PaneNotch";
+import { cn } from "../lib/utils";
+import { PANE_GHOST_TAB_TITLE_CLASS, PANE_INACTIVE_TAB_TITLE_CLASS } from "../components/PaneNotch";
 import { PullRequestGlyph } from "../components/pullRequest/pullRequestIcons";
 import { ThreadSurfaceTabIcon } from "../components/SurfaceTabIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
@@ -57,7 +59,6 @@ import { contextMenuShortcutFields, shortcutLabelForCommand } from "../keybindin
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { isElectron } from "../env";
-import { cn } from "../lib/utils";
 import { textDirection } from "../textDirection";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { toastManager } from "../components/ui/toast";
@@ -69,6 +70,8 @@ import {
   countLayoutTabs,
   findLayoutPane,
   findLayoutTab,
+  isLayoutGhostTab,
+  isLayoutGhostTabShown,
   isLayoutPageContent,
   THREAD_TERMINAL_SURFACE_ID,
   type LayoutState,
@@ -172,6 +175,7 @@ export function usePaneSiblingTabs(
 }
 
 export type LayoutTabMenuId =
+  | "layout:keep"
   | "layout:split-right"
   | "layout:split-down"
   | "layout:new-column"
@@ -196,6 +200,9 @@ export function buildLayoutTabMenuItems(
   );
   const hasSiblings = location.pane.tabs.length > 1;
   const items: ContextMenuItem<LayoutTabMenuId>[] = [
+    ...(isLayoutGhostTab(location.tab)
+      ? [{ id: "layout:keep", label: "Keep open", icon: "pin" } as const]
+      : []),
     {
       id: "layout:split-right",
       label: "Split right",
@@ -264,6 +271,9 @@ export function runLayoutTabMenuAction(action: LayoutTabMenuId, tabId: string): 
   const location = findLayoutTab(store.layout, (tab) => tab.id === tabId);
   if (!location) return;
   switch (action) {
+    case "layout:keep":
+      store.keepTab(tabId);
+      return;
     case "layout:split-right":
       splitLayoutTab(tabId, "right");
       return;
@@ -443,17 +453,13 @@ export function closeLayoutTabOnMiddleClick(event: ReactMouseEvent, tabId: strin
   closeLayoutTabByUser(tabId);
 }
 
-/**
- * Holds a notch tab and its close button. The other tabs add `shrink-[2]`,
- * so when the notch runs out of room the tab on screen keeps its title
- * longest.
- */
+/** Holds a notch tab and its close button. */
 export const LAYOUT_TAB_SLOT_CLASS =
-  "group/tab relative inline-flex min-w-0 items-center has-[[data-tab-close]:hover,[data-tab-close]:focus-visible]:[--tab-icon-visibility:hidden]";
+  "group/tab relative inline-flex max-w-full shrink-0 items-center hover:[--tab-icon-visibility:hidden] has-[[data-tab-close]:focus-visible]:[--tab-icon-visibility:hidden]";
 
 /**
  * Wraps a notch tab's icon so the close button can take its place: the icon
- * hides while the button over it is hovered or focused. The slot sets the
+ * hides while the tab is hovered or the button has keyboard focus. The slot sets the
  * variable; a `:has()` here, above the icon, would restyle every element
  * below each tab on any DOM change.
  */
@@ -461,7 +467,7 @@ export const LAYOUT_TAB_ICON_CLASS = "contents [visibility:var(--tab-icon-visibi
 
 /**
  * A notch tab's close button: a 12px x over the tab's icon, shown while the
- * pointer is on the icon or the button has keyboard focus. Render it after
+ * pointer is on the tab or the button has keyboard focus. Render it after
  * the tab inside `LAYOUT_TAB_SLOT_CLASS`, with the tab's icon wrapped in
  * `LAYOUT_TAB_ICON_CLASS`.
  */
@@ -476,7 +482,7 @@ export function LayoutTabCloseButton({ tabId, title }: { tabId: string; title: s
             variant="tab-close"
             type="button"
             aria-label={`Close ${title}`}
-            className="absolute start-2.25 top-1/2 -translate-y-1/2 group-data-icon-only/tab:hidden"
+            className="absolute start-2.25 top-1/2 -translate-y-1/2"
             data-tab-close=""
             onClick={() => closeLayoutTabByUser(tabId)}
           />
@@ -550,12 +556,7 @@ function LayoutPaneTabButton({
     onOpenMenu({ x: event.clientX, y: event.clientY });
   };
   return (
-    // Clipped to its box, so a squeezed tab never slides under its neighbor;
-    // it keeps at least its icon, so a Settings or side tab stays findable.
-    <span
-      ref={showIconOnlyWhenClipped}
-      className={cn(LAYOUT_TAB_SLOT_CLASS, "min-w-8.5 shrink-[2] overflow-hidden")}
-    >
+    <span className={LAYOUT_TAB_SLOT_CLASS}>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -564,6 +565,7 @@ function LayoutPaneTabButton({
               type="button"
               data-layout-pane-tab={tab.id}
               onClick={focusTab}
+              onDoubleClick={() => useLayoutStore.getState().keepTab(tab.id)}
               onAuxClick={(event) => closeLayoutTabOnMiddleClick(event, tab.id)}
               onPointerDown={(event) => beginLayoutTabDrag(event, tab.id)}
               onMouseDown={(event) => {
@@ -577,8 +579,8 @@ function LayoutPaneTabButton({
           <span className={LAYOUT_TAB_ICON_CLASS}>{label.icon}</span>
           <span
             className={cn(
-              "min-w-[4ch] group-data-icon-only/tab:invisible",
               PANE_INACTIVE_TAB_TITLE_CLASS,
+              isLayoutGhostTab(tab) && PANE_GHOST_TAB_TITLE_CLASS,
             )}
             dir={textDirection(label.title)}
           >
@@ -591,14 +593,6 @@ function LayoutPaneTabButton({
       </Tooltip>
       <LayoutTabCloseButton tabId={tab.id} title={label.title} />
     </span>
-  );
-}
-
-export function showIconOnlyWhenClipped(slot: HTMLSpanElement) {
-  const tab = slot.firstElementChild;
-  if (!(tab instanceof HTMLElement)) return;
-  return observeResize([slot, tab], () =>
-    slot.toggleAttribute("data-icon-only", tab.scrollWidth > tab.clientWidth),
   );
 }
 
@@ -616,6 +610,7 @@ export function useLayoutTabLabel(tab: LayoutTab): {
         : null;
   const draftId = target?.kind === "draft" ? target.draftId : null;
   const thread = useQuietThreadShell(threadRef);
+  const ghostParent = useQuietThreadShell(tab.ghostOf ?? null);
   const terminalRef =
     tab.content.kind === "surface" && tab.content.surfaceId === THREAD_TERMINAL_SURFACE_ID
       ? tab.content.threadRef
@@ -764,11 +759,46 @@ export function useLayoutTabLabel(tab: LayoutTab): {
     };
   }
   const title = thread?.title ?? "New thread";
+  if (tab.ghostOf) {
+    return {
+      icon: <GitForkIcon aria-hidden className="size-3.5 shrink-0" />,
+      title,
+      tooltip: ghostTabTooltip(title, ghostParent?.title),
+    };
+  }
   const icon =
     draftId !== null ? (
       <SquarePenIcon aria-hidden className="size-3.5 shrink-0" />
     ) : project ? (
       <ProjectFavicon project={project} className="size-3.5 shrink-0" />
     ) : null;
-  return { icon, title, tooltip: project ? `${project.title} / ${title}` : title };
+  const tooltip = project ? `${project.title} / ${title}` : title;
+  return {
+    icon,
+    title,
+    tooltip: isLayoutGhostTab(tab) ? ghostTabTooltip(tooltip, undefined) : tooltip,
+  };
+}
+
+/** A ghost tab names the thread it was opened from, if any, and how to keep it. */
+export function ghostTabTooltip(title: string, parentTitle: string | undefined): string {
+  return [title, parentTitle ? `Opened from ${parentTitle}` : null, "Double-click to keep open"]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** The thread a lineage ghost tab was opened from (`LayoutTab.ghostOf`), or null. */
+export function useLayoutTabGhostOf(tabId: string | null) {
+  return useLayoutStore((state) =>
+    tabId === null
+      ? null
+      : (findLayoutTab(state.layout, (tab) => tab.id === tabId)?.tab.ghostOf ?? null),
+  );
+}
+
+/** The tab draws as a ghost: italic, kept by a double-click (see `isLayoutGhostTabShown`). */
+export function useLayoutTabGhostShown(tabId: string | null): boolean {
+  return useLayoutStore((state) =>
+    tabId === null ? false : isLayoutGhostTabShown(state.layout, tabId),
+  );
 }

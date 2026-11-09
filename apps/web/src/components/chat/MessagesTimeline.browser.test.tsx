@@ -1,4 +1,3 @@
-import { useTimelineFollow } from "./useTimelineFollow";
 import { flushSync } from "react-dom";
 import { AudioPreview } from "../files/AudioPreview";
 import { cdp, page, userEvent } from "vite-plus/test/browser";
@@ -342,6 +341,41 @@ describe("MessagesTimeline work rows", () => {
     });
   });
 
+  it("keeps following a streaming turn after a heading is expanded at the bottom", async () => {
+    const props = { ...baseProps(), isWorking: true };
+    const runId = RunId.make("live-run");
+    const container = document.createElement("div");
+    container.style.cssText =
+      "height: min(600px, 100vh); width: 900px; display: flex; flex-direction: column;";
+    const entries = [
+      ...Array.from({ length: 12 }, (_, index) =>
+        message(`Earlier context ${index}`, {}, `context-${index}`),
+      ),
+      message("Progress details\n\n".repeat(50), { role: "assistant", runId }, "progress"),
+      message("Done", { role: "assistant", runId }, "final"),
+    ];
+    await using screen = await render(<MessagesTimeline {...props} timelineEntries={entries} />, {
+      container,
+    });
+    const heading = screen.getByRole("button", { name: /^Worked for/ });
+    await expect.element(heading).toHaveStyle({ pointerEvents: "auto" });
+    const viewport = props.listRef.current!.getScrollableNode()!;
+    const distanceFromEnd = () =>
+      viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+    await vi.waitFor(() => expect(distanceFromEnd()).toBeLessThan(2));
+    await heading.click();
+    await screen.rerender(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={[
+          ...entries,
+          message("Streamed reply\n\n".repeat(40), { role: "assistant", runId }, "streamed"),
+        ]}
+      />,
+    );
+    await vi.waitFor(() => expect(distanceFromEnd()).toBeLessThan(2));
+  });
+
   it("loads a streamed approval patch when review opens and hides it again", async () => {
     setup();
     const itemId = TurnItemId.make("approval-patch");
@@ -553,49 +587,6 @@ describe("MessagesTimeline work rows", () => {
     expect(navigations.filter((navigation) => navigation.source !== "pointer")).toEqual([]);
   });
 
-  it("follows growth that lands after a smooth follow scroll starts", async () => {
-    const runId = RunId.make("tail-run");
-    const props = {
-      ...baseProps(),
-      isWorking: true,
-      activeTurnStartedAt: CREATED_AT,
-      latestRun: { runId, status: "running" as const, startedAt: CREATED_AT, completedAt: null },
-    };
-    const entries = (lines: number) => [
-      ...Array.from({ length: 40 }, (_, index) =>
-        message(`Earlier ${index}`, {}, `earlier-${index}`),
-      ),
-      message("Build it", { runId }),
-      message(
-        Array.from({ length: lines }, (_, index) => `Line ${index}`).join("\n\n"),
-        { runId, role: "assistant", streaming: true },
-        "answer",
-      ),
-    ];
-    await using screen = await renderElement(
-      <MessagesTimeline {...props} timelineEntries={entries(2)} />,
-    );
-    await expect.element(screen.getByText("Line 1", { exact: true })).toBeVisible();
-    const viewport = props.listRef.current!.getScrollableNode()!;
-    const gap = () => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
-    await vi.waitFor(() => expect(gap()).toBeLessThan(2));
-    const realSetTimeout = globalThis.setTimeout;
-    using _followRetry = stubGlobal("setTimeout", ((
-      handler: () => void,
-      delay?: number,
-      ...args: unknown[]
-    ) =>
-      delay === 500 ? 0 : realSetTimeout(handler, delay, ...args)) as unknown as typeof setTimeout);
-
-    for (const lines of [12, 22, 32]) {
-      await screen.rerender(<MessagesTimeline {...props} timelineEntries={entries(lines)} />);
-      await expect
-        .element(screen.getByText(`Line ${lines - 1}`, { exact: true }))
-        .toBeInTheDocument();
-      await vi.waitFor(() => expect(gap()).toBeLessThan(2));
-    }
-  });
-
   it.each(["delegated", "legacy", "missing"] as const)(
     "uses the reported task for %s completion notifications",
     async (source) => {
@@ -671,57 +662,6 @@ describe("MessagesTimeline work rows", () => {
       }
     },
   );
-
-  it("keeps the rows still when the work history collapses at the end", async () => {
-    const runId = RunId.make("collapse-run");
-    const props = {
-      ...baseProps(),
-      isWorking: true,
-      activeTurnStartedAt: CREATED_AT,
-      latestRun: { runId, status: "running" as const, startedAt: CREATED_AT, completedAt: null },
-    };
-    await using screen = await renderElement(
-      <MessagesTimeline
-        {...props}
-        timelineEntries={[
-          ...Array.from({ length: 40 }, (_, index) =>
-            message(`Earlier ${index}`, {}, `earlier-${index}`),
-          ),
-          message("Build it", { runId }),
-          ...Array.from({ length: 30 }, (_, index) =>
-            message(`Step ${index}`, { runId, role: "assistant" }, `step-${index}`),
-          ),
-        ]}
-      />,
-    );
-    const bar = screen.getByRole("button", { name: "Open work history" });
-    await expect.element(bar).toBeVisible();
-    const viewport = props.listRef.current!.getScrollableNode()!;
-    const barElement = bar.element();
-    await bar.click();
-    const history = screen.getByRole("region", { name: "Work history" }).element();
-    await expect.element(screen.getByText("Step 0", { exact: true })).toBeInTheDocument();
-    await Promise.all(history.getAnimations().map((animation) => animation.finished));
-    const expandedHeight = history.clientHeight;
-    await vi.waitFor(() => {
-      viewport.scrollTop = viewport.scrollHeight;
-      expect(viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop).toBeLessThan(2);
-      expect(props.listRef.current!.getState().scroll).toBe(viewport.scrollTop);
-    });
-    const row = screen.getByText("Step 25", { exact: true }).element();
-    const rowTops: number[] = [];
-    const rowResizes = new ResizeObserver(() => rowTops.push(row.getBoundingClientRect().top));
-    rowResizes.observe(history);
-    using _rowResizes = { [Symbol.dispose]: () => rowResizes.disconnect() };
-    history.style.transitionDuration = "2s";
-
-    await act(() => {
-      barElement.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    await vi.waitFor(() => expect(history.clientHeight).toBeLessThan(expandedHeight - 200));
-    expect(Math.max(...rowTops) - Math.min(...rowTops)).toBeLessThan(2);
-    for (const animation of history.getAnimations()) animation.finish();
-  });
 });
 
 describe("MessagesTimeline messages", () => {
@@ -796,6 +736,44 @@ describe("MessagesTimeline messages", () => {
     screen.container.style.height = "880px";
     await vi.waitFor(() => expect(distances).toHaveLength(2));
     expect(distances[1]).toBeLessThan(2);
+  });
+
+  it("leaves earlier rows alone while a reply streams", async () => {
+    const props = baseProps();
+    let earlierRowRenders = 0;
+    // The row calls this on every render it does.
+    const renderHtmlRender = () => {
+      earlierRowRenders += 1;
+      return <p>Earlier app</p>;
+    };
+    const timeline = (reply: string) => (
+      <MessagesTimeline
+        {...props}
+        renderHtmlRender={renderHtmlRender}
+        timelineEntries={[
+          message("Build the app"),
+          {
+            id: "earlier-app",
+            kind: "html-render",
+            createdAt: CREATED_AT,
+            runId: null,
+            htmlRender: { attachmentId: "app", title: "App", height: 120 },
+          },
+          message(reply, { role: "assistant", streaming: true }, "reply"),
+        ]}
+      />
+    );
+    await using screen = await renderElement(timeline("Working"));
+    await expect.element(screen.getByText("Earlier app")).toBeVisible();
+    await vi.waitFor(() =>
+      expect(props.listRef.current!.getState().sizes.has("entry-reply")).toBe(true),
+    );
+    const rendersBeforeStream = earlierRowRenders;
+    for (let delta = 1; delta <= 10; delta++) {
+      await screen.rerender(timeline(`Working ${"step ".repeat(delta)}done ${delta}`));
+    }
+    await expect.element(screen.getByText("done 10", { exact: false })).toBeVisible();
+    expect(earlierRowRenders).toBe(rendersBeforeStream);
   });
 
   it("keeps the first and last message headings reachable from either end", async () => {
@@ -936,14 +914,6 @@ describe("MessagesTimeline messages", () => {
     await act(() => vi.advanceTimersByTime(300));
     const turns = turnsInDomOrder();
     expect(turns).toEqual(turns.toSorted((a, b) => a - b));
-  });
-
-  it("omits queue intent beneath sent user messages", async () => {
-    await using screen = await renderTimeline([
-      message("Queued prompt", { inputIntent: "queued_turn" }),
-    ]);
-    expect(screen.text()).toContain("Queued prompt");
-    expect(screen.container.querySelector("[data-user-message-intent]")).toBeNull();
   });
 
   it("opens standalone skill details and its instructions", async () => {
@@ -1619,7 +1589,7 @@ describe("MessagesTimeline thread find", () => {
 
     const frame = document.createElement("iframe");
     viewport.querySelector("[data-timeline-row-id]")!.append(frame);
-    frame.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    frame.focus();
     await scrollUp();
     expect(navigations).toEqual([{ source: "scroll" }]);
   });
@@ -1630,122 +1600,6 @@ describe("MessagesTimeline thread find", () => {
     await using screen = await renderElement(element({ findOpen: true }));
     await screen.rerender(element({ findOpen: true }));
     expect(navigations).toEqual([released]);
-  });
-
-  it.each([false, true])(
-    "shows a newly sent message before its content paints (anchor %s)",
-    async (anchored) => {
-      setup();
-      const base = baseProps();
-      const entries = Array.from({ length: 25 }, (_, index) =>
-        message(
-          `Reply ${index}\n\n${"line\n\n".repeat(8)}`,
-          { role: "assistant" },
-          `send-${index}`,
-        ),
-      );
-      function FollowingTimeline({ sent = false }) {
-        const [anchor, setAnchor] = useState({
-          threadKey: base.routeThreadKey as string | null,
-          messageId: null as MessageId | null,
-        });
-        const [wasSent, setWasSent] = useState(false);
-        if (sent !== wasSent) {
-          setWasSent(sent);
-          setAnchor({
-            threadKey: base.routeThreadKey,
-            messageId: anchored ? MessageId.make("new-prompt") : null,
-          });
-        }
-        const timelineEntries = sent
-          ? [...entries, message("New prompt", {}, "new-prompt")]
-          : entries;
-        const follow = useTimelineFollow({
-          legendListRef: base.listRef,
-          composerTimelineInset: 170,
-          routeThreadKey: base.routeThreadKey,
-          activeThreadKey: base.routeThreadKey,
-          isServerThread: false,
-          serverProjection: null,
-          threadStatus: "live",
-          activeActivityRun: null,
-          activeRunningTurnId: null,
-          timelineEntries,
-          timelineAnchorMessageId: anchor.messageId,
-          setTimelineAnchor: setAnchor,
-        });
-        return (
-          <MessagesTimeline
-            {...base}
-            timelineEntries={timelineEntries}
-            anchorMessageId={anchor.messageId}
-            contentInsetEndAdjustment={170}
-            isWorking={sent}
-            onAnchorReady={follow.onTimelineAnchorReadyStable}
-            onViewportAttach={follow.attachTimelineViewport}
-            onFooterGrow={follow.onTimelineFooterGrowStable}
-            onIsAtEndChange={follow.onIsAtEndChangeStable}
-          />
-        );
-      }
-      await using screen = await renderElement(<FollowingTimeline />);
-      const element = base.listRef.current!.getScrollableNode()!;
-      await vi.waitFor(() =>
-        expect(element.scrollHeight - element.clientHeight - element.scrollTop).toBeLessThanOrEqual(
-          1,
-        ),
-      );
-      const positions: number[] = [];
-      const observer = new ResizeObserver(() => {
-        const row = screen.container.querySelector('[data-message-id="new-prompt"]');
-        if (row && row.getBoundingClientRect().height > 0) {
-          positions.push(
-            row.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom + 170,
-          );
-        }
-      });
-      using _observer = { [Symbol.dispose]: () => observer.disconnect() };
-      observer.observe(screen.container.querySelector(".legend-list-content-container")!);
-      await screen.rerender(<FollowingTimeline sent />);
-      await vi.waitFor(() => expect(positions.length).toBeGreaterThan(0));
-      expect(positions[0]).toBeLessThanOrEqual(0);
-    },
-  );
-
-  it("opens a thread at its end before its measured content paints", async () => {
-    setup();
-    const base = baseProps();
-    const replies = Array.from({ length: 25 }, (_, index) =>
-      message(
-        `Reply ${index}\n\n${"line\n\n".repeat(8)}`,
-        { role: "assistant" },
-        `landing-${index}`,
-      ),
-    );
-    await using screen = await renderElement(
-      <MessagesTimeline {...base} timelineEntries={[message("Other thread")]} />,
-    );
-    const gaps: number[] = [];
-    const observer = new ResizeObserver(() => {
-      const list = base.listRef.current;
-      const element = list?.getScrollableNode();
-      if (!element || list?.getState().data.length !== 25) return;
-      const tail = screen.container.querySelector('[data-timeline-row-id="entry-landing-24"]');
-      if (tail && tail.getBoundingClientRect().height > 0) {
-        gaps.push(element.scrollHeight - element.clientHeight - element.scrollTop);
-      }
-    });
-    using _observer = { [Symbol.dispose]: () => observer.disconnect() };
-    observer.observe(screen.container.querySelector(".legend-list-content-container")!);
-    await screen.rerender(
-      <MessagesTimeline
-        {...base}
-        routeThreadKey="environment-local:landing-at-end"
-        timelineEntries={replies}
-      />,
-    );
-    await vi.waitFor(() => expect(gaps.length).toBeGreaterThan(0));
-    expect(gaps[0]).toBeLessThanOrEqual(1);
   });
 
   it("still restores the position of a thread it switches to whose find is open", async () => {

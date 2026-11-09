@@ -37,7 +37,16 @@ import {
   resolveEnvironmentMachineKind,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { ArrowLeftIcon, FileDiffIcon, PanelRightIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  BookOpenIcon,
+  CodeIcon,
+  FileDiffIcon,
+  HistoryIcon,
+  type LucideIcon,
+  PanelRightIcon,
+  TextIcon,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -185,11 +194,11 @@ const actionFailureHints = (term: string): Record<PullRequestAction, string> => 
 const UPDATE_BRANCH_REBASE_FAILURE_HINT =
   "The host refused it. A rebase stops at the first commit that does not apply cleanly; updating with a merge commit may still work.";
 
-const TABS: ReadonlyArray<{ value: PullRequestDetailTab; label: string }> = [
-  { value: "summary", label: "Summary" },
-  { value: "guide", label: "Guide" },
-  { value: "timeline", label: "Timeline" },
-  { value: "code", label: "Code" },
+const TABS: ReadonlyArray<{ value: PullRequestDetailTab; label: string; icon: LucideIcon }> = [
+  { value: "summary", label: "Summary", icon: TextIcon },
+  { value: "guide", label: "Guide", icon: BookOpenIcon },
+  { value: "timeline", label: "Timeline", icon: HistoryIcon },
+  { value: "code", label: "Code", icon: CodeIcon },
 ];
 
 // Defer the diff viewer's worker pool until Code is approached.
@@ -1307,14 +1316,19 @@ export function PullRequestDetailPanel({
     detail?.state === "merged" || detail?.state === "closed" ? detail.state : null;
   const finishedBadge =
     detail && finishedState ? (
-      <PullRequestStateBadge tone={finishedState === "merged" ? "merged" : "destructive"}>
-        {finishedState === "merged" ? (
-          <PullRequestGlyph.merged aria-hidden className="size-3.5" />
-        ) : (
-          <PullRequestGlyph.closed aria-hidden className="size-3.5" />
-        )}
-        {finishedState === "merged" ? `Merged into ${detail.baseBranch}` : "Closed without merging"}
-      </PullRequestStateBadge>
+      <PullRequestStateBadge
+        tone={finishedState === "merged" ? "merged" : "destructive"}
+        icon={
+          finishedState === "merged" ? (
+            <PullRequestGlyph.merged aria-hidden className="size-3.5" />
+          ) : (
+            <PullRequestGlyph.closed aria-hidden className="size-3.5" />
+          )
+        }
+        label={
+          finishedState === "merged" ? `Merged into ${detail.baseBranch}` : "Closed without merging"
+        }
+      />
     ) : null;
   const finishedMenu =
     detail && finishedState && (can("reopen") || can("revert") || showsDeleteBranch) ? (
@@ -1687,11 +1701,11 @@ export function PullRequestDetailPanel({
               <span
                 aria-hidden
                 className={cn(
-                  "pointer-events-none absolute top-px left-0.5 h-6 rounded-lg surface-raised",
+                  "pointer-events-none absolute top-px left-px h-6 rounded-md surface-raised",
                   tabMotionActive && "transition-transform ease-out",
                 )}
                 style={{
-                  width: `calc((100% - 0.25rem - ${visibleTabs.length - 1} * 0.125rem) / ${visibleTabs.length})`,
+                  width: `calc((100% - 2px - ${visibleTabs.length - 1} * 0.125rem) / ${visibleTabs.length})`,
                   transform: `translateX(calc(${Math.max(
                     0,
                     visibleTabs.findIndex((item) => item.value === tab),
@@ -1703,11 +1717,12 @@ export function PullRequestDetailPanel({
                 <Toggle
                   key={item.value}
                   value={item.value}
-                  className="flex-1"
+                  className="@container/pr-tab flex-1"
                   onPointerEnter={item.value === "code" ? () => void loadCodeTab() : undefined}
                   onFocus={item.value === "code" ? () => void loadCodeTab() : undefined}
                 >
-                  {item.label}
+                  <item.icon aria-hidden className="hidden @max-[4.25em]/pr-tab:block" />
+                  <span className="@max-[4.25em]/pr-tab:sr-only">{item.label}</span>
                 </Toggle>
               ))}
             </ToggleGroup>

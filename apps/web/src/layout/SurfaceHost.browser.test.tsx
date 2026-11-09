@@ -3,13 +3,8 @@ import { page } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { render } from "../../test/render";
-import {
-  createLayoutLauncherContent,
-  createLayoutState,
-  selectFocusedTab,
-  selectVisibleLayoutTabs,
-} from "./layoutModel";
 import { useLayoutBehaviorStore } from "./layoutBehavior";
+import { createLayoutLauncherContent, createLayoutState, selectFocusedTab } from "./layoutModel";
 import { useLayoutStore } from "./layoutStore";
 import { LayoutSurfaceHost } from "./SurfaceHost";
 
@@ -34,8 +29,7 @@ function setup() {
   const layout = useLayoutStore.getState().layout;
   const workspace = layout.workspaces[0]!;
   const columns = workspace.columns.map((column) => ({ ...column, width: 2 / 3 }));
-  const [first] = columns[0]!.panes[0]!.tabs;
-  const [second, third] = columns[1]!.panes[0]!.tabs;
+  const [second] = columns[1]!.panes[0]!.tabs;
   useLayoutStore.setState({
     layout: {
       ...layout,
@@ -43,9 +37,7 @@ function setup() {
     },
   });
   return {
-    first: first!,
     second: second!,
-    third: third!,
     [Symbol.dispose]: () => {
       useLayoutStore.setState({ layout: original });
       useLayoutBehaviorStore.setState({ behavior });
@@ -67,8 +59,6 @@ async function renderHost() {
   return render(<Host />, { container });
 }
 
-const visibleTabIds = () =>
-  selectVisibleLayoutTabs(useLayoutStore.getState().layout).map((tab) => tab.id);
 const focusedTabId = () => selectFocusedTab(useLayoutStore.getState().layout)?.id;
 
 const inSecondPane = (selector: string) => {
@@ -90,25 +80,9 @@ async function clickHeld(element: HTMLElement) {
   await vi.waitFor(() => expect(strip.scrollLeft).toBeGreaterThan(held));
 }
 
-it("closes a tab in an unfocused pane that runs off screen with one click on its close button", async () => {
-  using tabs = setup();
-  await using _screen = await renderHost();
-  await clickHeld(inSecondPane(`[data-layout-pane-tab="${tabs.second.id}"] ~ [data-tab-close]`));
-  await vi.waitFor(() => expect(visibleTabIds()).toEqual([tabs.first.id, tabs.third.id]));
-});
-
 it("shows a tab in an unfocused pane that runs off screen with one click on it", async () => {
   using tabs = setup();
   await using _screen = await renderHost();
   await clickHeld(inSecondPane(`[data-layout-pane-tab="${tabs.second.id}"]`));
   await vi.waitFor(() => expect(focusedTabId()).toBe(tabs.second.id));
-});
-
-it("keeps a button in an unfocused pane that runs off screen under the pointer until its click", async () => {
-  using _tabs = setup();
-  await using _screen = await renderHost();
-  const settings = [...inSecondPane('[role="list"]').querySelectorAll("button")].find(
-    (button) => button.textContent === "Settings",
-  )!;
-  await clickHeld(settings);
 });

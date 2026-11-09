@@ -130,7 +130,7 @@ function ModelPicker({
               <ComboboxItem key={model.id} value={model}>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate">{model.name}</span>
-                  <span className="truncate text-meta text-muted-foreground">{model.id}</span>
+                  <span className="truncate text-xs text-muted-foreground">{model.id}</span>
                 </span>
               </ComboboxItem>
             )}
@@ -138,11 +138,11 @@ function ModelPicker({
         </ComboboxPopup>
       </Combobox>
       {delisted ? (
-        <p className="text-body text-destructive" role="alert">
+        <p className="text-sm text-destructive" role="alert">
           OpenRouter no longer lists {current}. Dictation stays off until you choose another model.
         </p>
       ) : selected ? (
-        <p className="truncate text-meta text-muted-foreground">{selected.id}</p>
+        <p className="truncate text-xs text-muted-foreground">{selected.id}</p>
       ) : null}
     </div>
   );
@@ -297,7 +297,7 @@ export function CloudVoiceConfiguration({
           )}
         </div>
       </div>
-      <p className="text-body text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {draft.trim() && !credential
           ? (source?.invalidReferenceMessage ?? "Enter an API key, not a URL or secret reference.")
           : active && !routed
@@ -374,7 +374,7 @@ export function CloudVoiceConfiguration({
                       Retry loading models
                     </Button>
                   ) : (
-                    <p role="status" className="text-body text-muted-foreground">
+                    <p role="status" className="text-sm text-muted-foreground">
                       Loading transcription models…
                     </p>
                   )}
@@ -384,7 +384,7 @@ export function CloudVoiceConfiguration({
                 ) : !saved ? (
                   <p>Ask an administrator on {environment.label} to add an API key.</p>
                 ) : (
-                  <p className="text-body text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     Uses the API key saved on {environment.label}. This choice applies only to this
                     device.
                   </p>
@@ -404,14 +404,14 @@ export function CloudVoiceConfiguration({
             ) : !saved ? (
               <p>Ask an administrator on {environment.label} to add an API key.</p>
             ) : (
-              <p className="text-body text-muted-foreground">
+              <p className="text-sm text-muted-foreground">
                 This choice applies only to this device. Choose Off to stop sharing.
               </p>
             )}
           </DialogPanel>
         )}
         {error && (
-          <p className="px-6 text-body text-destructive" role="alert">
+          <p className="px-6 text-sm text-destructive" role="alert">
             {error}
           </p>
         )}

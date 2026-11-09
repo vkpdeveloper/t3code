@@ -93,6 +93,7 @@ function MenuPopup({
           id={popupId}
           finalFocus={tooltipSafeFinalFocus(props.finalFocus, popupId)}
         >
+          {/* Items stay concentric with the popup: its radius minus the 1px rim and padding. */}
           <div className="max-h-(--available-height) flex w-full flex-col overflow-y-auto p-1 [--popup-item-radius:calc(var(--radius-card)-5px)]">
             {children}
           </div>
@@ -402,7 +403,6 @@ function MenuSubPopup({
   align = "start",
   ...props
 }: MenuPrimitive.Popup.Props & {
-  keepMounted?: boolean;
   align?: MenuPrimitive.Positioner.Props["align"];
   sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];

@@ -686,7 +686,7 @@ export function SettingsRow({
             {description ? (
               <p
                 data-settings-description
-                className="text-body text-muted-foreground [--type-body:var(--type-meta)]"
+                className="text-pretty text-body text-muted-foreground [--type-body:var(--type-meta)]"
               >
                 {description}
               </p>

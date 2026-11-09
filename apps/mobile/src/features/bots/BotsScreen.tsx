@@ -164,14 +164,12 @@ export function BotsScreen(props: { readonly sidebar?: boolean } = {}) {
         renderScrollComponent={Platform.OS === "ios" ? BotsScrollView : undefined}
         alwaysBounceVertical
         showsVerticalScrollIndicator={Platform.OS !== "android"}
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior="never"
+        contentInset={Platform.OS === "ios" ? { top: iosTopInset } : undefined}
         initialScrollOffset={initialOffset > 0 ? initialOffset - iosTopInset : undefined}
-        contentInsetStartAdjustment={iosTopInset}
         contentContainerStyle={{
           paddingHorizontal: sidebar ? 8 : 0,
-          paddingBottom:
-            Math.max(insets.bottom, workspace?.bottomClearance ?? 0) -
-            (Platform.OS === "ios" ? insets.bottom : 0),
+          paddingBottom: Math.max(insets.bottom, workspace?.bottomClearance ?? 0),
         }}
         onScroll={(event) => {
           workspace?.recordScrollOffset(

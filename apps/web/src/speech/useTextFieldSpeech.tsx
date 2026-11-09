@@ -96,11 +96,9 @@ export function TextFieldSpeechControls({
         {speech.available ? (
           <ComposerSpeechButton
             state={speech.state}
-            progress={null}
             shortcutLabel={speech.shortcutLabel}
             disabled={disabled}
             onStart={() => void speech.start()}
-            onCancel={speech.cancel}
           />
         ) : null}
       </div>

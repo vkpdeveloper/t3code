@@ -6,6 +6,7 @@ import {
   AuthMcpAuthorizationRequest,
   isRuntimeModeAbove,
   managedRuntimeModeCeilingMessage,
+  parseMcpApprovalCode,
 } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import { EyeIcon, type LucideIcon } from "lucide-react";
@@ -16,7 +17,7 @@ import { type ReactNode, useEffect, useState } from "react";
 
 import { PrimaryEnvironmentHttpClient } from "~/environments/primary/httpClient";
 import { runPrimaryHttp } from "~/lib/runtime";
-import { resolveMcpAccess } from "./ConnectAgentSurface.logic";
+import { resolveApprovalDecision, resolveMcpAccess } from "./ConnectAgentSurface.logic";
 import { runtimeModeConfig } from "../chat/runtimeModeConfig";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -83,20 +84,16 @@ function readAuthorizationRequest(): AuthMcpAuthorizationRequest {
   return decodeAuthorizationRequest(Object.fromEntries(new URL(window.location.href).searchParams));
 }
 
-/** Sessions can grant only scopes they hold. */
-function oneClickApproves(details: AuthMcpApprovalDetails, access: AuthMcpClientAccess) {
-  return details.csrfToken !== undefined && (details.oneClickAccess ?? []).includes(access);
-}
-
 export function ConnectAgentSurface() {
   const [authorization] = useState(readAuthorizationRequest);
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
-  const [requestedAccess, setAccess] = useState<AuthMcpClientAccess>("auto");
+  const [requestedAccess, setAccess] = useState<AuthMcpClientAccess | null>(null);
+  const [pairingCode, setPairingCode] = useState("");
   const access = resolveMcpAccess(
     requestedAccess,
     loaded.status === "ready" ? loaded.details.runtimeModeCeiling : undefined,
+    pairingCode.trim().length > 0,
   );
-  const [pairingCode, setPairingCode] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
 
@@ -124,15 +121,13 @@ export function ConnectAgentSurface() {
 
   const decide = async (choice: "approve" | "deny") => {
     if (loaded.status !== "ready") return;
-    setPending(choice);
-    setErrorMessage("");
-    const { csrfToken } = loaded.details;
-    const decision: AuthMcpApprovalDecision =
+    const decision: AuthMcpApprovalDecision | null =
       choice === "deny"
         ? { _tag: "deny" }
-        : csrfToken !== undefined && oneClickApproves(loaded.details, access)
-          ? { _tag: "browser-session", access, csrfToken }
-          : { _tag: "pairing-code", access, code: pairingCode.trim() };
+        : resolveApprovalDecision({ code: pairingCode, access, details: loaded.details });
+    if (decision === null) return;
+    setPending(choice);
+    setErrorMessage("");
     const answer = await runApproval((client) =>
       client.mcpOAuth.decision({ payload: { authorization, decision } }),
     );
@@ -168,8 +163,10 @@ export function ConnectAgentSurface() {
   }
 
   const { details } = loaded;
-  const oneClick = oneClickApproves(details, access);
-  const canApprove = pending === null && (oneClick || pairingCode.trim().length > 0);
+  const canApprove =
+    pending === null && resolveApprovalDecision({ code: pairingCode, access, details }) !== null;
+  // A code from "Use T3 Code in another app" names its level, so the page does not ask again.
+  const codeAccess = parseMcpApprovalCode(pairingCode)?.access;
 
   return (
     <StandalonePage>
@@ -182,19 +179,24 @@ export function ConnectAgentSurface() {
           </>
         }
       />
+      <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-body">
+        <dt className="text-muted-foreground">App</dt>
+        <dd className="min-w-0 break-words">
+          {details.clientName} <span className="text-muted-foreground">(name set by the app)</span>
+        </dd>
+        <dt className="text-muted-foreground">Access goes to</dt>
+        <dd className="min-w-0 break-words text-label">
+          {details.redirectHost}
+          {redirectsToThisComputer(details.redirectHost) ? (
+            <span className="text-body text-muted-foreground">
+              {" "}
+              on the computer that opened this page
+            </span>
+          ) : null}
+        </dd>
+      </dl>
       <p className="mt-2 text-meta text-muted-foreground">
-        {redirectsToThisComputer(details.redirectHost) ? (
-          <>
-            The name is chosen by the agent. Approval returns to {details.redirectHost} on the
-            computer that opened this page. Only approve a sign-in you just started.
-          </>
-        ) : (
-          <>
-            The name is chosen by the agent. Approval gives access to whoever runs{" "}
-            <span className="text-label text-foreground">{details.redirectHost}</span>. Only approve
-            a sign-in you just started there.
-          </>
-        )}
+        Only approve a sign-in you just started.
       </p>
 
       <form
@@ -205,48 +207,53 @@ export function ConnectAgentSurface() {
         }}
       >
         <div className="space-y-2">
-          <span id="connect-agent-access-label" className="text-label">
-            What it may do
-          </span>
-          <RadioGroup
-            aria-labelledby="connect-agent-access-label"
-            value={access}
-            onValueChange={(value) => setAccess(value as AuthMcpClientAccess)}
-          >
-            {AuthMcpClientAccess.literals.map((option) => (
-              <AccessOption
-                key={option}
-                access={option}
-                managedReason={ceilingReason(details, option)}
-              />
-            ))}
-          </RadioGroup>
+          <label className="text-label" htmlFor="connect-agent-pairing-code">
+            Sign-in code
+          </label>
+          <Input
+            id="connect-agent-pairing-code"
+            autoCapitalize="none"
+            autoComplete="one-time-code"
+            autoCorrect="off"
+            disabled={pending !== null}
+            nativeInput
+            onChange={(event) => setPairingCode(event.currentTarget.value)}
+            placeholder="Paste a code"
+            spellCheck={false}
+            value={pairingCode}
+          />
           <p className="text-meta text-muted-foreground">
-            Beyond read only, it can start, message and stop threads, and none of them can run with
-            more than the mode you pick.
+            Get one from Use T3 Code in another app (MCP), Settings → Sharing & access, or{" "}
+            <code>t3 auth pairing create</code> on this machine.
           </p>
         </div>
 
-        {oneClick ? null : (
+        {codeAccess ? (
+          <p className="text-body">
+            <span className="text-muted-foreground">Access</span>{" "}
+            <span className="text-label">{accessConfig[codeAccess].label}</span>
+          </p>
+        ) : (
           <div className="space-y-2">
-            <label className="text-label" htmlFor="connect-agent-pairing-code">
-              Pairing code
-            </label>
-            <Input
-              id="connect-agent-pairing-code"
-              autoCapitalize="none"
-              autoComplete="one-time-code"
-              autoCorrect="off"
-              disabled={pending !== null}
-              nativeInput
-              onChange={(event) => setPairingCode(event.currentTarget.value)}
-              placeholder="Paste a one-time pairing code"
-              spellCheck={false}
-              value={pairingCode}
-            />
+            <span id="connect-agent-access-label" className="text-label">
+              What it may do
+            </span>
+            <RadioGroup
+              aria-labelledby="connect-agent-access-label"
+              value={access}
+              onValueChange={(value) => setAccess(value as AuthMcpClientAccess)}
+            >
+              {AuthMcpClientAccess.literals.map((option) => (
+                <AccessOption
+                  key={option}
+                  access={option}
+                  disabledReason={ceilingReason(details, option)}
+                />
+              ))}
+            </RadioGroup>
             <p className="text-meta text-muted-foreground">
-              Create one in Settings → Sharing & access, or run <code>t3 auth pairing create</code>{" "}
-              on this machine.
+              Beyond read only, it can start, message and stop threads, and none of them can run
+              with more than the mode you pick.
             </p>
           </div>
         )}
@@ -259,7 +266,11 @@ export function ConnectAgentSurface() {
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button disabled={!canApprove} type="submit">
-            {pending === "approve" ? "Approving…" : "Approve"}
+            {pending === "approve"
+              ? "Approving…"
+              : codeAccess
+                ? `Approve ${accessConfig[codeAccess].label}`
+                : "Approve"}
           </Button>
           <Button
             disabled={pending !== null}
@@ -295,23 +306,28 @@ function ceilingReason(details: AuthMcpApprovalDetails, access: AuthMcpClientAcc
     : managedRuntimeModeCeilingMessage(ceiling.organization, ceiling.maxRuntimeMode);
 }
 
-function AccessOption({
+/** One access level in a radio group; `description` replaces the level's own, null hides it. */
+export function AccessOption({
   access,
-  managedReason,
+  disabledReason,
+  description,
 }: {
   readonly access: AuthMcpClientAccess;
-  readonly managedReason: string | undefined;
+  readonly disabledReason: string | undefined;
+  readonly description?: string | null;
 }) {
-  const { label, description, icon: Icon } = accessConfig[access];
+  const { label, icon: Icon } = accessConfig[access];
+  const detail =
+    disabledReason ?? (description === undefined ? accessConfig[access].description : description);
   return (
     <label className="flex cursor-pointer items-start gap-3 rounded-control surface-well px-3 py-3 has-data-disabled:cursor-not-allowed has-data-disabled:opacity-64">
-      <Radio value={access} disabled={managedReason !== undefined} />
+      <Radio value={access} disabled={disabledReason !== undefined} />
       <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0">
         <span className="block text-label text-foreground">{label}</span>
-        <span className="block text-meta text-muted-foreground">
-          {managedReason ?? description}
-        </span>
+        {detail === null ? null : (
+          <span className="block text-meta text-muted-foreground">{detail}</span>
+        )}
       </span>
     </label>
   );
