@@ -55,6 +55,14 @@ function targetZone(state: LayoutDragState, target: LayoutDropTarget): Box | nul
   if (!pane) return null;
   const { rect } = pane;
   if (target.kind === "into") {
+    if (pane.tabRow) {
+      return box({
+        left: pane.tabRow.left - ZONE_INSET / 2,
+        top: pane.tabRow.top - ZONE_INSET / 2,
+        right: pane.tabRow.right + ZONE_INSET / 2,
+        bottom: pane.tabRow.bottom + ZONE_INSET / 2,
+      });
+    }
     return box({
       left: rect.left + ZONE_INSET / 2,
       top: rect.top + ZONE_INSET / 2,

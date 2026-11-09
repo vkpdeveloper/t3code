@@ -17,7 +17,7 @@ import { cn, isMacPlatform } from "../lib/utils";
 import { sidewaysWheelScrollsStrip, wheelDeltaPx } from "../motion/gesture";
 import { usePaneMotion } from "../motion/paneMotion";
 import {
-  PanelAnimationSuppressionProvider,
+  ChatPanelAnimationSuppressionProvider,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import {
@@ -789,15 +789,17 @@ export function LayoutSurfaceHost({
     if (scroller.clientWidth !== viewportWidth) return;
     const left = focusedLeft;
     const right = left + focusedWidth;
-    const viewLeft = scroller.scrollLeft;
-    const viewRight = viewLeft + scroller.clientWidth;
-    let target: number | null = null;
-    if (left < viewLeft - 1) target = left;
-    else if (right > viewRight + 1) target = Math.min(left, right - scroller.clientWidth);
-    if (target === null) return;
-    // The scroll lands at once and the stage springs there on the compositor,
-    // so the composer's caret scroll, right after, finds the pane in place.
-    moveStripCamera(scroller, element, target);
+    return afterPressRelease(() => {
+      const viewLeft = scroller.scrollLeft;
+      const viewRight = viewLeft + scroller.clientWidth;
+      let target: number | null = null;
+      if (left < viewLeft - 1) target = left;
+      else if (right > viewRight + 1) target = Math.min(left, right - scroller.clientWidth);
+      if (target === null) return;
+      // The scroll lands at once and the stage springs there on the compositor,
+      // so the composer's caret scroll, right after, finds the pane in place.
+      moveStripCamera(scroller, element, target);
+    });
   }, [dragging, focusedLeft, focusedPaneId, focusedWidth, stacked, staged, viewportWidth]);
 
   useStripResizeScroll(
@@ -898,7 +900,7 @@ export function LayoutSurfaceHost({
     if (column) lastFocusedPaneByColumn.current.set(column.id, focusedPaneId);
   }, [focusedPaneId, workspace]);
 
-  // The sidebar highlights every thread on screen (pen r45lm). Derived from
+  // The sidebar keeps every thread on screen from receding. Derived from
   // the slots and the strip's settled scroll position, never per frame.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to settled strip scrolling and publishes the DOM-visible panes to the shared layout registry
   useEffect(() => {
@@ -1144,7 +1146,25 @@ export function LayoutSurfaceHost({
     shown.workspaces.length > 1 && shown.workspaces[0]!.columns.length === 0
       ? shown.workspaces[0]!.id
       : null;
-  const emptyRows = staged ? stage.rows.filter((row) => row.workspace.columns.length === 0) : [];
+  const emptyRows = staged
+    ? stage.rows
+        .filter((row) => row.workspace.columns.length === 0)
+        .map((row) => ({
+          id: row.workspace.id,
+          style: overviewSlotStyle(row, FULL_SLOT, stage.gap, HALF_PANE_GAP),
+          active: false,
+        }))
+    : stacked && workspaceStack
+      ? stackRows
+          .filter((row) => row.slots.length === 0)
+          .map((row) => ({
+            id: row.id,
+            style: stackSlotStyle(row, FULL_SLOT, workspaceStack.gap),
+            active: false,
+          }))
+      : emptyWorkspace
+        ? [{ id: workspace.id, style: FULL_STYLE, active }]
+        : [];
   const pageTabs = shown.workspaces.flatMap((candidate) =>
     candidate.columns.flatMap((column) =>
       column.panes.flatMap((pane) => pane.tabs.filter((tab) => isLayoutPageContent(tab.content))),
@@ -1354,33 +1374,15 @@ export function LayoutSurfaceHost({
               overview={staged}
             />
           ))}
-          {staged ? (
-            emptyRows.map((row) => (
-              <LayoutEmptyWorkspace
-                key={row.workspace.id}
-                style={overviewSlotStyle(row, FULL_SLOT, stage.gap, HALF_PANE_GAP)}
-                top={row.workspace.id === topEmptyId}
-                active={false}
-              />
-            ))
-          ) : stacked && workspaceStack ? (
-            stackRows
-              .filter((row) => row.slots.length === 0)
-              .map((row) => (
-                <LayoutEmptyWorkspace
-                  key={row.id}
-                  style={stackSlotStyle(row, FULL_SLOT, workspaceStack.gap)}
-                  top={row.id === topEmptyId}
-                  active={false}
-                />
-              ))
-          ) : emptyWorkspace ? (
+          {emptyRows.map((row) => (
             <LayoutEmptyWorkspace
-              style={FULL_STYLE}
-              top={workspace.id === topEmptyId}
-              active={active}
+              key={row.id}
+              workspaceId={row.id}
+              style={row.style}
+              top={row.id === topEmptyId}
+              active={row.active}
             />
-          ) : null}
+          ))}
           {staged ? (
             <OverviewStageOverlay layout={shown} stage={stage} phase={overviewPhase} />
           ) : null}
@@ -1476,8 +1478,8 @@ function LayoutChatSurface({
     paneId,
     // Staged, every pane draws its own; a window-fixed header cluster would
     // land in the stage's corner, over whichever workspace sits on top.
-    split: split || staged,
-    narrow,
+    split: visible && (split || staged),
+    narrow: visible && narrow,
     leadingEdge,
     trailingEdge,
     focused: focused && !background,
@@ -1488,9 +1490,7 @@ function LayoutChatSurface({
   // events are left alone so a pane's own autofocus cannot steal focus.
   const claimFocus = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
-    const store = useLayoutStore.getState();
-    if (selectFocusedTab(store.layout)?.id === tab.id) return;
-    store.focusTab(tab.id);
+    claimPaneFocus(tab.id);
   };
 
   return (
@@ -1628,7 +1628,7 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
     return registerWaitingChat(tabId, () => setRendered(true));
   }, [rendered, tabId]);
   return (
-    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
+    <ChatPanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <LayoutPaneContext value={paneState}>
         {rendered ? (
           <ThreadRouteView
@@ -1658,7 +1658,7 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
           <div aria-hidden className="min-h-0 min-w-0 flex-1 bg-background" />
         )}
       </LayoutPaneContext>
-    </PanelAnimationSuppressionProvider>
+    </ChatPanelAnimationSuppressionProvider>
   );
 });
 
@@ -1710,10 +1710,6 @@ function LayoutSurfaceTabSurface({
   // Focus that lands on the pane (cmd+J, alt+cmd+B, a launcher's letter, a
   // click on its tab) moves the keyboard in.
   usePaneKeyboard(slotRef, focused && !staged, surfaceKeyboardTarget);
-  const claimFocus = () => {
-    const store = useLayoutStore.getState();
-    if (selectFocusedTab(store.layout)?.id !== tabId) store.focusTab(tabId);
-  };
   return (
     <div
       ref={slotRef}
@@ -1728,7 +1724,7 @@ function LayoutSurfaceTabSurface({
       )}
       style={placed.style}
       inert={staged}
-      onPointerDownCapture={claimFocus}
+      onPointerDownCapture={() => claimPaneFocus(tabId)}
     >
       <LayoutPaneContext value={paneState}>
         {near ? (
@@ -1786,6 +1782,39 @@ function usePaneKeyboard(
   }, [focused, handBack, paneRef, target]);
 }
 
+let pressRelease: Set<() => void> | null = null;
+
+function claimPaneFocus(tabId: string): void {
+  const store = useLayoutStore.getState();
+  if (selectFocusedTab(store.layout)?.id === tabId) return;
+  holdCameraUntilRelease();
+  store.focusTab(tabId);
+}
+
+function holdCameraUntilRelease(): void {
+  if (pressRelease) return;
+  const waiting = new Set<() => void>();
+  pressRelease = waiting;
+  const release = () => {
+    window.removeEventListener("pointerup", release, true);
+    window.removeEventListener("pointercancel", release, true);
+    pressRelease = null;
+    for (const run of waiting) run();
+  };
+  window.addEventListener("pointerup", release, true);
+  window.addEventListener("pointercancel", release, true);
+}
+
+function afterPressRelease(run: () => void): (() => void) | undefined {
+  const waiting = pressRelease;
+  if (!waiting) {
+    run();
+    return;
+  }
+  waiting.add(run);
+  return () => waiting.delete(run);
+}
+
 /** Preserve focus held outside the strip unless explicitly handed back. An unready pane releases the
  * old keyboard target before it can receive more input. */
 function moveDomFocusInto(pane: HTMLElement, target: HTMLElement | null, handedBack = false): void {
@@ -1836,10 +1865,12 @@ function PaneCuts() {
  * or a drop, lands here.
  */
 function LayoutEmptyWorkspace({
+  workspaceId,
   style,
   top,
   active,
 }: {
+  workspaceId: string;
   style: React.CSSProperties;
   top: boolean;
   /** The strip's own empty workspace, not one under the overview or mid-switch. */
@@ -1878,7 +1909,7 @@ function LayoutEmptyWorkspace({
   return (
     <div
       ref={paneRef}
-      data-layout-empty-workspace=""
+      data-layout-empty-workspace={workspaceId}
       className={cn(
         "absolute flex flex-col",
         // Under the overview or mid-switch it draws its own pane, as panes do there.
@@ -1948,10 +1979,6 @@ function LayoutLauncherSurface({
     related: false,
     visible: true,
   } satisfies LayoutPaneState;
-  const claimFocus = () => {
-    const store = useLayoutStore.getState();
-    if (selectFocusedTab(store.layout)?.id !== tabId) store.focusTab(tabId);
-  };
   // Focus that lands on an open launcher (alt+cmd arrows, the overview) moves
   // the keyboard in; a new one takes it as it mounts (useLauncherElement).
   const launcherSlotRef = useRef<HTMLDivElement | null>(null);
@@ -1971,7 +1998,7 @@ function LayoutLauncherSurface({
       )}
       style={placed.style}
       inert={staged || closing}
-      onPointerDownCapture={claimFocus}
+      onPointerDownCapture={() => claimPaneFocus(tabId)}
     >
       <LayoutPaneContext value={paneState}>
         {near ? <LayoutLauncherPane tabId={tabId} context={context} /> : null}
@@ -2021,10 +2048,6 @@ function LayoutPageSurface({
   } satisfies LayoutPaneState;
   const settingsRef = useRef<HTMLDivElement | null>(null);
   usePaneKeyboard(settingsRef, focused && !staged, settingsKeyboardTarget);
-  const claimFocus = () => {
-    const store = useLayoutStore.getState();
-    if (selectFocusedTab(store.layout)?.id !== tabId) store.focusTab(tabId);
-  };
   return (
     <div
       ref={settingsRef}
@@ -2042,7 +2065,7 @@ function LayoutPageSurface({
       )}
       style={placed?.style}
       inert={!visible || staged}
-      onPointerDownCapture={claimFocus}
+      onPointerDownCapture={() => claimPaneFocus(tabId)}
     >
       <LayoutPaneContext value={paneState}>{children}</LayoutPaneContext>
       {split && !staged ? <PaneCuts /> : null}

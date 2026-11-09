@@ -127,7 +127,7 @@ export type LayoutDirection = "left" | "right" | "up" | "down";
 
 export type LayoutTabDestination =
   | { kind: "pane"; paneId: string; index?: number }
-  | { kind: "split"; paneId: string; side: LayoutDirection }
+  | { kind: "split"; paneId: string; side: LayoutDirection; exact?: boolean }
   | { kind: "column"; workspaceId: string; index: number };
 
 export type LayoutOpenPlacement = "active-pane" | "new-column" | "split-down";
@@ -869,16 +869,15 @@ export function focusLayoutWorkspaceStep(state: LayoutState, delta: 1 | -1): Lay
 
 /**
  * Move the focused tab to the end of the workspace below or above; focus
- * follows. Below the last
- * workspace is the empty one, so this is also how a thread gets a new
- * workspace of its own.
+ * follows. Below the last workspace is the empty one, and above the first a
+ * new one opens, so this is also how a thread gets a workspace of its own.
  */
 export function moveLayoutTabToWorkspace(state: LayoutState, delta: 1 | -1): LayoutState {
   const chat = selectFocusedChatTab(state);
   if (!chat) return state;
   const index = state.workspaces.indexOf(chat.workspace);
   const target = state.workspaces[index + delta];
-  if (!target) return state;
+  if (!target) return delta === -1 ? moveLayoutTabToNewWorkspace(state, chat.tab.id, 0) : state;
   // A workspace's only chat moving into the empty one would just trade places.
   const tabsInWorkspace = chat.workspace.columns
     .flatMap((column) => column.panes)
@@ -1113,6 +1112,7 @@ function splitPaneWithTab(
   paneId: string,
   side: LayoutDirection,
   tab: LayoutTab,
+  exact = false,
 ): LayoutState {
   const found = findPane(state, paneId);
   if (!found) return state;
@@ -1122,7 +1122,7 @@ function splitPaneWithTab(
     const insertIndex =
       side === "left"
         ? columnIndex
-        : (tab.content.kind !== "surface"
+        : (tab.content.kind !== "surface" && !exact
             ? companionRunEnd(found.workspace, columnIndex)
             : columnIndex) + 1;
     // A horizontal split adds a full-width column without resizing its source.
@@ -1535,7 +1535,9 @@ export function moveLayoutTab(
     );
   }
   if (destination.kind === "split") {
-    return normalizeLayout(splitPaneWithTab(detached, destination.paneId, destination.side, tab));
+    return normalizeLayout(
+      splitPaneWithTab(detached, destination.paneId, destination.side, tab, destination.exact),
+    );
   }
   // As in niri, a moved window keeps its column's width.
   return insertColumn(
@@ -1568,7 +1570,9 @@ export function placeLayoutContent(
     );
   }
   if (destination.kind === "split") {
-    return normalizeLayout(splitPaneWithTab(state, destination.paneId, destination.side, tab));
+    return normalizeLayout(
+      splitPaneWithTab(state, destination.paneId, destination.side, tab, destination.exact),
+    );
   }
   if (!state.workspaces.some((workspace) => workspace.id === destination.workspaceId)) {
     return state;

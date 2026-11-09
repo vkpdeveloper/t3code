@@ -6,6 +6,7 @@ import {
   removeEnvironmentSpeechModel,
   selectEnvironmentSpeechModel,
   updateEnvironmentSpeechAcceleration,
+  updateEnvironmentSpeechModelDirectories,
   updateEnvironmentSpeechModelUnloadTimeout,
 } from "@t3tools/client-runtime/voice-input";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
@@ -277,7 +278,7 @@ function ModelCard(props: ModelCardProps) {
             Use model
           </Button>
         )}
-        {model.state === "installed" ? (
+        {model.state === "installed" && !model.shared ? (
           <Button
             size="icon-sm"
             variant="ghost"
@@ -676,6 +677,79 @@ function useVoiceModels(prepared: PreparedConnection | null) {
 
 type VoiceModels = ReturnType<typeof useVoiceModels>;
 
+function ModelFolderSettings({
+  prepared,
+  catalog,
+}: {
+  prepared: PreparedConnection;
+  catalog: VoiceModels;
+}) {
+  const [draft, setDraft] = useState("");
+  const { status, run, controlsDisabled } = catalog;
+  if (!status?.supported || status.modelDirectories === undefined) return null;
+  const directories = status.modelDirectories;
+  const valid = /^(\/|\\\\|[A-Za-z]:[/\\])/.test(draft.trim());
+  const save = (next: string[], onSuccess?: () => void) =>
+    run("Could not update model folders", async () => {
+      await runEnvironmentSpeech(updateEnvironmentSpeechModelDirectories(prepared, next));
+      onSuccess?.();
+    });
+  const add = () => {
+    if (!valid || controlsDisabled || directories.length >= 20) return;
+    void save([...directories, draft.trim()], () => setDraft(""));
+  };
+  return (
+    <SettingsRow
+      {...searchableSetting("speech-model-folders")}
+      title="Model folders"
+      description="Look for downloaded models in folders on this environment. T3 Code never changes files there."
+      control={
+        <div className="flex w-full max-w-80 items-center gap-1.5">
+          <Input
+            size="settings"
+            value={draft}
+            placeholder="Add a folder path"
+            aria-label="Add a model folder"
+            disabled={controlsDisabled}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                add();
+              }
+            }}
+          />
+          <Button
+            size="standard"
+            disabled={controlsDisabled || !valid || directories.length >= 20}
+            onClick={add}
+          >
+            Add
+          </Button>
+        </div>
+      }
+    >
+      {directories.length > 0 && (
+        <div aria-label="Model folders" className="mt-3 flex flex-wrap gap-1.5">
+          {directories.map((directory) => (
+            <Button
+              key={directory}
+              size="xs"
+              variant="secondary"
+              disabled={controlsDisabled}
+              aria-label={`Remove folder ${directory}`}
+              onClick={() => void save(directories.filter((entry) => entry !== directory))}
+            >
+              {directory}
+              <XIcon className="size-3" />
+            </Button>
+          ))}
+        </div>
+      )}
+    </SettingsRow>
+  );
+}
+
 function AdvancedSpeechSettings({
   prepared,
   catalog,
@@ -705,7 +779,12 @@ function AdvancedSpeechSettings({
                 );
             }}
           >
-            <SelectTrigger size="sm" aria-label="Transcription hardware" className="max-w-72">
+            <SelectTrigger
+              variant="well"
+              size="compact"
+              aria-label="Transcription hardware"
+              className="max-w-72"
+            >
               <SelectValue>
                 {supported.acceleration === "auto"
                   ? "Auto"
@@ -747,7 +826,12 @@ function AdvancedSpeechSettings({
                 );
             }}
           >
-            <SelectTrigger size="sm" aria-label="Unload model" className="max-w-72">
+            <SelectTrigger
+              variant="well"
+              size="compact"
+              aria-label="Unload model"
+              className="max-w-72"
+            >
               <SelectValue>{UNLOAD_LABELS[supported.modelUnloadTimeout]}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1230,7 +1314,12 @@ export function VoiceSettingsPanel() {
                       });
                   }}
                 >
-                  <SelectTrigger size="sm" aria-label="Microphone" className="max-w-64">
+                  <SelectTrigger
+                    variant="well"
+                    size="compact"
+                    aria-label="Microphone"
+                    className="max-w-64"
+                  >
                     <SelectValue>{selectedMicrophoneLabel}</SelectValue>
                   </SelectTrigger>
                   <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1267,7 +1356,12 @@ export function VoiceSettingsPanel() {
                   void updateClientSettings({ voiceShortcutMode: value as VoiceShortcutMode });
               }}
             >
-              <SelectTrigger size="sm" aria-label="Dictation shortcut mode" className="max-w-72">
+              <SelectTrigger
+                variant="well"
+                size="compact"
+                aria-label="Dictation shortcut mode"
+                className="max-w-72"
+              >
                 <SelectValue>{SHORTCUT_MODE_LABELS[settings.voiceShortcutMode]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1316,7 +1410,8 @@ export function VoiceSettingsPanel() {
                 }}
               >
                 <SelectTrigger
-                  size="sm"
+                  variant="well"
+                  size="compact"
                   aria-label="Transcribe with"
                   className="w-auto min-w-0 max-w-72"
                 >
@@ -1473,6 +1568,13 @@ export function VoiceSettingsPanel() {
             }
           />
         ) : null}
+        {prepared && (
+          <ModelFolderSettings
+            key={`folders:${prepared.environmentId}`}
+            prepared={prepared}
+            catalog={catalog}
+          />
+        )}
         {prepared ? (
           <SpeechModelBrowser
             key={prepared.environmentId}
@@ -1572,7 +1674,12 @@ export function VoiceSettingsPanel() {
                     });
                 }}
               >
-                <SelectTrigger size="sm" aria-label="Cleanup instructions" className="max-w-64">
+                <SelectTrigger
+                  variant="well"
+                  size="compact"
+                  aria-label="Cleanup instructions"
+                  className="max-w-64"
+                >
                   <SelectValue>
                     {settings.speechPostProcessingPrompt.mode === "custom" ? "Custom" : "Built-in"}
                   </SelectValue>
@@ -1613,6 +1720,7 @@ export function VoiceSettingsPanel() {
             description="The word or phrase you say to flag a correction, like “sorry” or “scratch that”. Cleanup applies the correction only where one is meant, and hears the cue as a hint."
             control={
               <Input
+                size="settings"
                 key={settings.speechCorrectionWord}
                 defaultValue={settings.speechCorrectionWord}
                 maxLength={50}

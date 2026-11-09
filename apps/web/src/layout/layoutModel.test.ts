@@ -6,11 +6,13 @@ import {
   createLayoutState,
   ghostLoneLayoutChats,
   layoutChatSwaps,
+  moveLayoutTabToWorkspace,
   openLayoutGhostChat,
   openLayoutKeptTab,
   openLayoutTab,
   replaceLayoutTabContent,
   selectFocusedTab,
+  selectFocusedWorkspace,
   showLayoutContent,
   type LayoutState,
   type LayoutTab,
@@ -305,5 +307,31 @@ describe("layoutChatSwaps", () => {
         ({ from, to }) => `${name(from)}>${name(to)}`,
       ),
     ).toEqual(swaps);
+  });
+});
+
+function tabContents(state: LayoutState) {
+  return state.workspaces.map((workspace) =>
+    workspace.columns
+      .flatMap((column) => column.panes)
+      .flatMap((pane) => pane.tabs.map((tab) => tab.content)),
+  );
+}
+
+describe("moveLayoutTabToWorkspace", () => {
+  it("moves the top workspace's tab into a new workspace above it", () => {
+    const first = chatOf("first");
+    const second = chatOf("second");
+    const state = [first, second].reduce(
+      (layout, content) =>
+        openLayoutTab(layout, content, { placement: "active-pane", position: "end" }),
+      createLayoutState(),
+    );
+
+    const moved = moveLayoutTabToWorkspace(state, -1);
+
+    expect(tabContents(moved)).toEqual([[second], [first], []]);
+    expect(selectFocusedWorkspace(moved)).toBe(moved.workspaces[0]);
+    expect(selectFocusedTab(moved)?.content).toBe(second);
   });
 });

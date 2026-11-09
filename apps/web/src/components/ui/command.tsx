@@ -208,10 +208,15 @@ function CommandGroup({ className, ...props }: React.ComponentProps<typeof Autoc
 
 function CommandGroupLabel({
   className,
+  tone = "default",
   ...props
-}: React.ComponentProps<typeof AutocompleteGroupLabel>) {
+}: React.ComponentProps<typeof AutocompleteGroupLabel> & { tone?: "default" | "muted" }) {
   return (
-    <AutocompleteGroupLabel className={className} data-slot="command-group-label" {...props} />
+    <AutocompleteGroupLabel
+      className={cn(tone === "muted" && "text-muted-foreground", className)}
+      data-slot="command-group-label"
+      {...props}
+    />
   );
 }
 

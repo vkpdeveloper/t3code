@@ -87,6 +87,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
+import { RunningFor } from "./RunningFor";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
@@ -168,6 +169,7 @@ function WorkingTimer({ createdAt, clock = false }: { createdAt: string; clock?:
 }
 
 const compactWorkEntryHeight = 24;
+const expandedWorkEntryHeight = 28;
 
 function ExpandedWorkGroupEntries({
   anchorKey,
@@ -259,7 +261,9 @@ function ExpandedWorkGroupEntries({
   }, [updateScrollFades]);
 
   const renderEntry = ({ item }: { item: TimelineWorkEntry }) => (
-    <SimpleWorkEntryRow key={item.id} workEntry={item} workspaceRoot={workspaceRoot} />
+    <div className="min-h-7">
+      <SimpleWorkEntryRow key={item.id} workEntry={item} workspaceRoot={workspaceRoot} />
+    </div>
   );
 
   const updateExpandedContentHeight = () => {
@@ -269,7 +273,7 @@ function ExpandedWorkGroupEntries({
       if (state?.indexByKey(entryId) === undefined) continue;
       height += Math.max(
         0,
-        (state.sizes.get(entryId) ?? compactWorkEntryHeight) - compactWorkEntryHeight,
+        (state.sizes.get(entryId) ?? expandedWorkEntryHeight) - expandedWorkEntryHeight,
       );
     }
     setExpandedContentHeight(height);
@@ -287,7 +291,7 @@ function ExpandedWorkGroupEntries({
           extraData={workspaceRoot}
           keyExtractor={workEntryKey}
           renderItem={renderEntry}
-          estimatedItemSize={compactWorkEntryHeight}
+          estimatedItemSize={expandedWorkEntryHeight}
           drawDistance={240}
           recycleItems
           {...(initialScrollIndex ? { initialScrollIndex } : {})}
@@ -699,20 +703,22 @@ function WorkGroupHeader(props: {
   onToggle: () => void;
 }) {
   return (
-    <WorkLogButton
-      aria-label={props.failed ? `${props.label}, tool call failed` : props.label}
-      aria-expanded={props.expanded}
-      onClick={props.onToggle}
-      icon={
-        <ToolActivityIconView
-          icon={props.toolIcon}
-          fallbackName={props.iconName}
-          className="size-3.5 shrink-0 stroke-2 text-muted-foreground"
-          muted
-        />
-      }
-      label={<span className="block truncate text-secondary-label">{props.label}</span>}
-    />
+    <div className="pb-2">
+      <WorkLogButton
+        aria-label={props.failed ? `${props.label}, tool call failed` : props.label}
+        aria-expanded={props.expanded}
+        onClick={props.onToggle}
+        icon={
+          <ToolActivityIconView
+            icon={props.toolIcon}
+            fallbackName={props.iconName}
+            className="size-3.5 shrink-0 stroke-2 text-muted-foreground"
+            muted
+          />
+        }
+        label={<span className="block truncate text-secondary-label">{props.label}</span>}
+      />
+    </div>
   );
 }
 
@@ -823,7 +829,7 @@ function WorkingWindowText({
   const textRef = useCarriedTextFade(item.message.id);
   if (text.trim().length === 0) return null;
   return (
-    <div ref={textRef} className="min-w-0 py-2">
+    <div ref={textRef} className="min-w-0 px-1 py-2">
       <AssistantCitationSource
         messageId={item.message.id}
         {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
@@ -869,9 +875,19 @@ const WorkingWindowItemView = memo(function WorkingWindowItemView({
     if (entry.itemType === "approval_request" || entry.itemType === "user_input_request") {
       return <WorkingRequestRow entry={entry} />;
     }
+    const label = liveWorkEntryLabel(entry, ctx.workspaceRoot, true);
     return (
       <LiveActivityRow
-        label={liveWorkEntryLabel(entry, ctx.workspaceRoot, true)}
+        label={
+          entry.itemType === "command_execution" && entry.command?.trim() ? (
+            <>
+              {label}
+              <RunningFor startedAt={entry.createdAt} />
+            </>
+          ) : (
+            label
+          )
+        }
         iconName={workEntryIconName(entry)}
         toolIcon={entry.toolIcon ?? entry.toolSource?.icon}
         active={current}
@@ -919,20 +935,37 @@ function WorkingWindowView({
     if (open) return;
     setCollapseClips((windowRef.current?.scrollHeight ?? 0) > WORKING_WINDOW_COLLAPSED_HEIGHT);
   }, [open]);
-  const { onWorkingHistoryCollapsing } = ctx;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- older items stay mounted, and the timeline stops following its end, until the collapse transition finishes
+  const { onWorkingHistoryMoving, onWorkingHistorySettled } = ctx;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the timeline holds off following its end until the open transition finishes
   useEffect(() => {
-    if (open || history === null) return;
-    onWorkingHistoryCollapsing(true);
+    if (!open) return;
+    onWorkingHistoryMoving(true);
     let cancelled = false;
     void transitionsSettled(windowRef.current).then(() => {
-      if (!cancelled) setHistory(null);
+      if (cancelled) return;
+      onWorkingHistoryMoving(false);
+      onWorkingHistorySettled();
     });
     return () => {
       cancelled = true;
-      onWorkingHistoryCollapsing(false);
+      onWorkingHistoryMoving(false);
     };
-  }, [open, history, onWorkingHistoryCollapsing]);
+  }, [open, onWorkingHistoryMoving, onWorkingHistorySettled]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- older items stay mounted, and the timeline stops following its end, until the collapse transition finishes
+  useEffect(() => {
+    if (open || history === null) return;
+    onWorkingHistoryMoving(true);
+    let cancelled = false;
+    void transitionsSettled(windowRef.current).then(() => {
+      if (cancelled) return;
+      onWorkingHistorySettled();
+      setHistory(null);
+    });
+    return () => {
+      cancelled = true;
+      onWorkingHistoryMoving(false);
+    };
+  }, [open, history, onWorkingHistoryMoving, onWorkingHistorySettled]);
   const head = history?.head;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as the timeline scroll brings them near the viewport
   useEffect(() => {

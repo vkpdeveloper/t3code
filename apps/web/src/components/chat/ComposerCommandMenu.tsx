@@ -160,11 +160,6 @@ function composerCommandItemGroup(
   }
 }
 
-/**
- * Splits a ranked menu list into labelled groups. Groups appear in the order of their best
- * item and keep the ranking inside, so the top match stays first and highlighted. Callers
- * flatten the groups to get the arrow-key order, which then matches what the menu shows.
- */
 export function groupComposerCommandItems(
   items: ReadonlyArray<ComposerCommandItem>,
   triggerKind: ComposerTriggerKind | null,
@@ -179,7 +174,12 @@ export function groupComposerCommandItems(
       groups.set(group.key, { ...group, items: [item] });
     }
   }
-  return [...groups.values()];
+  const ordered = [...groups.values()];
+  if (triggerKind === "path") {
+    const order = ["threads", "environments", "paths"];
+    ordered.sort((left, right) => order.indexOf(left.key) - order.indexOf(right.key));
+  }
+  return ordered;
 }
 
 const SLASH_COMMAND_ICONS: Record<ComposerSlashCommand, LucideIcon> = {
@@ -244,7 +244,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
           >
             {pullRequestsPending ? (
               <CommandGroup>
-                <CommandGroupLabel>Pull requests</CommandGroupLabel>
+                <CommandGroupLabel tone="muted">Pull requests</CommandGroupLabel>
                 <div
                   role="status"
                   className="flex min-h-8 items-center gap-2 px-2 text-meta text-dim-foreground"
@@ -256,7 +256,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             ) : null}
             {groups.map((group) => (
               <CommandGroup key={group.key}>
-                <CommandGroupLabel>{group.label}</CommandGroupLabel>
+                <CommandGroupLabel tone="muted">{group.label}</CommandGroupLabel>
                 {group.items.map((item) => (
                   <ComposerCommandMenuItem
                     key={item.id}

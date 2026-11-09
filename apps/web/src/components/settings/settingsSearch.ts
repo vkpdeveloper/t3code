@@ -162,7 +162,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    heading: null,
+    heading: "Application",
     paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
   },
 ];
@@ -666,6 +666,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "speech voice stt download whisper parakeet canary moonshine accuracy speed benchmark languages",
     ],
+  },
+  {
+    id: "speech-model-folders",
+    title: "Model folders",
+    to: "/settings/voice",
+    searchTerms: ["speech voice local models folder directory path reuse hex handy"],
   },
   {
     id: "speech-hardware",

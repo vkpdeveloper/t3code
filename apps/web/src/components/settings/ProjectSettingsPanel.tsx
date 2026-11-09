@@ -115,7 +115,8 @@ function CheckoutGroupingSelect({ member }: { member: SidebarProjectGroupMember 
       }}
     >
       <SelectTrigger
-        size="sm"
+        variant="well"
+        size="compact"
         title={
           selection === "inherit"
             ? `Default (${PROJECT_GROUPING_MODE_LABELS[globalMode]})`
@@ -604,7 +605,7 @@ function ProjectDetail({
             control={
               <Input
                 key={`${group.projectKey}:${group.displayName}`}
-                size="sm"
+                size="settings"
                 className="w-full sm:w-50"
                 aria-label="Project name"
                 disabled={!canEditGroup}
