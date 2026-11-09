@@ -14,8 +14,7 @@ import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { HttpClient, HttpClientRequest } from "effect/http";
-import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import type * as Undici from "undici";
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
@@ -489,8 +488,9 @@ const make = Effect.gen(function* () {
   return OriginCli.of({ execute, api, viewer, personalNamespace, resolveRepository });
 });
 
-// undici is external to the CLI bundle; Node single-executables can load it from disk only with require.
-const { Agent } = NodeModule.createRequire(import.meta.url)("undici") as typeof Undici;
+// undici is external to the CLI bundle; Node single-executables can load it from disk only with
+// require. NodeHttpClient's undici layer imports it statically, so requests go through undici's fetch.
+const undici = NodeModule.createRequire(import.meta.url)("undici") as typeof Undici;
 
 /**
  * Origin answers from a few hundred milliseconds away, so a new TLS connection doubles a request.
@@ -498,15 +498,28 @@ const { Agent } = NodeModule.createRequire(import.meta.url)("undici") as typeof 
  * request always outlasts; Origin keeps one open for minutes, and HTTP/2 carries a detail's
  * parallel reads on it at once.
  */
-const httpClientLayer = NodeHttpClient.layerUndiciNoDispatcher.pipe(
+const httpClientLayer = FetchHttpClient.layer.pipe(
   Layer.provide(
-    Layer.effect(NodeHttpClient.Dispatcher)(
+    Layer.effect(FetchHttpClient.Fetch)(
       Effect.acquireRelease(
         Effect.sync(
           () =>
-            new Agent({ allowH2: true, keepAliveTimeout: 300_000, keepAliveMaxTimeout: 300_000 }),
+            new undici.Agent({
+              allowH2: true,
+              keepAliveTimeout: 300_000,
+              keepAliveMaxTimeout: 300_000,
+            }),
         ),
         (agent) => Effect.promise(() => agent.destroy()),
+      ).pipe(
+        Effect.map(
+          (agent): typeof globalThis.fetch =>
+            (input, init) =>
+              undici.fetch(input as Undici.RequestInfo, {
+                ...(init as Undici.RequestInit),
+                dispatcher: agent,
+              }) as unknown as Promise<Response>,
+        ),
       ),
     ),
   ),
