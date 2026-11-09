@@ -615,7 +615,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     const list = listRef.current;
     if (list) {
       list.cancelScroll();
-      list.anchorVisibleContent({ key: "working-indicator-row" });
+      if (workingHistoryKey !== key) list.anchorVisibleContent({ key: "working-indicator-row" });
     }
     setWorkingHistoryKey((current) => (current === key ? null : key));
   };
@@ -1709,6 +1709,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   : maintainVisibleContentPosition
               }
               maintainScrollAtEndThreshold={1}
+              immediateWebShrinks={workingHistoryCollapsing}
               onScroll={handleScroll}
               onItemSizeChanged={scheduleMinimapRefresh}
               onMetricsChange={scheduleMinimapRefresh}
