@@ -3,6 +3,8 @@
  * over one long-lived HTTP/2 connection: spawning the CLI per request costs about 0.8s, a warm
  * request about 0.2s.
  */
+import * as NodeModule from "node:module";
+
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -14,7 +16,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
-import { Agent } from "@effect/platform-node/Undici";
+import type * as Undici from "undici";
 import { collectUint8StreamText } from "@t3tools/provider-core/server/collectStreamText";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { parseGitRemoteHost } from "@t3tools/source-control-core/shared/definition";
@@ -486,6 +488,9 @@ const make = Effect.gen(function* () {
 
   return OriginCli.of({ execute, api, viewer, personalNamespace, resolveRepository });
 });
+
+// undici is external to the CLI bundle; Node single-executables can load it from disk only with require.
+const { Agent } = NodeModule.createRequire(import.meta.url)("undici") as typeof Undici;
 
 /**
  * Origin answers from a few hundred milliseconds away, so a new TLS connection doubles a request.
