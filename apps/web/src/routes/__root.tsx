@@ -18,8 +18,9 @@ import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { GuestShareDialogHost } from "../components/chat/GuestShareControls";
+import { UseInAnotherAppDialogHost } from "../components/mcp/UseInAnotherAppDialog";
 import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachineDialog";
-import { WelcomeWizardCoordinator } from "../components/onboarding/WelcomeWizardCoordinator";
+import { FirstRunRedirect } from "../components/onboarding/FirstRunRedirect";
 import { ClientSettingsRecoveryGate } from "../components/ClientSettingsRecoveryGate";
 import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
 import { DevReplayHost } from "../components/DevReplayHost";
@@ -168,7 +169,8 @@ function RootRouteBranch() {
 
   const appShell = (
     <CommandPalette>
-      <AppSidebarLayout>
+      {/* Setup starts with an empty workspace, so the Welcome page has no thread list. */}
+      <AppSidebarLayout showSidebar={pathname !== "/welcome"}>
         <Outlet />
       </AppSidebarLayout>
     </CommandPalette>
@@ -191,10 +193,11 @@ function RootRouteBranch() {
       <GuestShareDialogHost />
       <ProjectCloneToastCoordinator />
       <AddProjectToMachineDialogHost />
+      <UseInAnotherAppDialogHost />
       {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
       {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
       {appShell}
-      <WelcomeWizardCoordinator />
+      <FirstRunRedirect />
       <ChatGptWelcomeCoordinator />
       {/* Keep the theme editor above the router so drafts survive navigation. */}
       <ThemeEditorHost />

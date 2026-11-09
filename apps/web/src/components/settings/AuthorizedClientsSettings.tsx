@@ -3,6 +3,7 @@ import {
   CheckIcon,
   CopyIcon,
   MonitorIcon,
+  PlugIcon,
   QrCodeIcon,
   SmartphoneIcon,
   TabletIcon,
@@ -68,6 +69,7 @@ import { useManagedPolicy, usePrimaryManagedPolicy } from "~/state/managedPolicy
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ManagedControl } from "../ManagedPolicy";
 import { StatusDot } from "../ui/status-dot";
+import { openUseInAnotherApp } from "../mcp/UseInAnotherAppDialog";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import {
   formatAccessTimestamp,
@@ -685,14 +687,24 @@ export const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHead
 
   if (part === "revoke") {
     return (
-      <Button
-        size="standard"
-        variant="destructive-outline"
-        disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
-        onClick={() => void onRevokeOtherClients()}
-      >
-        {isRevokingOtherClients ? "Revoking…" : "Revoke others"}
-      </Button>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button
+          size="standard"
+          variant="secondary"
+          onClick={() => openUseInAnotherApp(environmentId)}
+        >
+          <PlugIcon />
+          Use in another app (MCP)
+        </Button>
+        <Button
+          size="standard"
+          variant="destructive-outline"
+          disabled={isRevokingOtherClients || !canRevokeOtherClients(clientSessions)}
+          onClick={() => void onRevokeOtherClients()}
+        >
+          {isRevokingOtherClients ? "Revoking…" : "Revoke others"}
+        </Button>
+      </div>
     );
   }
 

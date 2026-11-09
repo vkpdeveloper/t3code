@@ -1,52 +1,41 @@
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
-import { useState } from "react";
+import { useEffect } from "react";
 
-import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { useClientSettings, useClientSettingsHydrated } from "../../hooks/useSettings";
 import { SETUP_COMPLETED_KEY } from "../../onboarding/firstRun";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { WelcomeWizard } from "./WelcomeWizard";
 
-/** Only the empty home opens setup automatically; direct links always remain usable. */
-export function WelcomeWizardCoordinator() {
+/**
+ * Only the empty home opens the Welcome page automatically; direct links always remain usable.
+ * The page sets up this computer, so the hosted app without one never opens it.
+ */
+export function FirstRunRedirect() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const projects = useProjects();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const { isReady } = useEnvironments();
-  const [completed, setCompleted] = useLocalStorage(SETUP_COMPLETED_KEY, false, Schema.Boolean);
+  const [completed] = useLocalStorage(SETUP_COMPLETED_KEY, false, Schema.Boolean);
   const settingsHydrated = useClientSettingsHydrated();
   const onboardingCompletedAt = useClientSettings((settings) => settings.onboardingCompletedAt);
-  const navigate = useNavigate();
-  const openNewThread = useNewThreadHandler();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const [opened, setOpened] = useState(false);
+  const navigate = useNavigate();
   const shouldOpen =
     pathname === "/" &&
+    primaryEnvironmentId !== null &&
     !completed &&
     onboardingCompletedAt === null &&
     settingsHydrated &&
     isReady &&
     bootstrapped &&
     projects.length === 0;
-  if (!opened && shouldOpen) setOpened(true);
-  if (pathname !== "/" || (!opened && !shouldOpen)) return null;
-  return (
-    <WelcomeWizard
-      localAvailable={primaryEnvironmentId !== null}
-      onDone={async (projectRef) => {
-        setOpened(false);
-        setCompleted(true);
-        if (projectRef !== undefined) {
-          await openNewThread(projectRef, { replace: true }).catch(() =>
-            navigate({ to: "/", replace: true }),
-          );
-          return;
-        }
-        await navigate({ to: "/", replace: true });
-      }}
-    />
-  );
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- navigates from the empty home to /welcome once first-run evidence settles
+  useEffect(() => {
+    if (shouldOpen) void navigate({ to: "/welcome", replace: true });
+  }, [navigate, shouldOpen]);
+
+  return null;
 }
