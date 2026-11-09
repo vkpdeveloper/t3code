@@ -516,7 +516,7 @@ const httpClientLayer = FetchHttpClient.layer.pipe(
           (agent): typeof globalThis.fetch =>
             (input, init) =>
               undici.fetch(input as Undici.RequestInfo, {
-                ...(init as Undici.RequestInit),
+                ...(init as unknown as Undici.RequestInit),
                 dispatcher: agent,
               }) as unknown as Promise<Response>,
         ),
