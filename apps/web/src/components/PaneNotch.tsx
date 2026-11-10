@@ -193,14 +193,10 @@ export function PaneNotch({
   }, [connected, isMobile, marksHost, side]);
   return (
     <>
-      <span
-        aria-hidden
-        data-pane-notch-corner={side === "left" ? "" : side}
-        data-sidebar-slide-stay={side === "left" ? "" : undefined}
-      />
+      <span aria-hidden data-pane-notch-corner={side === "left" ? "" : side} />
       {side === "left" ? (
         <>
-          <span aria-hidden data-pane-bar-corner="start" data-sidebar-slide-stay="" />
+          <span aria-hidden data-pane-bar-corner="start" />
           <span aria-hidden data-pane-bar-corner="end" />
         </>
       ) : null}
