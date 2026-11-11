@@ -310,15 +310,15 @@ Claude instances can also compact idle threads for you. See
 
 ## Goals
 
-With Codex and Claude, send `/goal` followed by what "done" means, for example
+With Codex, Claude, and OpenCode 2.2.5 or later, send `/goal` followed by what "done" means, for example
 `/goal all tests in packages/api pass`. The agent keeps working across turns
 until it judges the goal met. The thread shows **Goal** while it works, and a
 line at the end of the thread (above the composer on mobile) shows the goal and
 its progress.
 
 - `/goal` alone shows the current goal. `/goal clear` removes it.
-- Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
-  pauses it, and so does Codex ending its work without meeting the goal.
+- Codex and OpenCode also support `/goal pause` and `/goal resume`. Stopping
+  their goal pauses it. Codex also pauses when its work ends without meeting the goal.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 - Sending a new goal, or `/goal resume`, while the agent works stops the current
@@ -346,8 +346,8 @@ the repository by text. Choose a result to insert it as a chip.
 
 Another thread can be context too. Type `@` followed by part of its title to pick one from
 the same server, or from a machine it links to while the Linked environments beta is on; those
-show the machine's name. Type `#` to list recent threads below pull requests. On web and desktop
-you can also drag a thread out of the sidebar and drop it on the composer; a multi-selection drops
+show the machine's name. On web and desktop, type `#` to list recent threads below pull requests.
+You can also drag a thread out of the sidebar and drop it on the composer; a multi-selection drops
 together. On any client, **Copy thread** copies a link to the thread that pastes into a composer
 as its chip. The chip shows the thread's current title and opens it when selected. Your prompt only
 carries a reference: the agent reads the thread's

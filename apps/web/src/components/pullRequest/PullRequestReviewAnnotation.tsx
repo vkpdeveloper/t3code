@@ -1,3 +1,4 @@
+import { pullRequestAnchorMatchesUrl } from "@t3tools/shared/pullRequestAnchor";
 import type {
   EnvironmentId,
   PullRequestDiffSide,
@@ -13,8 +14,10 @@ import {
   HammerIcon,
   MessageSquarePlusIcon,
   Trash2Icon,
+  CircleIcon,
+  CircleCheckIcon,
 } from "lucide-react";
-import { Circle, CircleCheck } from "lucide";
+
 import { useRef, useState } from "react";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
@@ -23,7 +26,6 @@ import { cn } from "~/lib/utils";
 import { SpeechTextField, TextFieldSpeechControls } from "~/speech/useTextFieldSpeech";
 
 import { Button, InlineButton } from "../ui/button";
-import { MorphIcon } from "~/components/MorphIcon";
 import { PullRequestEditButton } from "./PullRequestEditButton";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -36,7 +38,7 @@ import {
   mergePullRequestThreadComments,
   visibleBody,
 } from "./pullRequestDetail.logic";
-import { PullRequestActorLabel } from "./pullRequestPresentation";
+import { AddToChatIconButton, PullRequestActorLabel } from "./pullRequestPresentation";
 import { PullRequestCommentBody } from "./PullRequestCommentBody";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
@@ -174,6 +176,7 @@ function ReviewThreadLocation({ thread }: { thread: PullRequestReviewThread }) {
 export function ReviewThreadCard({
   thread,
   standalone = false,
+  revealAnchor,
   workspaceRoot,
   canReply,
   canResolve,
@@ -199,6 +202,7 @@ export function ReviewThreadCard({
    * shows the code it is about, and keeps a reply box open at its foot.
    */
   standalone?: boolean;
+  revealAnchor?: string | null;
   workspaceRoot: string;
   canReply: boolean;
   canResolve: boolean;
@@ -222,7 +226,22 @@ export function ReviewThreadCard({
   onToggleResolved: () => void;
   onReacted: () => void;
 }) {
-  const [expanded, setExpanded] = useState(!thread.isResolved);
+  const [expanded, setExpanded] = useState(
+    !thread.isResolved ||
+      Boolean(
+        revealAnchor &&
+        thread.comments.some((comment) => pullRequestAnchorMatchesUrl(revealAnchor, comment.url)),
+      ),
+  );
+  const [seenRevealAnchor, setSeenRevealAnchor] = useState(revealAnchor);
+  if (revealAnchor !== seenRevealAnchor) {
+    setSeenRevealAnchor(revealAnchor);
+    if (
+      revealAnchor &&
+      thread.comments.some((comment) => pullRequestAnchorMatchesUrl(revealAnchor, comment.url))
+    )
+      setExpanded(true);
+  }
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -311,7 +330,22 @@ export function ReviewThreadCard({
         <ReviewThreadLocation thread={thread} />
         <div className="space-y-3">
           {comments.map((comment, index) => (
-            <article key={comment.id} className={cn("group min-w-0", index > 0 && "ml-6")}>
+            <article
+              key={comment.id}
+              tabIndex={
+                revealAnchor && pullRequestAnchorMatchesUrl(revealAnchor, comment.url)
+                  ? -1
+                  : undefined
+              }
+              data-pr-link-target={
+                Boolean(revealAnchor && pullRequestAnchorMatchesUrl(revealAnchor, comment.url)) ||
+                undefined
+              }
+              className={cn(
+                "group min-w-0 data-[pr-link-target=true]:ring-1 data-[pr-link-target=true]:ring-primary/40",
+                index > 0 && "ml-6",
+              )}
+            >
               <div className="flex flex-wrap items-center gap-2 text-meta text-muted-foreground">
                 <PullRequestActorLabel actor={comment.author} />
                 <span>
@@ -322,6 +356,13 @@ export function ReviewThreadCard({
                     aria-label="Edit comment"
                     onClick={() => setEditingId(comment.id)}
                   />
+                ) : null}
+                {index === 0 &&
+                onAddToChat &&
+                comments.some((comment) => visibleBody(comment.body) !== null) ? (
+                  <span className="ml-auto">
+                    <AddToChatIconButton onClick={() => onAddToChat({ ...thread, comments })} />
+                  </span>
                 ) : null}
               </div>
               {editingId === comment.id ? (
@@ -340,6 +381,9 @@ export function ReviewThreadCard({
                 <PullRequestCommentBody
                   className="mt-1 min-w-0 text-body"
                   text={comment.body}
+                  revealCount={
+                    revealAnchor && pullRequestAnchorMatchesUrl(revealAnchor, comment.url) ? 1 : 0
+                  }
                   cwd={workspaceRoot}
                   environmentId={environmentId}
                 />
@@ -415,15 +459,18 @@ export function ReviewThreadCard({
 
   return (
     <div
-      className={cn(CARD_CLASS, "[--surface-tint-rim:var(--popover-rim)]")}
+      className={cn(CARD_CLASS, "[--surface-tint-rim:var(--popover-rim)]", !expanded && "py-1")}
       contentEditable={false}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="flex items-center gap-2 text-meta text-muted-foreground">
-        <MorphIcon
-          className={cn("size-3.5", thread.isResolved && "text-success-foreground")}
-          icon={thread.isResolved ? CircleCheck : Circle}
-        />
+        {thread.isResolved ? (
+          <CircleCheckIcon
+            className={cn("size-3.5", thread.isResolved && "text-success-foreground")}
+          />
+        ) : (
+          <CircleIcon className={cn("size-3.5", thread.isResolved && "text-success-foreground")} />
+        )}
         <InlineButton
           tone="muted"
           aria-expanded={expanded}
@@ -435,7 +482,7 @@ export function ReviewThreadCard({
         {thread.isOutdated ? <span>outdated</span> : null}
         {onFix ? (
           <Button
-            size="xs"
+            size="compact"
             variant="ghost"
             className="ml-auto"
             disabled={pending || fixPending}
@@ -447,7 +494,7 @@ export function ReviewThreadCard({
         ) : null}
         {onAddToChat && comments.some((comment) => visibleBody(comment.body) !== null) ? (
           <Button
-            size="xs"
+            size="compact"
             variant="ghost"
             className={onFix ? undefined : "ml-auto"}
             onClick={() => onAddToChat({ ...thread, comments })}
@@ -458,7 +505,7 @@ export function ReviewThreadCard({
         ) : null}
         {canResolve && !resolveBesideReply ? (
           <Button
-            size="xs"
+            size="compact"
             variant="ghost"
             className={onFix || onAddToChat ? undefined : "ml-auto"}
             disabled={pending}

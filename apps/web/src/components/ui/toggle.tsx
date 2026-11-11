@@ -16,8 +16,6 @@ const toggleVariants = cva(
           "h-7 min-w-7 rounded-md px-[calc(--spacing(1)-1px)] text-meta [&_svg:not([class*='size-'])]:size-3.5",
         default: "h-9 min-w-9 px-[calc(--spacing(2)-1px)] sm:h-8 sm:min-w-8",
         tile: "h-14 min-w-14 px-[calc(--spacing(2.5)-1px)]",
-        // An icon over its label, such as an app in a picker grid.
-        "tile-stacked": "h-auto min-w-0 flex-col gap-2 whitespace-normal px-1 py-3",
         lg: "h-10 min-w-10 px-[calc(--spacing(2.5)-1px)] sm:h-9 sm:min-w-9",
         "segmented-wide":
           "h-6 min-w-0 rounded-md px-2.5 text-control [&_svg:not([class*='size-'])]:size-3.5",

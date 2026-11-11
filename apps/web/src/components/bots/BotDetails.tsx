@@ -14,7 +14,7 @@ import { formatModelSlugName } from "@t3tools/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
-import { DownloadIcon, FolderIcon, FolderOpenIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, FolderIcon, FolderOpenIcon, ImageIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { saveUrlAsFile, useAssetUrlRefresh } from "~/assets/assetUrls";
@@ -164,7 +164,7 @@ function AvatarEditor({
                 onChange={(event) => setPrompt(event.target.value)}
               />
               <Button type="submit" size="sm" variant="secondary" disabled={generating}>
-                <SparklesIcon />
+                <ImageIcon />
                 {generating ? "Generating" : "Generate"}
               </Button>
             </form>

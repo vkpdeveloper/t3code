@@ -1,5 +1,7 @@
 import {
   memo,
+  useEffect,
+  useState,
   type ComponentProps,
   type MouseEventHandler,
   type PointerEventHandler,
@@ -41,6 +43,7 @@ interface ComposerPrimaryActionsProps {
   pendingAction: PendingActionState | null;
   isRunning: boolean;
   canInterrupt: boolean;
+  runId?: string | null;
   followUpBehavior?: "queue" | "steer";
   canSteer?: boolean;
   alternateShortcutLabel?: string | null;
@@ -86,6 +89,8 @@ const formatPendingPrimaryActionLabel = (input: {
   return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
 };
 
+const STOP_PENDING_MAX_MS = 10_000;
+
 // The pending-question Submit action shares the send button's message-action pill,
 // so it is a composer-owned button rather than a restyled Button.
 const messageActionPillClassName =
@@ -99,7 +104,7 @@ const COMPOSER_PILL_CLASS_NAME =
 // with the pill inside its 1px rim.
 // An icon button inside the pill, shared by send and the pane thumbnail's mock composer.
 export const COMPOSER_PILL_BUTTON_CLASS_NAME =
-  "relative isolate flex h-full items-center justify-center gap-1 overflow-hidden rounded-composer-pill-button text-foreground outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background enabled:cursor-pointer enabled:hover:bg-foreground/8 disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none";
+  "relative isolate flex h-full items-center justify-center gap-1 overflow-hidden rounded-composer-pill-button text-foreground outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring enabled:cursor-pointer enabled:hover:bg-foreground/8 disabled:pointer-events-none disabled:opacity-64 [&_svg]:pointer-events-none";
 
 const COMPOSER_PILL_SLOT_CLASS_NAME =
   "relative isolate flex h-full shrink-0 cursor-pointer items-center justify-center rounded-composer-pill-button outline-none transition-colors duration-150 hover:bg-foreground/8 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&_svg]:pointer-events-none";
@@ -120,6 +125,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   pendingAction,
   isRunning,
   canInterrupt,
+  runId = null,
   followUpBehavior = "steer",
   canSteer = true,
   alternateShortcutLabel = null,
@@ -143,6 +149,24 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   keepFullHistory = false,
   onToggleKeepFullHistory,
 }: ComposerPrimaryActionsProps) {
+  const [stopPhase, setStopPhase] = useState<"pending" | "timedOut" | "landed" | null>(null);
+  const [stopRunId, setStopRunId] = useState(runId);
+  if (runId !== null && stopRunId !== runId) {
+    setStopRunId(runId);
+    setStopPhase(null);
+  } else if (canOperateThread) {
+    // Losing permission also clears canInterrupt; it does not acknowledge the stop.
+    if ((stopPhase === "pending" || stopPhase === "timedOut") && !canInterrupt)
+      setStopPhase("landed");
+    else if (stopPhase === "landed" && canInterrupt) setStopPhase(null);
+  }
+  const isStopDisabled = stopPhase === "pending" || stopPhase === "landed";
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- timer that re-enables Stop if the interrupt never settles
+  useEffect(() => {
+    if (stopPhase !== "pending") return;
+    const timeout = setTimeout(() => setStopPhase("timedOut"), STOP_PENDING_MAX_MS);
+    return () => clearTimeout(timeout);
+  }, [stopPhase]);
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
@@ -162,10 +186,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   // The stop square sits in the same pill as send, so the pill never changes shape.
   // While dictating it ends the recording; a running turn's stop returns after.
   const stopsDictation = onStopDictation !== undefined && !pendingAction;
-  const stopLabel = stopsDictation ? "Stop voice input" : "Stop generation";
-  const renderStopGenerationButton = (insidePendingAction: boolean) => (
+  const stopLabel = stopsDictation
+    ? "Stop voice input"
+    : stopPhase === "landed"
+      ? "Stopped"
+      : stopPhase === "pending"
+        ? "Stopping"
+        : "Stop generation";
+  const stopDisabled = !stopsDictation && (!canOperateThread || isStopDisabled);
+  const renderStopGenerationButton = (insidePendingAction: boolean, withSpeech = true) => (
     <ComposerSendPill key="interrupt" className={cn(insidePendingAction && "sm:h-7")}>
-      {insidePendingAction ? null : renderSpeechAction?.(true)}
+      {insidePendingAction || !withSpeech ? null : renderSpeechAction?.(true)}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -175,12 +206,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 COMPOSER_PILL_SLOT_CLASS_NAME,
                 "w-8",
                 insidePendingAction && "sm:w-6.5",
+                "disabled:cursor-default disabled:opacity-64 disabled:hover:bg-transparent",
               )}
               {...pointerFocusProps}
-              disabled={!stopsDictation && !canOperateThread}
+              disabled={stopDisabled}
               onClick={() => {
-                if (stopsDictation) onStopDictation();
-                else if (canOperateThread) onInterrupt();
+                if (stopsDictation) {
+                  onStopDictation();
+                  return;
+                }
+                if (stopDisabled) return;
+                setStopPhase("pending");
+                onInterrupt();
               }}
               aria-label={stopLabel}
             />
@@ -191,7 +228,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <TooltipPopup>
           {stopsDictation
             ? `${stopLabel}${stopDictationShortcutLabel ? ` (${stopDictationShortcutLabel})` : ""}`
-            : "Interrupt"}
+            : stopPhase === "pending"
+              ? "Stopping…"
+              : stopPhase === "landed"
+                ? "Stopped"
+                : "Interrupt"}
         </TooltipPopup>
       </Tooltip>
     </ComposerSendPill>
@@ -201,7 +242,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
         {renderSpeechAction?.(false)}
-        {canInterrupt ? renderStopGenerationButton(true) : null}
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -249,11 +289,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             questionIndex: pendingAction.questionIndex,
           })}
         </MessageActionPill>
+        {canInterrupt || stopPhase !== null ? renderStopGenerationButton(true) : null}
       </div>
     );
   }
 
-  if (stopsDictation || (canInterrupt && !hasSendableContent && !isEditingQueuedMessage)) {
+  if (
+    stopsDictation ||
+    ((canInterrupt || stopPhase === "pending" || stopPhase === "timedOut") &&
+      !hasSendableContent &&
+      !isEditingQueuedMessage)
+  ) {
     return (
       <>
         {children}
@@ -339,11 +385,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </Tooltip>
     </ComposerSendPill>
   );
+  // Keep the clicked Stop at the right edge even if typing changes the primary action.
+  const stopAfterSubmit = stopPhase === null ? null : renderStopGenerationButton(false, false);
   if (compactTokens === null) {
     return (
       <>
         {children}
         {submit}
+        {stopAfterSubmit}
       </>
     );
   }
@@ -382,6 +431,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </Tooltip>
       {children}
       {submit}
+      {stopAfterSubmit}
     </div>
   );
 });

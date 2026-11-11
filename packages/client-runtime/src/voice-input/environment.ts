@@ -8,7 +8,6 @@ import type {
   CloudSpeechProvider,
   SettingsSecretValue,
   SpeechAcceleration,
-  SpeechModelDirectories,
   SpeechModelUnloadTimeout,
   SpeechTranscriptionOptions,
   SpeechPostProcessingOptions,
@@ -268,19 +267,6 @@ export const postProcessEnvironmentTranscript = (
       client.postProcess({ headers, payload: { transcript, draft, options } }),
   });
 
-export const updateEnvironmentSpeechModelDirectories = (
-  prepared: PreparedConnection,
-  directories: SpeechModelDirectories,
-) =>
-  request({
-    group: "voice",
-    prepared,
-    method: "POST",
-    path: (urls) => urls.updateModelDirectories(),
-    run: ({ client, headers }) =>
-      client.updateModelDirectories({ headers, payload: { directories } }),
-  });
-
 export const updateEnvironmentSpeechAcceleration = (
   prepared: PreparedConnection,
   acceleration: SpeechAcceleration,
@@ -304,6 +290,17 @@ export const updateEnvironmentSpeechModelUnloadTimeout = (
     path: (urls) => urls.updateModelUnloadTimeout(),
     run: ({ client, headers }) =>
       client.updateModelUnloadTimeout({ headers, payload: { timeout } }),
+  });
+
+export const linkEnvironmentSpeechModels = (prepared: PreparedConnection, path: string) =>
+  request({
+    group: "voice",
+    prepared,
+    method: "POST",
+    path: (urls) => urls.linkModels(),
+    // Hashing several multi-gigabyte files takes longer than an ordinary request.
+    timeoutMs: INFERENCE_OR_DOWNLOAD_TIMEOUT_MS,
+    run: ({ client, headers }) => client.linkModels({ headers, payload: { path } }),
   });
 
 export const removeEnvironmentSpeechModel = (prepared: PreparedConnection, modelId: string) =>

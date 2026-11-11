@@ -1,4 +1,8 @@
-import { THINKING_PREVIEW_PLUGINS, THOUGHT_PREVIEW_PLUGINS } from "./TimelineWorkEntryRow.logic";
+import {
+  THINKING_PREVIEW_PLUGINS,
+  THOUGHT_PREVIEW_PLUGINS,
+  THOUGHT_PREVIEW_SOURCE_MAX_LENGTH,
+} from "./TimelineWorkEntryRow.logic";
 import {
   type TimelinePendingRequest,
   type TimelineRow,
@@ -117,9 +121,13 @@ export const WorkGroupSection = memo(function WorkGroupSection({
   isExpandedToolGroup: boolean;
   displayLabel?: string | undefined;
 }) {
-  const { workspaceRoot, routeThreadKey, onToggleWorkEntry, pendingApprovals } =
-    use(TimelineRowCtx);
-  const onToggleStandaloneEntry = () => onToggleWorkEntry(disclosureAnchorKey);
+  const {
+    workspaceRoot,
+    routeThreadKey,
+    onToggleWorkEntry,
+    onWorkEntryContentReady,
+    pendingApprovals,
+  } = use(TimelineRowCtx);
   const nonEmptyEntries = groupedEntries.filter((entry) => {
     const item = entry.projectedItem?.item;
     return (
@@ -152,7 +160,10 @@ export const WorkGroupSection = memo(function WorkGroupSection({
           workEntry={workEntry}
           workspaceRoot={workspaceRoot}
           displayLabel={displayLabel}
-          onToggleEntry={onToggleStandaloneEntry}
+          onToggleEntry={(collapsed) =>
+            onToggleWorkEntry(disclosureAnchorKey, collapsed, workEntry.id)
+          }
+          onContentReady={() => onWorkEntryContentReady?.(disclosureAnchorKey, workEntry.id)}
         />
       ))}
     </section>
@@ -182,7 +193,11 @@ function ExpandedWorkGroupEntries({
   entries: TimelineWorkEntry[];
   workspaceRoot: string | undefined;
 }) {
-  const { workGroupViewState: viewState, onToggleWorkEntry } = use(TimelineRowCtx);
+  const {
+    workGroupViewState: viewState,
+    onToggleWorkEntry,
+    onWorkEntryContentReady,
+  } = use(TimelineRowCtx);
   const [initialScrollIndex] = useState(() =>
     resolveWorkGroupScrollIndex(entries, viewState.scrollPositions.get(anchorKey)),
   );
@@ -204,7 +219,9 @@ function ExpandedWorkGroupEntries({
 
   const groupView = {
     state: viewState,
-    onToggleEntry: () => onToggleWorkEntry(disclosureAnchorKey),
+    onToggleEntry: (collapsed: boolean, entryId: string) =>
+      onToggleWorkEntry(disclosureAnchorKey, collapsed, entryId),
+    onContentReady: (entryId: string) => onWorkEntryContentReady?.(disclosureAnchorKey, entryId),
   };
   const updateScrollFades = () => {
     const element = listRef.current?.getScrollableNode();
@@ -403,10 +420,11 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
             {isPreparingWorktree ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
           </span>
         </WorkFoldToggle>
-        {backgroundWorktreeSetup ? (
-          <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
-        ) : null}
-        <div className="ms-auto flex min-w-0 items-center justify-end">
+        {/* One trailing group: two auto margins would split the free space and center the chip. */}
+        <div className="ms-auto flex min-w-0 items-center justify-end gap-2">
+          {backgroundWorktreeSetup ? (
+            <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
+          ) : null}
           {window ? <WorkingBarSlot window={window} pendingRequest={pendingRequest} /> : null}
         </div>
       </div>
@@ -430,7 +448,7 @@ function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnap
           <Button
             variant="ghost-muted"
             size="micro"
-            className="ml-auto min-w-0 shrink-0"
+            className="min-w-0 shrink-0"
             aria-label={`Background setup is still running: ${scriptName}. Show setup progress.`}
           />
         }
@@ -559,7 +577,7 @@ function LiveActivityContent({
                 ? failedToolIconClassName
                 : highlighted
                   ? "text-foreground"
-                  : "text-muted-foreground",
+                  : "text-dim-foreground",
             )}
             role={announceFailure ? "img" : undefined}
             aria-label={announceFailure ? "Tool call failed" : undefined}
@@ -601,7 +619,10 @@ export function LiveWorkEntryTimelineRow({
   if (pendingApproval) return <TimelinePendingApprovalRow approval={pendingApproval} />;
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
-  const thoughtLine = row.thought && !row.expanded ? liveThoughtLine(row.thought.detail ?? "") : "";
+  const thoughtLine =
+    row.thought && !row.expanded
+      ? liveThoughtLine((row.thought.detail ?? "").slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH))
+      : "";
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
 
   return (
@@ -618,7 +639,7 @@ export function LiveWorkEntryTimelineRow({
       {thoughtLine ? (
         <WorkLogRow
           icon={
-            <span className="flex size-4 items-center justify-center text-icon-muted">
+            <span className="flex size-4 items-center justify-center text-dim-foreground">
               <ToolActivityIconView
                 icon={undefined}
                 fallbackName="brain"
@@ -652,7 +673,7 @@ export function LiveWorkEntryTimelineRow({
           ) : row.entry.itemType === "reasoning" ? (
             <ChatMarkdown
               inline
-              text={row.entry.detail ?? label}
+              text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
               cwd={ctx.markdownCwd}
               parseRawHtml={false}
               extraRemarkPlugins={row.active ? THINKING_PREVIEW_PLUGINS : THOUGHT_PREVIEW_PLUGINS}
@@ -712,7 +733,10 @@ function WorkGroupHeader(props: {
           <ToolActivityIconView
             icon={props.toolIcon}
             fallbackName={props.iconName}
-            className="size-3.5 shrink-0 stroke-2 text-muted-foreground"
+            className={cn(
+              "size-3.5 shrink-0 stroke-2",
+              props.failed ? "text-muted-foreground" : "text-dim-foreground",
+            )}
             muted
           />
         }
@@ -739,11 +763,14 @@ export function BackgroundActivityTimelineRow({
       aria-label={`${label}: ${summary}`}
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.id, row.id)}
-      icon={<BellIcon aria-hidden className="size-3.5 text-muted-foreground" />}
+      icon={<BellIcon aria-hidden className="size-3.5 text-dim-foreground" />}
       label={
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0 text-label">{label}</span>
-          <span className="min-w-0 flex-1 truncate text-body text-dim-foreground">{summary}</span>
+          {/* Open, the rows below say it; the bare count is what reads as unfolded. */}
+          {row.expanded ? null : (
+            <span className="min-w-0 flex-1 truncate text-body text-dim-foreground">{summary}</span>
+          )}
         </span>
       }
       trailing={
@@ -978,11 +1005,14 @@ function WorkingWindowView({
       observer?.disconnect();
     };
   }, [open, head]);
-  const { workGroupViewState, onToggleWorkEntry } = ctx;
+  const { workGroupViewState, onToggleWorkEntry, onWorkEntryContentReady } = ctx;
   // Entries opened in the history keep their state, and toggling one keeps the bar in place.
   const groupView = (() => ({
     state: workGroupViewState,
-    onToggleEntry: () => onToggleWorkEntry("working-indicator-row"),
+    onToggleEntry: (collapsed: boolean, entryId: string) =>
+      onToggleWorkEntry("working-indicator-row", collapsed, entryId),
+    onContentReady: (entryId: string) =>
+      onWorkEntryContentReady?.("working-indicator-row", entryId),
   }))();
   const headEnd = history ? Math.min(history.head, history.tailStart) : 0;
   const unmounted = history ? history.tailStart - headEnd : 0;
@@ -1092,7 +1122,12 @@ function CollapsedWorkingWindow({
     reportOverflow();
     return observeResize([content, viewport], () => {
       reportOverflow();
-      if (followRef.current) viewport.scrollTop = viewport.scrollHeight;
+      if (followRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
+      } else if (scrolledToEnd(viewport)) {
+        followRef.current = true;
+        setFollowing(true);
+      }
     });
   }, [onOverflowChange]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as scrolling brings the spacer near the viewport
@@ -1132,7 +1167,7 @@ function CollapsedWorkingWindow({
         onScrollCapture={(event) => {
           const viewport = getViewport();
           if (!viewport || event.target !== viewport || prependRef.current) return;
-          const atEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
+          const atEnd = scrolledToEnd(viewport);
           followRef.current = atEnd;
           setFollowing(atEnd);
           if (atEnd) setStart(Math.max(start, items.length - WORKING_WINDOW_TAIL));
@@ -1180,6 +1215,10 @@ function CollapsedWorkingWindow({
       ) : null}
     </div>
   );
+}
+
+function scrolledToEnd(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
 }
 
 function workingWindowItemIsLive(item: WorkingWindowItem | undefined): boolean {
@@ -1297,7 +1336,15 @@ export function SlashCommandTimelineRow({ command }: { command: TimelineSlashCom
   const compacting = command.name === "compact" && !command.skill && command.state === "running";
   return (
     <WorkLogRow
-      icon={<Icon aria-hidden="true" className="size-3.5 text-muted-foreground" />}
+      icon={
+        <Icon
+          aria-hidden="true"
+          className={cn(
+            "size-3.5",
+            command.state === "failed" ? "text-muted-foreground" : "text-dim-foreground",
+          )}
+        />
+      }
       label={
         <span className="flex min-w-0 items-center gap-1.5">
           <WorkLogVerb

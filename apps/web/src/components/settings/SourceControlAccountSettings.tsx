@@ -148,7 +148,7 @@ export function SourceControlAccountSettings({
                   >
                     <SelectTrigger
                       variant="well"
-                      size="compact"
+                      size="sm"
                       aria-label={`${label} account for ${group.host}`}
                     >
                       <SelectValue>

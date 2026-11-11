@@ -55,7 +55,6 @@ import { PullRequestMergeMethod } from "./pullRequest.ts";
 import {
   CloudSpeechModelId,
   SpeechAcceleration,
-  SpeechModelDirectories,
   SpeechCorrectionCue,
   SpeechCustomWords,
   SpeechLanguage,
@@ -220,17 +219,6 @@ export type SnapShotShortcut = typeof SnapShotShortcut.Type;
 export const SnapShotSound = Schema.Literals(["soft-pop", "camera-shutter"]);
 export type SnapShotSound = typeof SnapShotSound.Type;
 const DEFAULT_SNAP_SHOT_SOUND: SnapShotSound = "soft-pop";
-export const SpeechRecordingCueSound = Schema.Literals([
-  "classic",
-  "signature",
-  "click",
-  "soft",
-  "wood",
-  "analog",
-  "thock",
-]);
-export type SpeechRecordingCueSound = typeof SpeechRecordingCueSound.Type;
-const DEFAULT_SPEECH_RECORDING_CUE_SOUND: SpeechRecordingCueSound = "classic";
 
 export type SnapShotModifierPairShortcut = Extract<SnapShotShortcut, { readonly kind: string }>;
 
@@ -361,6 +349,10 @@ export type EffortDisplay = typeof EffortDisplay.Type;
 
 export const ToolCallVisibility = Schema.Literals(["showAll", "hideSuccessful", "hideAll", "zen"]);
 export type ToolCallVisibility = typeof ToolCallVisibility.Type;
+
+/** What the open thread reads to a screen reader: turn status, the agent's in-between messages too, or every step. */
+export const ScreenReaderAnnouncements = Schema.Literals(["status", "messages", "everything"]);
+export type ScreenReaderAnnouncements = typeof ScreenReaderAnnouncements.Type;
 
 export const ModelFavorite = Schema.Struct({
   provider: ProviderInstanceId,
@@ -632,6 +624,9 @@ export const ClientSettingsSchema = Schema.Struct({
   toolCallVisibility: ToolCallVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed("showAll" as const)),
   ),
+  screenReaderAnnouncements: ScreenReaderAnnouncements.pipe(
+    Schema.withDecodingDefault(Effect.succeed("status" as const)),
+  ),
   // Retired Labs toggle. Still read as the default for the Usage item in threadDetailsItems.
   threadDetailsUsageEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Sparse show/hide overrides for thread details card items. Missing ids use the client's
@@ -674,10 +669,6 @@ export const ClientSettingsSchema = Schema.Struct({
     ),
   ),
   speechCorrectionWord: SpeechCorrectionCue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  speechRecordingCue: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  speechRecordingCueSound: SpeechRecordingCueSound.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SPEECH_RECORDING_CUE_SOUND)),
-  ),
   snapShotEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snapShotIncludeAccessibility: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -1486,9 +1477,6 @@ export const ServerSettings = Schema.Struct({
   speechModelId: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("handy-computer/parakeet-unified-en-0.6b-gguf")),
   ),
-  speechModelDirectories: SpeechModelDirectories.pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
-  ),
   speechAcceleration: SpeechAcceleration.pipe(Schema.withDecodingDefault(Effect.succeed("auto"))),
   speechModelUnloadTimeout: SpeechModelUnloadTimeout.pipe(
     Schema.withDecodingDefault(Effect.succeed("min_15")),
@@ -1937,7 +1925,6 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   speechModelId: Schema.optionalKey(Schema.String),
-  speechModelDirectories: Schema.optionalKey(SpeechModelDirectories),
   speechAcceleration: Schema.optionalKey(SpeechAcceleration),
   speechModelUnloadTimeout: Schema.optionalKey(SpeechModelUnloadTimeout),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
@@ -2167,6 +2154,7 @@ export const ClientSettingsPatch = Schema.Struct({
   boringSidebarEnabled: Schema.optionalKey(Schema.Boolean),
   boringSidebarMultilineRows: Schema.optionalKey(Schema.Boolean),
   toolCallVisibility: Schema.optionalKey(ToolCallVisibility),
+  screenReaderAnnouncements: Schema.optionalKey(ScreenReaderAnnouncements),
   threadDetailsUsageEnabled: Schema.optionalKey(Schema.Boolean),
   threadDetailsItems: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   hideWindowControlsWhenSidebarCollapsed: Schema.optionalKey(Schema.Boolean),
@@ -2187,8 +2175,6 @@ export const ClientSettingsPatch = Schema.Struct({
   speechRemoveFillerWords: Schema.optionalKey(Schema.Boolean),
   speechPostProcessingPrompt: Schema.optionalKey(SpeechPostProcessingPromptSettings),
   speechCorrectionWord: Schema.optionalKey(SpeechCorrectionCue),
-  speechRecordingCue: Schema.optionalKey(Schema.Boolean),
-  speechRecordingCueSound: Schema.optionalKey(SpeechRecordingCueSound),
   snapShotEnabled: Schema.optionalKey(Schema.Boolean),
   snapShotIncludeAccessibility: Schema.optionalKey(Schema.Boolean),
   snapShotShortcut: Schema.optionalKey(SnapShotShortcut),

@@ -21,12 +21,12 @@ export {
   transcribeCloudPcm,
   getEnvironmentSpeechStatus,
   getEnvironmentSpeechStreamUrl,
+  linkEnvironmentSpeechModels,
   postProcessEnvironmentTranscript,
   removeEnvironmentSpeechModel,
   selectEnvironmentSpeechModel,
   transcribeEnvironmentPcm,
   updateEnvironmentSpeechAcceleration,
-  updateEnvironmentSpeechModelDirectories,
   updateEnvironmentSpeechModelUnloadTimeout,
 } from "./environment.ts";
 export { openSpeechStream } from "./stream.ts";

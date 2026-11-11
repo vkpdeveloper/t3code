@@ -11,6 +11,7 @@ import {
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
+  type EditorId,
   type PreviewAnnotationPayload,
   type ProjectId,
   type ScopedThreadRef,
@@ -21,11 +22,7 @@ import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
 } from "@t3tools/shared/projectScripts";
-import {
-  getTerminalLabel,
-  nextTerminalId,
-  resolveTerminalSessionLabel,
-} from "@t3tools/shared/terminalLabels";
+import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { FolderX, Unlink2Icon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -41,6 +38,7 @@ import { useLayoutPane } from "../layout/layoutPaneContext";
 import { copyLayoutFilePath } from "../layout/PaneTabs";
 import type { LauncherSurfaceKind } from "./SurfaceLauncher";
 import { THREAD_TERMINAL_SURFACE_ID } from "../layout/layoutModel";
+import { terminalTabTitle } from "../layout/surfaceTabLabels";
 import { runInNewLayoutTab } from "../layout/layoutStore";
 import {
   useThreadChatBridge,
@@ -77,7 +75,7 @@ import {
   useQuietThreadProjection,
 } from "../state/entities";
 import { previewEnvironment } from "../state/preview";
-import { primaryServerAvailableEditorsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import {
   readEnvironmentScope,
   useEnvironmentScope,
@@ -137,6 +135,7 @@ const PullRequestDetailPanel = lazy(() =>
   })),
 );
 
+const EMPTY_EDITORS: ReadonlyArray<EditorId> = [];
 const EMPTY_PENDING: ReadonlySet<string> = new Set();
 const noop = () => undefined;
 
@@ -663,7 +662,9 @@ function ThreadSurfaceContent({
   const bridge = useThreadChatBridge(threadRef);
   const { paneId } = useLayoutPane();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
+  const availableEditors =
+    useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId))?.availableEditors ??
+    EMPTY_EDITORS;
   const workspaceMutationId = bridge?.workspaceMutationId ?? null;
   const [pendingFiles, setPendingFiles] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const onPendingChange = (relativePath: string, pending: boolean) => {
@@ -763,6 +764,12 @@ function ThreadSurfaceContent({
           <PullRequestDetailPanel
             key={`${surface.host ?? ""}:${surface.repository}#${surface.number}`}
             initialTab={surface.detailTab ?? "summary"}
+            revealUrl={surface.revealUrl}
+            onRevealSettled={(revealUrl) => {
+              useRightPanelStore
+                .getState()
+                .settlePullRequestReveal(threadRef, surface.id, revealUrl);
+            }}
             onTabChange={(tab) =>
               useRightPanelStore.getState().setPullRequestDetailTab(threadRef, surface.id, tab)
             }
@@ -996,14 +1003,20 @@ let surfaceServices: {
   endTerminals: (threadRef: ScopedThreadRef, terminalIds: readonly string[]) => void;
 } | null = null;
 
-function readTerminalLabels(threadRef: ScopedThreadRef, terminalIds: readonly string[]): string[] {
+function readTerminalTabTitles(
+  threadRef: ScopedThreadRef,
+  terminalIds: readonly string[],
+): string[] {
   const sessions = readEnvironmentScope(threadRef.environmentId, AuthTerminalReadScope)
     ? appAtomRegistry.get(knownTerminalSessionsAtom(threadRef.environmentId, threadRef.threadId))
     : null;
   return terminalIds.map((terminalId) =>
-    resolveTerminalSessionLabel(
+    terminalTabTitle(
       terminalId,
-      sessions?.find((session) => session.target.terminalId === terminalId)?.state.summary,
+      resolveTerminalSessionLabel(
+        terminalId,
+        sessions?.find((session) => session.target.terminalId === terminalId)?.state.summary,
+      ),
     ),
   );
 }
@@ -1020,7 +1033,7 @@ export async function closeThreadSurface(
         useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
         threadRef,
       );
-      const [first, ...rest] = readTerminalLabels(threadRef, terminalIds);
+      const [first, ...rest] = readTerminalTabTitles(threadRef, terminalIds);
       if (first !== undefined) {
         if (!options.bulk && !(await confirmTerminalClose([first, ...rest]))) return;
         surfaceServices?.endTerminals(threadRef, terminalIds);
@@ -1057,10 +1070,7 @@ export async function closeThreadSurface(
     !options.bulk &&
     readEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope)
   ) {
-    const [first = getTerminalLabel(surface.activeTerminalId), ...rest] = readTerminalLabels(
-      threadRef,
-      surface.terminalIds,
-    );
+    const [first = "Terminal", ...rest] = readTerminalTabTitles(threadRef, surface.terminalIds);
     if (!(await confirmTerminalClose([first, ...rest]))) return;
   }
   finish();

@@ -116,7 +116,7 @@ function CheckoutGroupingSelect({ member }: { member: SidebarProjectGroupMember 
     >
       <SelectTrigger
         variant="well"
-        size="compact"
+        size="sm"
         title={
           selection === "inherit"
             ? `Default (${PROJECT_GROUPING_MODE_LABELS[globalMode]})`

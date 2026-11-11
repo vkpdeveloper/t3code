@@ -54,6 +54,16 @@ isn’t already selected. **Test model** lets you try it without sending a messa
 If you use the composer microphone before a model is installed, it offers to download one.
 The recommendation uses your Voice language, or your system’s preferred languages with **Auto-detect**.
 
+If another app already downloaded one of these models, you don’t need a second copy.
+**Download** first looks in Handy’s model folder and the Hugging Face cache on that
+environment and uses a copy it finds there instead of downloading. For a copy anywhere
+else, on web or desktop, paste the path of the model file or its folder under the model
+list and choose **Use existing**. The path is on the environment
+that transcribes, not on the device you are using. T3 Code checks that the file is exactly a
+model from its list and then uses it in place. Removing the model in T3 Code leaves your file
+alone; if the other app deletes it, download or link the model again. Files in another
+format, such as Core ML, ONNX, or MLX builds of the same model, can’t be used.
+
 Select the languages you dictate in to compare models that support all of them.
 Accuracy shows how often the model got words or characters wrong in each
 language; speed is the time to transcribe 30 seconds on a reference GPU. Choose
@@ -65,12 +75,6 @@ environment's CPU; a GPU you picked yourself reports the error instead. Nothing
 is ever retried on another environment. Models marked **Live preview** show
 text while you speak. Other models can process long recordings in chunks at pauses
 while you record; models with built-in long-form support transcribe when you stop.
-
-To reuse a catalog model downloaded by another app, add its folder under
-**Settings → Voice → Model folders**. Use an absolute path on the environment
-that transcribes your audio. The filename, size, and SHA-256 must match the
-catalog. T3 Code reads these folders without changing or deleting their files.
-Removing a folder stops T3 Code from using models stored there.
 
 ## Dictate
 
@@ -93,10 +97,6 @@ sees the recording, which runs in T3 Code itself.
 **Auto** tap-toggles or records while held, **Hold** records only while the keys
 are down, and **Toggle** always needs a second press. Change the chord itself in
 [Keybindings settings](./keybindings.md).
-
-On web and desktop, turn on **Sound cue** in Voice settings to hear a short sound
-when recording starts, and pick the sound you like next to the switch. It is off
-by default.
 
 ## Improve recognition
 

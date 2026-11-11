@@ -205,10 +205,18 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const selectOptionFromShortcut = useEffectEvent(handleOptionSelection);
   const backgroundThread = use(BackgroundThreadContext);
+  const handleWriteAnswer = () => {
+    if (responseDisabled) return;
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+    onWriteAnswer?.();
+  };
   const writeAnswerFromShortcut = useEffectEvent((event: globalThis.KeyboardEvent) => {
     if (!canWriteAnswer) return;
     event.preventDefault();
-    onWriteAnswer?.();
+    handleWriteAnswer();
   });
 
   // Only the layout-focused pane's prompt answers number-key shortcuts.
@@ -385,8 +393,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   multiSelect={activeQuestion.multiSelect === true}
                   selected={customAnswerActive}
                   shortcutKey={writeOptionKey}
-                  disabled={disabled || isResponding}
-                  onSelect={() => onWriteAnswer?.()}
+                  disabled={responseDisabled}
+                  onSelect={handleWriteAnswer}
                 />
               ) : null}
             </ComposerRequestCard.Well>
@@ -489,7 +497,7 @@ function QuestionOptionRow({
         <span
           aria-hidden
           className={cn(
-            "flex size-4 shrink-0 items-center justify-center rounded-kbd",
+            "flex size-4 shrink-0 items-center justify-center rounded-kbd border border-foreground/55",
             selected ? "surface-gloss-on text-primary-foreground" : "surface-well",
           )}
         >

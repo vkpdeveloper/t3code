@@ -347,6 +347,25 @@ export function selectLayoutPaneSlots(
   return { slots, stripWidth, fits, unitWidth };
 }
 
+export function selectLayoutStripSize(
+  workspace: LayoutWorkspace,
+  whenNoRoom: LayoutWhenNoRoom,
+): { share: number; minPx: number } {
+  const lone = workspace.columns.length === 1;
+  const weights = lone ? [1] : workspace.columns.map((column) => column.width);
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const arranged = workspace.cameraWidth;
+  if (whenNoRoom === "always-shrink") return { share: 1, minPx: 0 };
+  if (arranged === null) return { share: Math.max(1, total), minPx: 0 };
+  if (total * arranged > arranged + 0.5) return { share: 1, minPx: total * arranged };
+  const narrowest = Math.min(...weights);
+  const readableUnit =
+    lone || narrowest <= 0
+      ? 0
+      : Math.min(LAYOUT_READABLE_COLUMN_PX, narrowest * arranged) / narrowest;
+  return { share: Math.max(1, total), minPx: total * readableUnit };
+}
+
 /**
  * A top pane starting this close to the strip's left edge shares its row with
  * the collapsed sidebar's toggle and arrows, so its header makes room for them.
@@ -377,6 +396,18 @@ export function findLayoutPane(
   paneId: string,
 ): { workspace: LayoutWorkspace; column: LayoutColumn; pane: LayoutPane } | null {
   return findPane(state, paneId);
+}
+
+const layoutTabIds = (state: LayoutState): string[] =>
+  state.workspaces.flatMap((workspace) =>
+    workspace.columns.flatMap((column) =>
+      column.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)),
+    ),
+  );
+
+export function closedLayoutTabIds(before: LayoutState, after: LayoutState): string[] {
+  const open = new Set(layoutTabIds(after));
+  return layoutTabIds(before).filter((tabId) => !open.has(tabId));
 }
 
 /** How many tabs the layout holds across every workspace. */
@@ -1064,6 +1095,7 @@ function insertTabIntoPane(
   paneId: string,
   tab: LayoutTab,
   index: number | "after-current" | "end",
+  focus = true,
 ): LayoutState {
   const inserted = mapPanes(state, (pane) => {
     if (pane.id !== paneId) return pane;
@@ -1077,7 +1109,7 @@ function insertTabIntoPane(
     tabs.splice(at, 0, tab);
     return { ...pane, tabs, activeTabId: tab.id };
   });
-  return focusLayoutPane(inserted, paneId);
+  return focus ? focusLayoutPane(inserted, paneId) : inserted;
 }
 
 function insertColumn(
@@ -1085,6 +1117,7 @@ function insertColumn(
   workspaceId: string,
   index: number,
   column: LayoutColumn,
+  focus = true,
 ): LayoutState {
   const inserted = mapWorkspaces(state, (workspace) => {
     if (workspace.id !== workspaceId) return workspace;
@@ -1092,7 +1125,8 @@ function insertColumn(
     columns.splice(Math.max(0, Math.min(index, columns.length)), 0, column);
     return { ...workspace, columns };
   });
-  return focusLayoutPane(normalizeLayout(inserted), column.panes[0]!.id);
+  const normalized = normalizeLayout(inserted);
+  return focus ? focusLayoutPane(normalized, column.panes[0]!.id) : normalized;
 }
 
 /**
@@ -1131,13 +1165,14 @@ function splitPaneWithTab(
   paneId: string,
   side: LayoutDirection,
   tab: LayoutTab,
+  focus = true,
   exact = false,
 ): LayoutState {
   const found = findPane(state, paneId);
   if (!found) return state;
   if (side === "left" || side === "right") {
     const columnIndex = found.workspace.columns.indexOf(found.column);
-    // A chat never lands between another chat and its side pane.
+    // Commands keep a chat beside its side panes; explicit drops use the previewed position.
     const insertIndex =
       side === "left"
         ? columnIndex
@@ -1145,7 +1180,13 @@ function splitPaneWithTab(
             ? companionRunEnd(found.workspace, columnIndex)
             : columnIndex) + 1;
     // A horizontal split adds a full-width column without resizing its source.
-    return insertColumn(state, found.workspace.id, insertIndex, createColumn(createPane(tab)));
+    return insertColumn(
+      state,
+      found.workspace.id,
+      insertIndex,
+      createColumn(createPane(tab)),
+      focus,
+    );
   }
   const size = found.pane.size / 2;
   const newPane = createPane(tab, size);
@@ -1165,7 +1206,7 @@ function splitPaneWithTab(
           }),
         },
   );
-  return focusLayoutPane(split, newPane.id);
+  return focus ? focusLayoutPane(split, newPane.id) : split;
 }
 
 /**
@@ -1219,6 +1260,7 @@ export function replaceLayoutTabContent(
   content: LayoutTabContent,
   ghostOf?: ScopedThreadRef | null,
 ): LayoutState {
+  if (!findLayoutTab(state, (tab) => tab.id === tabId)) return state;
   const key = layoutTabContentKey(content);
   const duplicate = findLayoutTab(
     state,
@@ -1230,9 +1272,13 @@ export function replaceLayoutTabContent(
         ? { ...pane, tabs: pane.tabs.filter((tab) => tab.id !== duplicate.tab.id) }
         : pane;
     if (!withoutDuplicate.tabs.some((tab) => tab.id === tabId)) return withoutDuplicate;
+    const tabs =
+      ghostOf === undefined
+        ? withoutDuplicate.tabs
+        : withoutDuplicate.tabs.filter((tab) => tab.id === tabId || !isLayoutGhostTab(tab));
     return {
       ...withoutDuplicate,
-      tabs: withoutDuplicate.tabs.map((tab) =>
+      tabs: tabs.map((tab) =>
         tab.id === tabId &&
         (layoutTabContentKey(tab.content) !== key ||
           (isLayoutPageContent(tab.content) &&
@@ -1562,7 +1608,14 @@ export function moveLayoutTab(
   }
   if (destination.kind === "split") {
     return normalizeLayout(
-      splitPaneWithTab(detached, destination.paneId, destination.side, tab, destination.exact),
+      splitPaneWithTab(
+        detached,
+        destination.paneId,
+        destination.side,
+        tab,
+        true,
+        destination.exact,
+      ),
     );
   }
   // As in niri, a moved window keeps its column's width.
@@ -1597,7 +1650,7 @@ export function placeLayoutContent(
   }
   if (destination.kind === "split") {
     return normalizeLayout(
-      splitPaneWithTab(state, destination.paneId, destination.side, tab, destination.exact),
+      splitPaneWithTab(state, destination.paneId, destination.side, tab, true, destination.exact),
     );
   }
   if (!state.workspaces.some((workspace) => workspace.id === destination.workspaceId)) {
@@ -1629,11 +1682,9 @@ function keepLayoutFocus(before: LayoutState, after: LayoutState): LayoutState {
   const restored = mapWorkspaces(after, (workspace) => {
     const previous = before.workspaces.find((candidate) => candidate.id === workspace.id);
     if (!previous || previous.focusedPaneId === workspace.focusedPaneId) return workspace;
-    const exists =
-      previous.focusedPaneId === null ||
-      workspace.columns.some((column) =>
-        column.panes.some((pane) => pane.id === previous.focusedPaneId),
-      );
+    const exists = workspace.columns.some((column) =>
+      column.panes.some((pane) => pane.id === previous.focusedPaneId),
+    );
     return exists ? { ...workspace, focusedPaneId: previous.focusedPaneId } : workspace;
   });
   const focusedWorkspaceId = restored.workspaces.some(
@@ -1671,10 +1722,23 @@ export function placeLayoutTabs(
   let next: LayoutState;
   if (destination.kind === "pane") {
     if (!findPane(state, destination.paneId)) return state;
-    next = insertTabIntoPane(state, destination.paneId, first, destination.index ?? "end");
+    next = insertTabIntoPane(
+      state,
+      destination.paneId,
+      first,
+      destination.index ?? "end",
+      options.focus,
+    );
   } else if (destination.kind === "split") {
     if (!findPane(state, destination.paneId)) return state;
-    next = splitPaneWithTab(state, destination.paneId, destination.side, first);
+    next = splitPaneWithTab(
+      state,
+      destination.paneId,
+      destination.side,
+      first,
+      options.focus,
+      destination.exact,
+    );
   } else {
     if (!state.workspaces.some((workspace) => workspace.id === destination.workspaceId)) {
       return state;
@@ -1684,6 +1748,7 @@ export function placeLayoutTabs(
       destination.workspaceId,
       destination.index,
       createColumn(createPane(first)),
+      options.focus,
     );
   }
   const pane = findLayoutTab(next, (tab) => tab.id === first.id)?.pane;
@@ -1798,6 +1863,7 @@ export function resizeLayoutColumnEdge(
   state: LayoutState,
   columnId: string,
   width: number,
+  mode: LayoutWhenNoRoom,
   cameraWidth: number,
   drawnUnitWidth = cameraWidth,
 ): LayoutState {
@@ -1816,7 +1882,36 @@ export function resizeLayoutColumnEdge(
               }
             : workspace,
         );
-  return arrangeLayoutWorkspaces(state, resizeLayoutColumn(rebased, columnId, width), cameraWidth);
+  const workspace = rebased.workspaces.find((candidate) =>
+    candidate.columns.some((column) => column.id === columnId),
+  );
+  const index = workspace?.columns.findIndex((column) => column.id === columnId) ?? -1;
+  const neighbor = workspace?.columns[index + 1];
+  if (mode !== "always-shrink" || !workspace || !neighbor || !Number.isFinite(width)) {
+    return arrangeLayoutWorkspaces(
+      state,
+      resizeLayoutColumn(rebased, columnId, width),
+      cameraWidth,
+    );
+  }
+  const pair = workspace.columns[index]!.width + neighbor.width;
+  const floor = Math.min(LAYOUT_MIN_COLUMN_WIDTH, pair / 2);
+  const resized = Math.min(pair - floor, Math.max(floor, width));
+  const shared = mapWorkspaces(rebased, (candidate) =>
+    candidate === workspace
+      ? {
+          ...candidate,
+          columns: candidate.columns.map((column, columnIndex) =>
+            columnIndex === index
+              ? { ...column, width: resized }
+              : columnIndex === index + 1
+                ? { ...column, width: pair - resized }
+                : column,
+          ),
+        }
+      : candidate,
+  );
+  return arrangeLayoutWorkspaces(state, shared, cameraWidth);
 }
 
 /** Step to the next width preset, wrapping from 2/3 back to 1/3. A lone column keeps filling the window. */

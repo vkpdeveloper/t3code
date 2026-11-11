@@ -90,15 +90,18 @@ export function useLayoutPaneOwnsThreadRef(): React.RefObject<boolean> {
 
 /**
  * The thread-scoped commands a related chat still answers for its focused
- * surface tab: its panel toggles and opening its folder in the editor.
+ * surface tab: its panel toggles, opening its folder in the editor and
+ * copying its link.
  */
 export const RELATED_CHAT_COMMANDS: ReadonlySet<string> = new Set([
   "terminal.toggle",
   "rightPanel.toggle",
   "diff.toggle",
+  "pullRequests.toggle",
   "threadPanel.toggle",
   "preview.toggle",
   "editor.openFavorite",
+  "thread.copyReference",
 ]);
 
 /** The focused pane taking the keyboard back (see `returnKeyboardToFocusedPane`). */

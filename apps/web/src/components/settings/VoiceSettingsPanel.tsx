@@ -3,15 +3,16 @@ import {
   downloadEnvironmentSpeechModel,
   getEnvironmentSpeechModels,
   getEnvironmentSpeechStatus,
+  linkEnvironmentSpeechModels,
   removeEnvironmentSpeechModel,
   selectEnvironmentSpeechModel,
   updateEnvironmentSpeechAcceleration,
-  updateEnvironmentSpeechModelDirectories,
   updateEnvironmentSpeechModelUnloadTimeout,
 } from "@t3tools/client-runtime/voice-input";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { openRouterIcon } from "@t3tools/client-runtime/provider-clients";
 import {
+  AuthFilesystemReadScope,
   AuthSettingsWriteScope,
   CLOUD_SPEECH_LABELS,
   CloudSpeechProvider,
@@ -22,9 +23,9 @@ import {
   type ProjectId,
   ProviderDriverKind,
   type SpeechAcceleration,
+  type SpeechBenchmarkTier,
   type SpeechCustomWords,
   type SpeechModelUnloadTimeout,
-  SpeechRecordingCueSound,
   type VoiceShortcutMode,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -43,6 +44,7 @@ import {
   StarIcon,
   SlidersHorizontalIcon,
   Trash2Icon,
+  UnlinkIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -55,7 +57,6 @@ import {
   chooseTranscriptCleanup,
   useCleanupGrant,
 } from "../../speech/voiceConsent";
-import { playRecordingCue, RECORDING_CUE_SOUNDS } from "../../speech/recordingCue";
 import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import { runEnvironmentSpeech } from "../../speech/runEnvironmentSpeech";
 import {
@@ -164,6 +165,7 @@ const spellingsOf = (words: SpeechCustomWords) =>
 type ModelCardProps = {
   readonly model: EnvironmentSpeechModel;
   readonly comparisonLanguages: readonly string[];
+  readonly benchmarkTier: SpeechBenchmarkTier;
   readonly busy: boolean;
   readonly canCancel: boolean;
   readonly onDownload: () => void;
@@ -218,9 +220,15 @@ function ModelCard(props: ModelCardProps) {
           ) : null}
         </div>
         <p className="mt-0.5 text-meta text-muted-foreground">{model.description}</p>
+        {model.linkedFrom ? (
+          <p className="mt-0.5 break-all text-caption text-muted-foreground">
+            Using your file at {model.linkedFrom}
+          </p>
+        ) : null}
         <ModelBenchmarks
           model={model}
           languages={props.comparisonLanguages}
+          tier={props.benchmarkTier}
           facts={[
             ...(model.languages.length > 1
               ? [`${model.languages.length} languages`]
@@ -280,15 +288,23 @@ function ModelCard(props: ModelCardProps) {
             Use model
           </Button>
         )}
-        {model.state === "installed" && !model.shared ? (
+        {model.state === "installed" ? (
           <Button
             size="icon-sm"
             variant="ghost"
             disabled={props.busy}
-            aria-label={`Delete ${model.name}`}
+            aria-label={
+              model.linkedFrom
+                ? `Stop using your ${model.name} file; the file stays on disk`
+                : `Delete ${model.name}`
+            }
             onClick={props.onDelete}
           >
-            <Trash2Icon />
+            {model.linkedFrom ? (
+              <UnlinkIcon className="size-3.5" />
+            ) : (
+              <Trash2Icon className="size-3.5" />
+            )}
           </Button>
         ) : null}
       </div>
@@ -344,6 +360,7 @@ function DictionaryEditor(props: {
     <>
       <div className="flex items-start gap-1.5">
         <Textarea
+          size="sm"
           value={termDraft}
           rows={1}
           maxLength={5_100}
@@ -357,7 +374,7 @@ function DictionaryEditor(props: {
             addTerm();
           }}
         />
-        <Button type="button" disabled={!canAddTerm} onClick={addTerm}>
+        <Button size="standard" type="button" disabled={!canAddTerm} onClick={addTerm}>
           Add
         </Button>
       </div>
@@ -376,6 +393,7 @@ function DictionaryEditor(props: {
               ) : null}
               {aliasDraft?.term === term ? (
                 <Input
+                  size="settings"
                   autoFocus
                   value={aliasDraft.value}
                   maxLength={50}
@@ -679,79 +697,6 @@ function useVoiceModels(prepared: PreparedConnection | null) {
 
 type VoiceModels = ReturnType<typeof useVoiceModels>;
 
-function ModelFolderSettings({
-  prepared,
-  catalog,
-}: {
-  prepared: PreparedConnection;
-  catalog: VoiceModels;
-}) {
-  const [draft, setDraft] = useState("");
-  const { status, run, controlsDisabled } = catalog;
-  if (!status?.supported || status.modelDirectories === undefined) return null;
-  const directories = status.modelDirectories;
-  const valid = /^(\/|\\\\|[A-Za-z]:[/\\])/.test(draft.trim());
-  const save = (next: string[], onSuccess?: () => void) =>
-    run("Could not update model folders", async () => {
-      await runEnvironmentSpeech(updateEnvironmentSpeechModelDirectories(prepared, next));
-      onSuccess?.();
-    });
-  const add = () => {
-    if (!valid || controlsDisabled || directories.length >= 20) return;
-    void save([...directories, draft.trim()], () => setDraft(""));
-  };
-  return (
-    <SettingsRow
-      {...searchableSetting("speech-model-folders")}
-      title="Model folders"
-      description="Look for downloaded models in folders on this environment. T3 Code never changes files there."
-      control={
-        <div className="flex w-full max-w-80 items-center gap-1.5">
-          <Input
-            size="settings"
-            value={draft}
-            placeholder="Add a folder path"
-            aria-label="Add a model folder"
-            disabled={controlsDisabled}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                add();
-              }
-            }}
-          />
-          <Button
-            size="standard"
-            disabled={controlsDisabled || !valid || directories.length >= 20}
-            onClick={add}
-          >
-            Add
-          </Button>
-        </div>
-      }
-    >
-      {directories.length > 0 && (
-        <div aria-label="Model folders" className="mt-3 flex flex-wrap gap-1.5">
-          {directories.map((directory) => (
-            <Button
-              key={directory}
-              size="xs"
-              variant="secondary"
-              disabled={controlsDisabled}
-              aria-label={`Remove folder ${directory}`}
-              onClick={() => void save(directories.filter((entry) => entry !== directory))}
-            >
-              {directory}
-              <XIcon className="size-3" />
-            </Button>
-          ))}
-        </div>
-      )}
-    </SettingsRow>
-  );
-}
-
 function AdvancedSpeechSettings({
   prepared,
   catalog,
@@ -864,6 +809,8 @@ function SpeechModelBrowser(props: {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SpeechModelSort>("recommended");
   const [downloadedOnly, setDownloadedOnly] = useState(false);
+  const [existingPath, setExistingPath] = useState("");
+  const canReadFiles = useEnvironmentScope(prepared.environmentId, AuthFilesystemReadScope);
   const [languageSearch, setLanguageSearch] = useState("");
   const [selection, setSelection] = useState<string[] | null>(null);
   const [preferred] = useState(preferredSpeechLanguages);
@@ -889,6 +836,7 @@ function SpeechModelBrowser(props: {
     downloadedOnly,
     sort,
     accuracyLanguage,
+    benchmarkTier: status?.supported ? status.benchmarkTier : "accelerated",
   });
   const activeModel = models.find((model) => model.active);
   const renderedModels =
@@ -910,7 +858,7 @@ function SpeechModelBrowser(props: {
             <SettingsNote>
               Pick languages to see models that support all of them. Accuracy is word or character
               error rate: lower is better. Speed is the time to transcribe 30 seconds of audio on
-              Handy’s benchmark GPU.
+              Handy’s benchmark {status.benchmarkTier === "cpu" ? "CPU" : "GPU"}.
             </SettingsNote>
           </div>
           <div className="@min-[32rem]/voice-models:grid @min-[32rem]/voice-models:grid-cols-[11rem_minmax(0,1fr)]">
@@ -920,7 +868,7 @@ function SpeechModelBrowser(props: {
                   Languages
                 </Text>
                 <Input
-                  size="compact"
+                  size="settings"
                   aria-label="Search languages"
                   placeholder="Search languages"
                   value={languageSearch}
@@ -965,7 +913,7 @@ function SpeechModelBrowser(props: {
                 </Text>
                 <InputGroup>
                   <InputGroupInput
-                    size="compact"
+                    size="settings"
                     aria-label="Search transcription models"
                     placeholder="Search models"
                     value={search}
@@ -1028,6 +976,7 @@ function SpeechModelBrowser(props: {
                     busy: controlsDisabled,
                     canCancel,
                     comparisonLanguages: selectedLanguages,
+                    benchmarkTier: status.benchmarkTier,
                     onDownload: () =>
                       void run(
                         "Could not download the model",
@@ -1064,6 +1013,38 @@ function SpeechModelBrowser(props: {
                   );
                 })}
               </div>
+              {status.supportsModelLinking && canReadFiles ? (
+                <form
+                  className="flex items-center gap-2 border-t border-border/60 p-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void run("Could not use a model from that path", async () => {
+                      await runEnvironmentSpeech(
+                        linkEnvironmentSpeechModels(prepared, existingPath),
+                      );
+                      setExistingPath("");
+                    });
+                  }}
+                >
+                  <div className="min-w-0 flex-1">
+                    <Input
+                      size="compact"
+                      aria-label="Path to a model file or folder already on this environment"
+                      placeholder="Already downloaded elsewhere? Paste the model file or folder path"
+                      value={existingPath}
+                      onChange={(e) => setExistingPath(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="secondary"
+                    disabled={controlsDisabled || !existingPath.trim()}
+                  >
+                    Use existing
+                  </Button>
+                </form>
+              ) : null}
             </div>
           </div>
         </>
@@ -1285,8 +1266,6 @@ export function VoiceSettingsPanel() {
           model || destination.cloudProvider ? undefined : "voice-transcription-destination",
         "speech-models": prepared ? undefined : "voice-transcription-destination",
         "speech-hardware": prepared && model ? undefined : "voice-transcription-destination",
-        "speech-model-folders":
-          model?.modelDirectories !== undefined ? undefined : "voice-transcription-destination",
         "transcription-test": !prepared
           ? "voice-transcription-destination"
           : !model || model.state === "missing-model"
@@ -1376,49 +1355,6 @@ export function VoiceSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
-          }
-        />
-        <SettingsRow
-          {...searchableSetting("speech-recording-cue")}
-          title="Sound cue"
-          description="Play a short sound when recording starts."
-          control={
-            <div className="flex items-center gap-2">
-              <Select
-                value={settings.speechRecordingCueSound}
-                disabled={!settings.speechRecordingCue}
-                onValueChange={(value) => {
-                  const sound = SpeechRecordingCueSound.literals.find(
-                    (literal) => literal === value,
-                  );
-                  if (!sound) return;
-                  // Choosing a sound previews it, matching the Snap Shot sound picker.
-                  playRecordingCue(sound);
-                  void updateClientSettings({ speechRecordingCueSound: sound });
-                }}
-              >
-                <SelectTrigger size="sm" aria-label="Recording cue sound" className="w-32">
-                  <SelectValue>
-                    {RECORDING_CUE_SOUNDS[settings.speechRecordingCueSound].label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {SpeechRecordingCueSound.literals.map((sound) => (
-                    <SelectItem key={sound} value={sound}>
-                      {RECORDING_CUE_SOUNDS[sound].label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-              <Switch
-                aria-label="Sound cue"
-                checked={settings.speechRecordingCue}
-                onCheckedChange={(checked) => {
-                  if (checked) playRecordingCue(settings.speechRecordingCueSound);
-                  void updateClientSettings({ speechRecordingCue: checked });
-                }}
-              />
-            </div>
           }
         />
       </SettingsSection>
@@ -1615,13 +1551,6 @@ export function VoiceSettingsPanel() {
             }
           />
         ) : null}
-        {prepared && (
-          <ModelFolderSettings
-            key={`folders:${prepared.environmentId}`}
-            prepared={prepared}
-            catalog={catalog}
-          />
-        )}
         {prepared ? (
           <SpeechModelBrowser
             key={prepared.environmentId}

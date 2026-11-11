@@ -3,22 +3,19 @@ import { page } from "vite-plus/test/browser";
 import "~/index.css";
 
 import { render } from "../../test/render";
+import { __setClientSettingsForTests, getClientSettings } from "../hooks/useSettings";
 import { useLayoutBehaviorStore } from "./layoutBehavior";
 import { createLayoutLauncherContent, createLayoutState, selectFocusedTab } from "./layoutModel";
 import { useLayoutStore } from "./layoutStore";
 import { LayoutSurfaceHost } from "./SurfaceHost";
 
-// Panes only run off screen when the strip scrolls, so the test owns the layout behavior.
-vi.mock(import("./useSyncLayoutBehavior"), () => ({ useSyncLayoutBehavior: () => {} }));
-
 const TOUR_KEY = "t3code:layout-tour:v1";
 
 function setup() {
-  const original = useLayoutStore.getState().layout;
+  const settings = getClientSettings();
   const behavior = useLayoutBehaviorStore.getState().behavior;
-  useLayoutBehaviorStore.setState({
-    behavior: { ...behavior, scrollingWorkspaces: true, whenNoRoom: "always-scroll" },
-  });
+  __setClientSettingsForTests({ ...settings, scrollingWorkspacesEnabled: true });
+  const original = useLayoutStore.getState().layout;
   const tour = localStorage.getItem(TOUR_KEY);
   localStorage.setItem(TOUR_KEY, "true");
   useLayoutStore.setState({ layout: createLayoutState() });
@@ -39,8 +36,9 @@ function setup() {
   return {
     second: second!,
     [Symbol.dispose]: () => {
-      useLayoutStore.setState({ layout: original });
+      __setClientSettingsForTests(settings);
       useLayoutBehaviorStore.setState({ behavior });
+      useLayoutStore.setState({ layout: original });
       if (tour === null) localStorage.removeItem(TOUR_KEY);
       else localStorage.setItem(TOUR_KEY, tour);
     },
@@ -76,7 +74,7 @@ async function clickHeld(element: HTMLElement) {
     .toHaveAttribute("data-layout-pane-focused", "true");
   expect(strip.scrollLeft).toBe(held);
   element.dispatchEvent(new PointerEvent("pointerup", pointer));
-  await page.elementLocator(element).click();
+  element.click();
   await vi.waitFor(() => expect(strip.scrollLeft).toBeGreaterThan(held));
 }
 

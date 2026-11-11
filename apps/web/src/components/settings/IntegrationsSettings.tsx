@@ -658,9 +658,8 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
           }}
         >
           <SelectTrigger
-            variant="well"
-            size="compact"
-            className="w-full sm:w-40"
+            size="sm"
+            className="w-full sm:w-52"
             aria-label="Open links in"
             leadingIcon={<GlobeIcon />}
           >

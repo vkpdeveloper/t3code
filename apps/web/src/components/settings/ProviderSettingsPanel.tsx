@@ -310,7 +310,13 @@ export function ProviderSettingsPanel(target: ProviderSettingsTarget) {
           <Button
             variant="secondary"
             size="sm"
-            render={<Link to="/welcome" hash={`agents:${target.resumeEnvironmentId}`} />}
+            render={
+              <Link
+                to="/welcome"
+                hash="setup"
+                search={{ resumeEnvironmentId: target.resumeEnvironmentId }}
+              />
+            }
           >
             Back to setup
           </Button>

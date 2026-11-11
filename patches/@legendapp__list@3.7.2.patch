@@ -1,5 +1,17 @@
+diff --git a/react.d.ts b/react.d.ts
+index 358fcd7..e3c7de6 100644
+--- a/react.d.ts
++++ b/react.d.ts
+@@ -314,6 +314,7 @@ interface LegendListSpecificProps<ItemT, TItemType extends string | undefined> {
+      * @default 0.1
+      */
+     maintainScrollAtEndThreshold?: number;
++    immediateWebShrinks?: boolean;
+     /**
+      * Maintains visibility of content.
+      * - size (default: true) stabilizes during size/layout changes while scrolling.
 diff --git a/react.js b/react.js
-index 5155454..2885128 100644
+index 5155454..ddb57ab 100644
 --- a/react.js
 +++ b/react.js
 @@ -3489,6 +3489,16 @@ function abortBootstrapInitialScroll(ctx) {
@@ -46,7 +58,14 @@ index 5155454..2885128 100644
        const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
        const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
        prevRect = rectObserved;
-@@ -6296,7 +6306,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6290,13 +6300,13 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  const shouldDeferWebShrinkLayoutUpdate = !listState.props.immediateWebShrinks && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
        var _a4;
        if (state.itemKey === currentItemKey) {
          const element = ref.current;
@@ -55,8 +74,24 @@ index 5155454..2885128 100644
          if (rect) {
            layout = { height: rect.height, width: rect.width };
          }
+@@ -9133,6 +9143,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     getFixedItemSize,
+     getItemType,
+     horizontal,
++    immediateWebShrinks,
+     rtl,
+     estimatedHeaderSize,
+     initialScrollAtEnd = false,
+@@ -9431,6 +9442,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+     horizontal: !!horizontal,
++    immediateWebShrinks: !!immediateWebShrinks,
+     itemsAreEqual,
+     keyExtractor: useWrapIfItem(keyExtractor),
+     maintainScrollAtEnd: maintainScrollAtEndConfig,
 diff --git a/react.mjs b/react.mjs
-index ce08abe..2c764cb 100644
+index ce08abe..35d89ab 100644
 --- a/react.mjs
 +++ b/react.mjs
 @@ -3468,6 +3468,16 @@ function abortBootstrapInitialScroll(ctx) {
@@ -103,7 +138,14 @@ index ce08abe..2c764cb 100644
        const previousRect = prevRect != null ? prevRect : getContainerLayoutBaseline(element);
        const didSizeChange = previousRect === void 0 || rectObserved.width !== previousRect.width || rectObserved.height !== previousRect.height;
        prevRect = rectObserved;
-@@ -6275,7 +6285,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+@@ -6269,13 +6279,13 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  const shouldDeferWebShrinkLayoutUpdate = !listState.props.immediateWebShrinks && !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
        var _a4;
        if (state.itemKey === currentItemKey) {
          const element = ref.current;
@@ -112,3 +154,99 @@ index ce08abe..2c764cb 100644
          if (rect) {
            layout = { height: rect.height, width: rect.width };
          }
+@@ -9112,6 +9122,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     getFixedItemSize,
+     getItemType,
+     horizontal,
++    immediateWebShrinks,
+     rtl,
+     estimatedHeaderSize,
+     initialScrollAtEnd = false,
+@@ -9410,6 +9421,7 @@ var LegendListInner = typedForwardRef(function LegendListInner2(props, forwarded
+     hasExternalScroll,
+     hideItemsUntilMeasured: experimental_hideItemsUntilMeasured,
+     horizontal: !!horizontal,
++    immediateWebShrinks: !!immediateWebShrinks,
+     itemsAreEqual,
+     keyExtractor: useWrapIfItem(keyExtractor),
+     maintainScrollAtEnd: maintainScrollAtEndConfig,
+diff --git a/react-native.js b/react-native.js
+index 4af685dfb961eb0c8a4bf1ae9132c9304cf4fa4d..df4ead7ae4f03cd0fbcd99a3df7d95e15b1852b1 100644
+--- a/react-native.js
++++ b/react-native.js
+@@ -1795,7 +1795,35 @@ function resolvePendingNativeMVCPAdjust(ctx, newScroll) {
+   }
+   return false;
+ }
++// T3 patch: while following the end, a size-only change keeps the end in the same pass that
++// repositions the items. Native end following otherwise runs a frame later, after MVCP has
++// anchored the top row, so the feed visibly jumps twice.
++function shouldHoldEndOnSizeChange(ctx, dataChanged) {
++  const state = ctx.state;
++  return !dataChanged && !!state.props.maintainScrollAtEnd && !!state.didFinishInitialScroll && !state.endFollowInterrupted && !state.visibleContentAnchor && state.scrollingTo === void 0 && !state.isDragging && state.userScrollContentSize === void 0 && !!peek$(ctx, "isFollowingEnd");
++}
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
++  const restore = prepareDefaultMVCP(ctx, dataChanged, adjustmentSource);
++  if (!shouldHoldEndOnSizeChange(ctx, dataChanged)) {
++    return restore;
++  }
++  return () => {
++    if (!shouldHoldEndOnSizeChange(ctx, dataChanged)) {
++      restore == null ? void 0 : restore();
++      return;
++    }
++    // Content that shrinks under an offset past its new end pulls the native offset back by itself.
++    const endOffset = getScrollRangeEnd(ctx);
++    if (ctx.state.scroll > endOffset) {
++      ctx.state.scroll = endOffset;
++    }
++    const positionDiff = endOffset - ctx.state.scroll;
++    if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
++      requestAdjust(ctx, positionDiff, adjustmentSource);
++    }
++  };
++}
++function prepareDefaultMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b, _c;
+   const state = ctx.state;
+   const { idsInView, positions, props } = state;
+diff --git a/react-native.mjs b/react-native.mjs
+index 9ebfddc183a9b202d35c990a387c9b628feeb185..c414a49e866ecab1393645101fb67d55530a7d00 100644
+--- a/react-native.mjs
++++ b/react-native.mjs
+@@ -1774,7 +1774,35 @@ function resolvePendingNativeMVCPAdjust(ctx, newScroll) {
+   }
+   return false;
+ }
++// T3 patch: while following the end, a size-only change keeps the end in the same pass that
++// repositions the items. Native end following otherwise runs a frame later, after MVCP has
++// anchored the top row, so the feed visibly jumps twice.
++function shouldHoldEndOnSizeChange(ctx, dataChanged) {
++  const state = ctx.state;
++  return !dataChanged && !!state.props.maintainScrollAtEnd && !!state.didFinishInitialScroll && !state.endFollowInterrupted && !state.visibleContentAnchor && state.scrollingTo === void 0 && !state.isDragging && state.userScrollContentSize === void 0 && !!peek$(ctx, "isFollowingEnd");
++}
+ function prepareMVCP(ctx, dataChanged, adjustmentSource) {
++  const restore = prepareDefaultMVCP(ctx, dataChanged, adjustmentSource);
++  if (!shouldHoldEndOnSizeChange(ctx, dataChanged)) {
++    return restore;
++  }
++  return () => {
++    if (!shouldHoldEndOnSizeChange(ctx, dataChanged)) {
++      restore == null ? void 0 : restore();
++      return;
++    }
++    // Content that shrinks under an offset past its new end pulls the native offset back by itself.
++    const endOffset = getScrollRangeEnd(ctx);
++    if (ctx.state.scroll > endOffset) {
++      ctx.state.scroll = endOffset;
++    }
++    const positionDiff = endOffset - ctx.state.scroll;
++    if (Math.abs(positionDiff) > MVCP_POSITION_EPSILON) {
++      requestAdjust(ctx, positionDiff, adjustmentSource);
++    }
++  };
++}
++function prepareDefaultMVCP(ctx, dataChanged, adjustmentSource) {
+   var _a3, _b, _c;
+   const state = ctx.state;
+   const { idsInView, positions, props } = state;

@@ -3,6 +3,8 @@
 import { useEffectEvent, useLayoutEffect, useRef } from "react";
 
 import { useClientSettings } from "../hooks/useSettings";
+import { closedLayoutTabIds } from "../layout/layoutModel";
+import { useLayoutStore } from "../layout/layoutStore";
 import { MotionAnimation, playMotion, toDevicePixel, type MotionRun } from "./animation";
 import { takePaneDrop } from "./paneDrop";
 import { configureMotion } from "./registry";
@@ -72,7 +74,7 @@ function slide(
     if (earlier) rest = onRest ? () => (earlier(), onRest()) : earlier;
   }
   const motion = MotionAnimation.start("window-movement", 1, 0);
-  if (motion.durationMs <= 0 || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+  if (motion.durationMs <= 0 || (toDevicePixel(dx) === 0 && toDevicePixel(dy) === 0)) {
     kept?.remove();
     rest?.();
     return;
@@ -375,16 +377,22 @@ function copyPainted(from: Element | ShadowRoot, to: Element | ShadowRoot, copy:
     ) {
       twin.getContext("2d")?.drawImage(element, 0, 0);
     }
-    if (element.shadowRoot && twin.shadowRoot) {
-      twin.shadowRoot.replaceChildren(
+    if (element.shadowRoot) {
+      let shadow;
+      try {
+        shadow = twin.shadowRoot ?? twin.attachShadow({ mode: "open" });
+      } catch {
+        return;
+      }
+      shadow.replaceChildren(
         ...[...element.shadowRoot.childNodes].map((node) => node.cloneNode(true)),
       );
-      copyPainted(element.shadowRoot, twin.shadowRoot, copy);
+      copyPainted(element.shadowRoot, shadow, copy);
     }
   });
 }
 
-export function keepClosingPane(tabId: string, pane: HTMLElement): void {
+function keepClosingPane(tabId: string, pane: HTMLElement): void {
   if (MotionAnimation.start("window-movement", 0, 1).durationMs <= 0) return;
   const copy: PaneCopy = { pane: pane.cloneNode(true) as HTMLElement, scrolls: [] };
   copyPainted(pane, copy.pane, copy);
@@ -397,6 +405,16 @@ export function keepClosingPane(tabId: string, pane: HTMLElement): void {
   }
   closingCopies.set(tabId, copy);
 }
+
+useLayoutStore.subscribe(({ layout }, previous) => {
+  if (layout === previous.layout) return;
+  for (const tabId of closedLayoutTabIds(previous.layout, layout)) {
+    const pane = document.querySelector<HTMLElement>(
+      `[data-layout-tab-id="${CSS.escape(tabId)}"]:is([data-layout-surface], [data-layout-page])`,
+    );
+    if (pane) keepClosingPane(tabId, pane);
+  }
+});
 
 /** The stage must be a stacking context. Workspace or viewport changes move panes 1:1; unframed lone
  * panes never animate independently. */
@@ -440,9 +458,8 @@ export function usePaneMotion(
   useLayoutEffect(() => {
     const drop = takePaneDrop();
     const stage = stageRef.current;
-    const copies = new Map(closingCopies);
-    closingCopies.clear();
     if (!stage || key === null) {
+      closingCopies.clear();
       previous.current = null;
       return;
     }
@@ -465,6 +482,12 @@ export function usePaneMotion(
       boxes.set(tabId, { element: child, paneId, ...boxOf(child) });
       // Every pane shares the pane radius.
       if (radius === null) radius = radiusOf(child);
+    }
+    const copies = new Map<string, PaneCopy>();
+    for (const [tabId, copy] of closingCopies) {
+      if (boxes.has(tabId)) continue;
+      copies.set(tabId, copy);
+      closingCopies.delete(tabId);
     }
     const before = previous.current;
     previous.current = { key, placement, boxes };
@@ -553,8 +576,16 @@ export function usePaneMotion(
     if (!before || !animate) return;
     const paneWas = new Map<string, PaneBox>();
     for (const box of previousBoxes.values()) paneWas.set(box.paneId, box);
-    const wasOf = (tabId: string, box: PaneBox) =>
-      drop ? paneWas.get(box.paneId) : (previousBoxes.get(tabId) ?? paneWas.get(box.paneId));
+    const wasOf = (tabId: string, box: PaneBox) => {
+      const was = drop
+        ? paneWas.get(box.paneId)
+        : (previousBoxes.get(tabId) ?? paneWas.get(box.paneId));
+      const inherited = was && was.element !== box.element ? slides.get(was.element) : undefined;
+      if (!was || !inherited) return was;
+      const owed = inherited.run.value();
+      return { ...was, x: was.x + inherited.dx * owed, y: was.y + inherited.dy * owed };
+    };
+    const wasBy = new Map([...boxes].map(([tabId, box]) => [tabId, wasOf(tabId, box)]));
     const kept = (from: number, fromSize: number, to: number, toSize: number) =>
       drop && Math.abs(from + fromSize - to - toSize) < 1;
     const moved = (was: Box, box: Box) => ({
@@ -565,7 +596,7 @@ export function usePaneMotion(
     // below retargets it: its move plus what a running slide still owes.
     const shows = new Map<string, { dx: number; dy: number }>();
     for (const [tabId, box] of boxes) {
-      const was = wasOf(tabId, box);
+      const was = wasBy.get(tabId);
       const running = slides.get(box.element);
       const owed = running ? running.run.value() : 0;
       const move = was ? moved(was, box) : { dx: 0, dy: 0 };
@@ -629,7 +660,7 @@ export function usePaneMotion(
       }
     };
     for (const [tabId, box] of boxes) {
-      const was = wasOf(tabId, box);
+      const was = wasBy.get(tabId);
       if (!was && drop) {
         box.element.style.zIndex = "1";
         raised.push(box.element);

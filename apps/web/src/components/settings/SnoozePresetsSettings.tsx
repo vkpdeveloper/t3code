@@ -375,7 +375,7 @@ function SnoozePresetFields(props: {
           onChange(next);
         }}
       >
-        <SelectTrigger variant="well" size="compact" className="w-32 min-w-0" aria-label="When">
+        <SelectTrigger size="sm" className="w-32 min-w-0" aria-label="When">
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>
@@ -431,7 +431,7 @@ function DurationFields(props: { minutes: number; onChange: (minutes: number) =>
   return (
     <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2 @min-[37rem]/snooze:contents">
       <NumberField
-        size="compact"
+        size="sm"
         className="w-32 shrink-0 @min-[37rem]/snooze:col-start-3"
         min={1}
         max={maxAmount}
@@ -473,7 +473,7 @@ function DurationFields(props: { minutes: number; onChange: (minutes: number) =>
           }
         }}
       >
-        <SelectTrigger variant="well" size="compact" className="w-28 min-w-0" aria-label="Unit">
+        <SelectTrigger size="sm" className="w-28 min-w-0" aria-label="Unit">
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>

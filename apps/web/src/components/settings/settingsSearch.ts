@@ -164,7 +164,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     ],
   },
   {
-    heading: "Application",
+    heading: null,
     paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
   },
 ];
@@ -370,7 +370,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "theme",
     title: "Themes",
     to: "/settings/appearance",
-    searchTerms: ["appearance colors palette custom import export download"],
+    searchTerms: ["appearance colors palette custom import export download t3 code classic old"],
     targetId: "appearance",
   },
   {
@@ -554,6 +554,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "screen-reader-announcements",
+    title: "Screen reader announcements",
+    to: "/settings/chat",
+    searchTerms: [
+      "accessibility a11y screen reader nvda jaws voiceover orca narrator speech announce read aloud messages activity steps",
+    ],
+  },
+  {
     id: "guest-links",
     title: "Guest links",
     to: "/settings/labs",
@@ -608,14 +616,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Dictation shortcut",
     to: "/settings/voice",
     searchTerms: ["speech voice keyboard hotkey hold toggle auto"],
-  },
-  {
-    id: "speech-recording-cue",
-    title: "Sound cue",
-    to: "/settings/voice",
-    searchTerms: [
-      "speech voice dictation stt recording start audio feedback beep click chime tone classic signature soft wood warm synth thock",
-    ],
   },
   {
     id: "speech-language",
@@ -676,12 +676,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "speech voice stt download whisper parakeet canary moonshine accuracy speed benchmark languages",
     ],
-  },
-  {
-    id: "speech-model-folders",
-    title: "Model folders",
-    to: "/settings/voice",
-    searchTerms: ["speech voice local models folder directory path reuse hex handy"],
   },
   {
     id: "speech-hardware",
@@ -1239,18 +1233,18 @@ export const SETTINGS_SEARCH_ITEMS = [
   ...sourceControlHostSearchItems(sourceControlClients.definitions),
   {
     id: "source-control-writing-style",
-    title: "Source control writing style",
+    title: "Commit and pull request writing",
     to: "/settings/source-control",
     searchTerms: [
-      "repository conventions conventional commits custom instructions change descriptions request titles",
+      "repository conventions conventional commits custom instructions commit messages change pr pull request merge request titles descriptions body style prompt write my own",
     ],
     environmentOnly: true,
   },
   {
     id: "follow-change-request-templates",
-    title: "Follow change request templates",
+    title: "Follow pull request templates",
     to: "/settings/source-control",
-    searchTerms: ["repository pr pull request description structure"],
+    searchTerms: ["repository pr pull request merge request change request description structure"],
     environmentOnly: true,
   },
   {

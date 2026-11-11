@@ -10,7 +10,6 @@ import * as Result from "effect/Result";
 import * as Scheduler from "effect/Scheduler";
 import * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
-import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS } from "@t3tools/contracts";
@@ -50,7 +49,6 @@ const loadNative = vi.hoisted(() =>
     },
   ),
 );
-const sharedModels = vi.hoisted(() => new Set<string>());
 const readyModels = vi.hoisted(() => new Set(["test-model", "fallback-model"]));
 const modelDefinitions = vi.hoisted(() => [
   {
@@ -60,7 +58,10 @@ const modelDefinitions = vi.hoisted(() => [
     size: 4,
     languages: ["en", "fr"],
     accuracy: 1,
-    benchmark: { accuracy: { en: { grade: "A-", errorPercent: 4 } }, secondsPer30s: 1.2 },
+    benchmark: {
+      accuracy: { en: { grade: "A-", errorPercent: 4 } },
+      secondsPer30s: { cpu: 3, accelerated: 1.2 },
+    },
     speed: 1,
     recommended: true,
     supportsStreaming: true,
@@ -98,14 +99,12 @@ const download = vi.fn<SpeechModelStore.SpeechModelStore["Service"]["download"]>
 const store = Layer.succeed(
   SpeechModelStore.SpeechModelStore,
   SpeechModelStore.SpeechModelStore.of({
-    isReady: (model, directories = []) =>
-      Effect.sync(
-        () => readyModels.has(model.id) || (directories.length > 0 && sharedModels.has(model.id)),
-      ),
-    hasOwnedFile: (model) => Effect.sync(() => readyModels.has(model.id)),
+    isReady: (model) => Effect.sync(() => readyModels.has(model.id)),
     installedPath: (model) =>
       Effect.sync(() => (readyModels.has(model.id) ? "test.gguf" : undefined)),
     download,
+    link: () => Effect.succeed([]),
+    linkedFrom: () => Effect.undefined,
     remove: (model) =>
       Effect.sync(() => {
         readyModels.delete(model.id);
@@ -126,7 +125,6 @@ beforeEach(() => {
   native.backend = "Vulkan0";
   native.supportsVocabulary = false;
   native.supportsStreaming = true;
-  sharedModels.clear();
   native.languages = ["en", "fr"];
   readyModels.clear();
   readyModels.add("test-model");
@@ -153,31 +151,40 @@ it("rejects empty, misaligned, non-finite, and oversized PCM as invalid audio", 
   }
 });
 
-it.effect("prepares a batch model before audio arrives and reuses it for transcription", () =>
-  Effect.gen(function* () {
-    const speech = yield* SpeechService.SpeechService;
-    yield* speech.selectModel("fallback-model");
-    yield* speech.prepareModel;
-    expect(loadNative).toHaveBeenCalledTimes(1);
-    expect(native.transcribe).not.toHaveBeenCalled();
-    native.supportsStreaming = false;
-    yield* Effect.gen(function* () {
-      const stream = yield* speech.startStream({
-        ...DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS,
-        speechLanguage: "fr",
-        speechTranslateToEnglish: true,
-        speechSilenceFiltering: false,
+it.effect.each(["CPU", "Vulkan0"])(
+  "prepares a batch model on %s before audio arrives and reuses it for transcription",
+  (backend) =>
+    Effect.gen(function* () {
+      const speech = yield* SpeechService.SpeechService;
+      yield* speech.selectModel("fallback-model");
+      loadNative.mockImplementationOnce(async () => {
+        native.backend = backend;
+        return native;
       });
-      expect(native.begin).toHaveBeenLastCalledWith(
-        { timestamps: "none", language: "fr", task: "translate", targetLanguage: "en" },
-        false,
-        "test.gguf",
-      );
-      expect(yield* stream.finish).toBe("hello");
-    }).pipe(Effect.scoped);
-    expect(yield* speech.transcribe(pcm(), DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS)).toBe("hello");
-    expect(loadNative).toHaveBeenCalledTimes(1);
-  }).pipe(Effect.provide(layer)),
+      yield* speech.prepareModel;
+      expect(yield* speech.status).toMatchObject({
+        benchmarkTier: backend === "CPU" ? "cpu" : "accelerated",
+      });
+      expect(loadNative).toHaveBeenCalledTimes(1);
+      expect(native.transcribe).not.toHaveBeenCalled();
+      native.supportsStreaming = false;
+      yield* Effect.gen(function* () {
+        const stream = yield* speech.startStream({
+          ...DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS,
+          speechLanguage: "fr",
+          speechTranslateToEnglish: true,
+          speechSilenceFiltering: false,
+        });
+        expect(native.begin).toHaveBeenLastCalledWith(
+          { timestamps: "none", language: "fr", task: "translate", targetLanguage: "en" },
+          false,
+          "test.gguf",
+        );
+        expect(yield* stream.finish).toBe("hello");
+      }).pipe(Effect.scoped);
+      expect(yield* speech.transcribe(pcm(), DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS)).toBe("hello");
+      expect(loadNative).toHaveBeenCalledTimes(1);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("sends the chosen language in the spelling the loaded model advertises", () =>
@@ -297,7 +304,7 @@ it.effect("rejects model mutations outside the offered registry", () =>
     expect(current).not.toHaveProperty("benchmark");
     expect(
       (yield* speech.models(true)).models.find((model) => model.active)?.benchmark?.secondsPer30s,
-    ).toBe(1.2);
+    ).toEqual({ cpu: 3, accelerated: 1.2 });
   }).pipe(Effect.provide(layer)),
 );
 
@@ -672,11 +679,19 @@ it.effect.each([{ devices: [] }, { devices: [{ id: "gpu", name: "Test GPU" }] }]
       const speech = yield* SpeechService.SpeechService;
       const discover = vi.mocked(listNativeSpeechGpuDevices).mockReset();
       discover.mockRejectedValueOnce(new Error("driver not ready")).mockResolvedValueOnce(devices);
-      expect(yield* speech.status).toMatchObject({ gpuDevices: [] });
+      expect(yield* speech.status).toMatchObject({ gpuDevices: [], benchmarkTier: "cpu" });
       yield* speech.status;
       expect(discover).toHaveBeenCalledOnce();
       yield* TestClock.adjust("1 minute");
-      expect(yield* speech.status).toMatchObject({ gpuDevices: devices });
+      expect(yield* speech.status).toMatchObject({
+        gpuDevices: devices,
+        benchmarkTier: devices.length ? "accelerated" : "cpu",
+      });
+      expect(yield* speech.updateAcceleration("cpu")).toMatchObject({ benchmarkTier: "cpu" });
+      expect(yield* speech.updateAcceleration('gpu:["vulkan","gpu-1"]')).toMatchObject({
+        benchmarkTier: "accelerated",
+      });
+      yield* speech.updateAcceleration("auto");
       yield* TestClock.adjust("1 minute");
       expect(yield* speech.status).toMatchObject({ gpuDevices: devices });
       expect(discover).toHaveBeenCalledTimes(2);
@@ -707,9 +722,11 @@ it.effect(
             ],
           };
           const speech = yield* SpeechService.SpeechService;
+          expect(yield* speech.status).toMatchObject({ benchmarkTier: "accelerated" });
           expect(yield* speech.transcribe(pcm(), options)).toBe(
             cpuSupportsVocabulary ? "git hub Bob" : "GitHub Bob",
           );
+          expect(yield* speech.status).toMatchObject({ benchmarkTier: "cpu" });
           expect(yield* speech.transcribe(pcm(), DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS)).toBe(
             "hello",
           );
@@ -903,68 +920,5 @@ it.effect("does not restart a stream cancelled while native finalization is pend
     expect(Result.isFailure(yield* Fiber.join(request))).toBe(true);
     expect(loadNative).toHaveBeenCalledOnce();
     expect(native.reset).toHaveBeenCalledOnce();
-  }).pipe(Effect.provide(layer)),
-);
-
-it.effect("saves normalized model folders and releases a loaded model when they change", () =>
-  Effect.gen(function* () {
-    const speech = yield* SpeechService.SpeechService;
-    const path = yield* Path.Path;
-    const directory = path.resolve("speech-models");
-    yield* speech.prepareModel;
-    const status = yield* speech.updateModelDirectories([` ${directory} `, directory]);
-    expect(status).toMatchObject({ supported: true, modelDirectories: [directory] });
-    expect(native.dispose).toHaveBeenCalled();
-    const platform = yield* HostProcess.Platform;
-    for (const invalidPath of ["relative", "", platform === "win32" ? "/models" : "C:\\models"]) {
-      const invalid = yield* Effect.result(speech.updateModelDirectories([invalidPath]));
-      expect(invalid).toMatchObject({
-        _tag: "Failure",
-        failure: { _tag: "SpeechInvalidModelDirectoryError" },
-      });
-    }
-    expect(yield* speech.status).toMatchObject({ modelDirectories: [directory] });
-    expect(yield* speech.updateModelDirectories([])).toMatchObject({ modelDirectories: [] });
-  }).pipe(Effect.provide(Layer.mergeAll(layer, NodeServices.layer))),
-);
-
-it.effect("keeps the selected model when removing its owned copy leaves a shared copy", () =>
-  Effect.gen(function* () {
-    const speech = yield* SpeechService.SpeechService;
-    const path = yield* Path.Path;
-    yield* speech.updateModelDirectories([path.resolve("shared-models")]);
-    sharedModels.add("test-model");
-    expect(
-      (yield* speech.models(false)).models.find((model) => model.id === "test-model"),
-    ).toMatchObject({ shared: false });
-    yield* speech.removeModel("test-model");
-    expect(yield* speech.status).toMatchObject({ modelId: "test-model", state: "ready" });
-    expect(
-      (yield* speech.models(false)).models.find((model) => model.id === "test-model"),
-    ).toMatchObject({ shared: true, active: true });
-  }).pipe(Effect.provide(Layer.mergeAll(layer, NodeServices.layer))),
-);
-
-it.effect("holds the busy slot until new model folders are saved", () =>
-  Effect.gen(function* () {
-    const speech = yield* SpeechService.SpeechService;
-    const settings = yield* ServerSettings.ServerSettingsService;
-    const entered = yield* Deferred.make<void>();
-    const release = yield* Deferred.make<void>();
-    const update = settings.updateSettings;
-    using _save = vi
-      .spyOn(settings, "updateSettings")
-      .mockImplementation((patch) =>
-        Deferred.succeed(entered, undefined).pipe(
-          Effect.andThen(Deferred.await(release)),
-          Effect.andThen(update(patch)),
-        ),
-      );
-    const saving = yield* speech.updateModelDirectories([]).pipe(Effect.forkChild);
-    yield* Deferred.await(entered);
-    const preparation = yield* Effect.result(speech.prepareModel);
-    yield* Deferred.succeed(release, undefined);
-    yield* Fiber.join(saving);
-    expect(preparation).toMatchObject({ _tag: "Failure", failure: { _tag: "SpeechBusyError" } });
   }).pipe(Effect.provide(layer)),
 );

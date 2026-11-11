@@ -14,7 +14,10 @@ import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as ServerConfig from "../config.ts";
+import { expandHomePath } from "../os-jank.ts";
 import type { SpeechModel } from "./model.ts";
 
 type ModelFile = Pick<SpeechModel, "id" | "filename" | "revision" | "size" | "sha256">;
@@ -41,21 +44,28 @@ export class SpeechModelStore extends Context.Service<
   SpeechModelStore,
   {
     /** Cheap size check for status polls; never hashes the file. */
-    readonly hasOwnedFile: (model: ModelFile) => Effect.Effect<boolean>;
-    readonly isReady: (model: ModelFile, directories?: readonly string[]) => Effect.Effect<boolean>;
+    readonly isReady: (model: ModelFile) => Effect.Effect<boolean>;
     /** The installed file once its SHA-256 has been verified, hashing it on first use. */
-    readonly installedPath: (
-      model: ModelFile,
-      directories?: readonly string[],
-    ) => Effect.Effect<string | undefined>;
+    readonly installedPath: (model: ModelFile) => Effect.Effect<string | undefined>;
+    /** Links a copy the Hugging Face cache or Handy already holds; fetches only without one. */
     readonly download: (
       model: ModelFile,
       progress?: SpeechModelDownloadProgress,
-      directories?: readonly string[],
     ) => Effect.Effect<
       string,
       SpeechModelDownloadError | PlatformError | HttpClientError.HttpClientError
     >;
+    /**
+     * Installs catalog files already on this machine as symlinks, never copies.
+     * `source` is a file or a folder to search; returns the ids it installed.
+     */
+    readonly link: (
+      models: ReadonlyArray<ModelFile>,
+      source: string,
+    ) => Effect.Effect<ReadonlyArray<string>, PlatformError>;
+    /** The outside file a linked model points at. */
+    readonly linkedFrom: (model: ModelFile) => Effect.Effect<string | undefined>;
+    /** Removes T3 Code's file or link; a linked file itself is left in place. */
     readonly remove: (model: ModelFile) => Effect.Effect<void, PlatformError>;
   }
 >()("t3/speech/SpeechModelStore") {}
@@ -64,9 +74,14 @@ const DOWNLOAD_ATTEMPTS = 3;
 const PARTIAL_FILENAME =
   /\.gguf\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.part$/i;
 
+const LINK_SEARCH_DEPTH = 5;
+const LINK_SEARCH_ENTRIES = 5_000;
+
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
+  const platform = yield* HostProcess.Platform;
   const http = yield* HttpClient.HttpClient;
   const random = yield* SecureRandom.SecureRandom;
   const config = yield* ServerConfig.ServerConfig;
@@ -78,9 +93,30 @@ const make = Effect.gen(function* () {
     }
   }
   const modelPath = (model: ModelFile) => path.join(directory, model.filename);
+  const appDataDirectories =
+    platform === "darwin"
+      ? [path.join(home, "Library", "Application Support")]
+      : platform === "win32"
+        ? [path.join(home, "AppData", "Roaming")]
+        : [path.join(home, ".local", "share"), path.join(home, ".config")];
+  // Where the Hugging Face cache and Handy keep these same pinned files.
+  const knownCopies = (model: ModelFile) => [
+    path.join(
+      home,
+      ".cache",
+      "huggingface",
+      "hub",
+      `models--${model.id.replace("/", "--")}`,
+      "snapshots",
+      model.revision,
+      model.filename,
+    ),
+    ...appDataDirectories.map((appData) =>
+      path.join(appData, "com.pais.handy", "models", model.filename),
+    ),
+  ];
   // Files whose digest failed, by identity, so status polls stop calling them ready.
   const corrupt = new Map<string, string>();
-  const verifiedExternal = new Map<string, string>();
 
   const identity = (model: ModelFile, info: FileSystem.File.Info) =>
     [
@@ -116,23 +152,21 @@ const make = Effect.gen(function* () {
     model: ModelFile,
     file: string,
     onVerificationStart?: () => void,
-    shared = false,
   ) {
     const info = yield* expectedFile(model, file);
     if (!info) return undefined;
     const marker = identity(model, info);
     if (corrupt.get(file) === marker) return undefined;
-    const recorded = shared
-      ? verifiedExternal.get(file)
-      : yield* fs.readFileString(`${file}.verified`).pipe(Effect.orElseSucceed(() => undefined));
+    const recorded = yield* fs
+      .readFileString(`${file}.verified`)
+      .pipe(Effect.orElseSucceed(() => undefined));
     if (recorded === marker) return file;
     onVerificationStart?.();
     const valid = yield* digestMatches(model, file);
     if (!valid) corrupt.set(file, marker);
     const current = yield* expectedFile(model, file);
     if (!valid || !current || identity(model, current) !== marker) return undefined;
-    if (shared) verifiedExternal.set(file, marker);
-    else yield* fs.writeFileString(`${file}.verified`, marker, { mode: 0o600 }).pipe(Effect.ignore);
+    yield* fs.writeFileString(`${file}.verified`, marker, { mode: 0o600 }).pipe(Effect.ignore);
     return file;
   });
 
@@ -187,20 +221,80 @@ const make = Effect.gen(function* () {
     return downloaded;
   });
 
+  const filesUnder = Effect.fn("SpeechModelStore.filesUnder")(function* (source: string) {
+    const files: Array<{ readonly file: string; readonly size: number }> = [];
+    const pending = [{ entry: source, depth: LINK_SEARCH_DEPTH }];
+    for (let visited = 0; pending.length > 0 && visited < LINK_SEARCH_ENTRIES; visited += 1) {
+      const { entry, depth } = pending.pop()!;
+      const info = yield* statFile(entry);
+      if (info?.type === "File") files.push({ file: entry, size: Number(info.size) });
+      if (info?.type !== "Directory" || depth === 0) continue;
+      for (const name of yield* fs.readDirectory(entry).pipe(Effect.orElseSucceed(() => [])))
+        pending.push({ entry: path.join(entry, name), depth: depth - 1 });
+    }
+    return files;
+  });
+
+  const realPath = (file: string) => fs.realPath(file).pipe(Effect.orElseSucceed(() => undefined));
+
+  const link: SpeechModelStore["Service"]["link"] = Effect.fn("SpeechModelStore.link")(
+    function* (models, source) {
+      const root = path.resolve(
+        yield* expandHomePath(source.trim()).pipe(
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(HostProcess.HomeDirectory, home),
+        ),
+      );
+      yield* fs.makeDirectory(directory, { recursive: true });
+      const linked: string[] = [];
+      for (const { file, size } of yield* filesUnder(root)) {
+        for (const model of models) {
+          if (model.size !== size || linked.includes(model.id)) continue;
+          const finalPath = modelPath(model);
+          // Pointing at T3 Code's own model folder must not replace a file with a link to itself.
+          if ((yield* realPath(file)) === (yield* realPath(finalPath))) continue;
+          if (yield* verifiedPath(model, finalPath)) continue;
+          const hashed = yield* expectedFile(model, file);
+          if (!hashed || !(yield* digestMatches(model, file))) continue;
+          // Staged then renamed, so a failed link never removes the file already installed.
+          const staged = `${finalPath}.${yield* random.uuidV4()}.part`;
+          // Windows grants symlinks only to privileged accounts; a hard link also shares the bytes.
+          const hardLinked = yield* fs.symlink(file, staged).pipe(
+            Effect.as(false),
+            Effect.catch(() => fs.link(file, staged).pipe(Effect.as(true))),
+          );
+          const current = yield* expectedFile(model, staged);
+          const marker = identity(model, hashed);
+          if (!current || identity(model, current) !== marker) {
+            yield* fs.remove(staged, { force: true });
+            continue;
+          }
+          yield* fs.rename(staged, finalPath);
+          // A hard link cannot be read back, so its origin is recorded beside it.
+          yield* (
+            hardLinked
+              ? fs.writeFileString(`${finalPath}.source`, file, { mode: 0o600 })
+              : fs.remove(`${finalPath}.source`, { force: true })
+          ).pipe(Effect.ignore);
+          yield* fs
+            .writeFileString(`${finalPath}.verified`, marker, { mode: 0o600 })
+            .pipe(Effect.ignore);
+          linked.push(model.id);
+        }
+      }
+      return linked;
+    },
+  );
+
   const download: SpeechModelStore["Service"]["download"] = Effect.fn("SpeechModelStore.download")(
-    function* (model, progress = {}, directories = []) {
+    function* (model, progress = {}) {
       yield* Effect.annotateCurrentSpan({ modelId: model.id });
       const finalPath = modelPath(model);
       yield* fs.makeDirectory(directory, { recursive: true });
       if (yield* verifiedPath(model, finalPath, progress.onVerificationStart)) return finalPath;
-      for (const extra of directories) {
-        const shared = yield* verifiedPath(
-          model,
-          path.join(extra, model.filename),
-          progress.onVerificationStart,
-          true,
-        );
-        if (shared) return shared;
+      for (const copy of knownCopies(model)) {
+        const linked = yield* link([model], copy).pipe(Effect.orElseSucceed(() => []));
+        if (linked.length > 0) return finalPath;
       }
       const partialPath = `${finalPath}.${yield* random.uuidV4()}.part`;
       const url = `https://huggingface.co/${model.id}/resolve/${model.revision}/${model.filename}`;
@@ -228,6 +322,7 @@ const make = Effect.gen(function* () {
         if (!complete || !(yield* digestMatches(model, partialPath)))
           return yield* new SpeechModelDownloadError({ modelId: model.id, reason: "verification" });
         yield* fs.rename(partialPath, finalPath);
+        yield* fs.remove(`${finalPath}.source`, { force: true }).pipe(Effect.ignore);
         // Rename changes file metadata, so record the verified file's final identity.
         const info = yield* fs.stat(finalPath);
         yield* fs
@@ -245,38 +340,29 @@ const make = Effect.gen(function* () {
   );
 
   return SpeechModelStore.of({
-    hasOwnedFile: Effect.fn("SpeechModelStore.hasOwnedFile")((model) =>
-      statFile(modelPath(model)).pipe(Effect.map((info) => info?.type === "File")),
+    link,
+    linkedFrom: Effect.fn("SpeechModelStore.linkedFrom")((model) =>
+      fs.readLink(modelPath(model)).pipe(
+        Effect.catch(() => fs.readFileString(`${modelPath(model)}.source`)),
+        Effect.orElseSucceed(() => undefined),
+      ),
     ),
-    isReady: Effect.fn("SpeechModelStore.isReady")(function* (model, directories = []) {
-      for (const file of [
-        modelPath(model),
-        ...directories.map((extra) => path.join(extra, model.filename)),
-      ]) {
-        const info = yield* expectedFile(model, file);
-        if (info && corrupt.get(file) !== identity(model, info)) return true;
-      }
-      return false;
-    }),
-    installedPath: Effect.fn("SpeechModelStore.installedPath")(function* (model, directories = []) {
-      const owned = yield* verifiedPath(model, modelPath(model));
-      if (owned) return owned;
-      for (const extra of directories) {
-        const shared = yield* verifiedPath(
-          model,
-          path.join(extra, model.filename),
-          undefined,
-          true,
-        );
-        if (shared) return shared;
-      }
-      return undefined;
-    }),
+    isReady: Effect.fn("SpeechModelStore.isReady")((model) =>
+      expectedFile(model, modelPath(model)).pipe(
+        Effect.map(
+          (info) => info !== undefined && corrupt.get(modelPath(model)) !== identity(model, info),
+        ),
+      ),
+    ),
+    installedPath: Effect.fn("SpeechModelStore.installedPath")((model) =>
+      verifiedPath(model, modelPath(model)),
+    ),
     download,
     remove: Effect.fn("SpeechModelStore.remove")(function* (model) {
       const file = modelPath(model);
       yield* fs.remove(file, { force: true });
       yield* fs.remove(`${file}.verified`, { force: true });
+      yield* fs.remove(`${file}.source`, { force: true });
     }),
   });
 });

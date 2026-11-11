@@ -66,8 +66,7 @@ export function SecretSourceSelect(props: {
   readonly sources: ReadonlyArray<Pick<SecretSource, "id" | "label">>;
   readonly label: string;
   readonly disabled?: boolean;
-  /** Matches a settings-row field: the compact well instead of the raised small select. */
-  readonly well?: boolean;
+  readonly settings?: boolean;
   readonly onValueChange: (provider: SecretProviderId | null) => void;
 }) {
   const { value, sources } = props;
@@ -85,8 +84,8 @@ export function SecretSourceSelect(props: {
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
     >
       <SelectTrigger
-        variant={props.well ? "well" : "default"}
-        size={props.well ? "compact" : "sm"}
+        variant={props.settings ? "well" : "default"}
+        size={props.settings ? "compact" : "sm"}
         className="w-auto min-w-0 shrink-0"
         aria-label={`${props.label} source`}
         title={title}
@@ -152,7 +151,7 @@ export function SecretSourceInput({
         value={provider}
         sources={sources}
         label={label}
-        well={input.size === "settings"}
+        settings={input.size === "settings"}
         onValueChange={(next) => {
           setRejectedReference(null);
           if (next === null) {

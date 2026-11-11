@@ -32,7 +32,7 @@ export function ThreadDetailsItemsRow() {
             render={
               <SelectButton
                 variant="well"
-                size="compact"
+                size="sm"
                 className="w-full @min-[26rem]/settings-row:w-40"
                 aria-label={`Thread details: ${enabled} of ${THREAD_DETAILS_ITEMS.length} on`}
               />

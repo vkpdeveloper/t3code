@@ -66,11 +66,6 @@ export function requestLayoutSurfacePlacement(
   }, 5000);
 }
 
-function dropPanelPlacement(threadRef: ScopedThreadRef): void {
-  const key = scopedThreadKey(threadRef);
-  if (pendingPlacements.get(key)?.kind !== "below") pendingPlacements.delete(key);
-}
-
 /** Where Settings › Layout puts a thread's terminal or side pane, relative to its chat. */
 export function layoutSurfaceDestination(
   chat: LayoutTabLocation,
@@ -103,6 +98,11 @@ export function layoutSurfacePlacement(
 ): LayoutSurfacePlacement {
   const destination = layoutSurfaceDestination(chat, terminal);
   return destination.kind === "split" ? { kind: terminal ? "below" : "beside" } : destination;
+}
+
+function dropPanelPlacement(threadRef: ScopedThreadRef): void {
+  const key = scopedThreadKey(threadRef);
+  if (pendingPlacements.get(key)?.kind !== "below") pendingPlacements.delete(key);
 }
 
 function isTerminalTab(tab: LayoutTab): boolean {

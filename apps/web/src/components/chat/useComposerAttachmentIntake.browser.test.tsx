@@ -22,6 +22,7 @@ function Harness(props: {
     pendingUserInputs: [],
     supportsQuestionAttachments: false,
     isLiteralPendingAnswer: false,
+    projectSelectionRequired: false,
     questionAttachmentTarget: null,
     attachmentTargetKey: "thread-paste",
     fileStagingLimit: 1_000_000,
@@ -49,7 +50,7 @@ const PNG = Uint8Array.from(
   (char) => char.charCodeAt(0),
 );
 
-it("pasting after text keeps images in the strip and inserts file references", async () => {
+it("pasting an image and a file after text inserts a chip for each", async () => {
   const insertAttachmentReferences = vi.fn(
     (_references: ReadonlyArray<ComposerContextReference>) => true,
   );
@@ -75,5 +76,5 @@ it("pasting after text keeps images in the strip and inserts file references", a
     insertAttachmentReferences.mock.calls.map(([references]) =>
       references.map(({ kind, label }) => `${kind}:${label}`),
     ),
-  ).toEqual([["file:notes.txt"]]);
+  ).toEqual([["file:notes.txt"], ["image:shot.png"]]);
 });

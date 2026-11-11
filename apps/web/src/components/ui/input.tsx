@@ -26,7 +26,7 @@ function Input({
     size === "compact" &&
       "h-7 px-[calc(--spacing(2.5)-1px)] text-meta leading-7 sm:h-7 sm:leading-7",
     size === "settings" &&
-      "h-6.5 px-[calc(--spacing(2.5)-1px)] text-meta leading-6.5 sm:h-6.5 sm:leading-6.5",
+      "h-6.5 px-[calc(--spacing(2.5)-1px)] leading-6.5 sm:h-6.5 sm:leading-6.5",
     size === "sm" && "h-7.5 px-[calc(--spacing(2.5)-1px)] leading-7.5 sm:h-6.5 sm:leading-6.5",
     size === "lg" && "h-9.5 leading-9.5 sm:h-8.5 sm:leading-8.5",
     props.type === "search" &&

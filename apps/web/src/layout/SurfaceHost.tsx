@@ -1,5 +1,5 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { kickBrowserSurfaceTracking } from "../browser/browserSurfaceTracking";
 import { ThreadRouteView } from "../components/ThreadRouteView";
@@ -15,7 +15,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useScrollingWorkspacesEnabled } from "../hooks/useSettings";
 import { cn, isMacPlatform } from "../lib/utils";
 import { sidewaysWheelScrollsStrip, wheelDeltaPx } from "../motion/gesture";
-import { keepClosingPane, usePaneMotion } from "../motion/paneMotion";
+import { usePaneMotion } from "../motion/paneMotion";
 import {
   ChatPanelAnimationSuppressionProvider,
   usePanelNavigationSuppression,
@@ -55,17 +55,23 @@ import {
 import { useLayoutBehavior } from "./layoutBehavior";
 import { useSyncLayoutBehavior } from "./useSyncLayoutBehavior";
 import { ChatPaneStandIn } from "./ChatPaneStandIn";
-import { chatHoldsLiveWork, queueChatRender, registerWaitingChat } from "./chatRenderGate";
+import {
+  DeferredChatContext,
+  chatHoldsLiveWork,
+  queueChatRender,
+  registerWaitingChat,
+  renderWaitingChatNow,
+} from "./chatRenderGate";
 import { useThreeFingerSwipe } from "./useThreeFingerSwipe";
 import { ThreadSurfaceServices, ThreadSurfaceTab } from "../components/ThreadSurfaceTab";
 import { findThreadChat, useLayoutSurfaceSync } from "./surfaceSync";
 import {
-  findLayoutTab,
   isLayoutPageContent,
   selectFocusedPane,
   selectFocusedTab,
   selectFocusedWorkspace,
   selectLayoutPaneSlots,
+  selectLayoutStripSize,
   selectWindowStartPaneId,
   type LayoutColumn,
   type LayoutSurfaceContent,
@@ -249,7 +255,7 @@ function selectShownSlots(
 ): {
   slots: LayoutPaneSlot[];
   stripWidth: number;
-  fits: boolean;
+  stripSize: { share: number; minPx: number };
   unitWidth: number;
   paneCount: number;
 } {
@@ -260,7 +266,9 @@ function selectShownSlots(
     maximizedTabId === null
       ? null
       : (all.slots.find((slot) => slot.activeTabId === maximizedTabId) ?? null);
-  if (paneCount < 2 || (!narrow && !maximizedSlot)) return { ...all, paneCount };
+  if (paneCount < 2 || (!narrow && !maximizedSlot)) {
+    return { ...all, paneCount, stripSize: selectLayoutStripSize(workspace, viewport.whenNoRoom) };
+  }
   const onlySlot =
     (narrow ? null : maximizedSlot) ??
     all.slots.find((slot) => slot.paneId === workspace.focusedPaneId) ??
@@ -278,7 +286,7 @@ function selectShownSlots(
       },
     ],
     stripWidth: 1,
-    fits: true,
+    stripSize: { share: 1, minPx: 0 },
     unitWidth: viewport.width,
   };
 }
@@ -315,15 +323,33 @@ function selectStackRows(
  */
 const LAYOUT_INLINE_RIGHT_PANEL_MIN_PX = 981;
 
-/** The strip's visible width in px, kept current as the window or sidebar resizes. */
-function useElementWidth(ref: React.RefObject<HTMLElement | null>): number {
+/** The strip's visible width in px, taken once a window or sidebar resize has settled. */
+function useSettledWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the strip DOM width so pane geometry follows window and sidebar resizes
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Observes the strip DOM width; pane geometry follows a resize in CSS and React learns the width a frame after it stops.
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     setWidth(element.clientWidth);
-    return observeResize(element, () => setWidth(element.clientWidth));
+    let resized = false;
+    let frame: number | null = null;
+    const settle = () => {
+      if (resized) {
+        resized = false;
+        frame = window.requestAnimationFrame(settle);
+        return;
+      }
+      frame = null;
+      setWidth(element.clientWidth);
+    };
+    const stopObserving = observeResize(element, () => {
+      resized = true;
+      if (frame === null) frame = window.requestAnimationFrame(settle);
+    });
+    return () => {
+      stopObserving();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
   }, [ref]);
   return width;
 }
@@ -398,7 +424,7 @@ function useSurfacePlacement(
   const overviewPhase = useOverviewPhase();
   const workspaceStack = useWorkspaceStack();
   const viewport = { width: viewportWidth, whenNoRoom };
-  const { slots, stripWidth, fits, unitWidth, paneCount } = selectShownSlots(
+  const { slots, stripWidth, stripSize, unitWidth, paneCount } = selectShownSlots(
     workspace,
     viewport,
     narrow,
@@ -493,7 +519,7 @@ function useSurfacePlacement(
   return {
     slots,
     stripWidth,
-    fits,
+    stripSize,
     unitWidth,
     paneCount,
     chatTabsById,
@@ -540,7 +566,7 @@ export function LayoutSurfaceHost({
       element.focus({ preventScroll: true });
     }
   }, [active]);
-  const viewportWidth = useElementWidth(scrollerRef);
+  const viewportWidth = useSettledWidth(scrollerRef);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Publish the measured desktop strip width for imperative pane placement.
   useEffect(() => {
     // Below md one pane fills the window; columns stay arranged for the last
@@ -554,7 +580,7 @@ export function LayoutSurfaceHost({
   const {
     slots,
     stripWidth,
-    fits,
+    stripSize,
     unitWidth,
     paneCount,
     chatTabsById,
@@ -666,10 +692,9 @@ export function LayoutSurfaceHost({
     };
     if (staged) {
       // The overview renders the chats it shows big enough to read.
-      const thumbScale = (stage.scale * viewportWidth) / window.innerWidth;
       for (const row of stage.rows) {
         for (const slot of row.slots) {
-          const width = slot.rect.width * row.stripWidth * viewportWidth * thumbScale;
+          const width = slot.rect.width * row.stripWidth * viewportWidth * stage.scale;
           if (width >= OVERVIEW_RENDER_MIN_PX) mark(slot);
         }
       }
@@ -1142,11 +1167,14 @@ export function LayoutSurfaceHost({
         narrow,
         maximizedTabId,
       );
-      return own.slots.map(
-        (slot) => [slot.paneId, slotStyle(slot, own.stripWidth * viewportWidth)] as const,
-      );
+      return own.slots.map((slot) => {
+        const { width, height } = slotStyle(slot, own.stripWidth * viewportWidth);
+        return [slot.paneId, { width, height }] as const;
+      });
     }),
-    ...[...slotByTabId.values()].map(({ slot, style }) => [slot.paneId, style] as const),
+    ...[...slotByTabId.values()].map(
+      ({ slot, style }) => [slot.paneId, { width: style.width, height: style.height }] as const,
+    ),
   ]);
   const renderedTabIds = [
     ...new Set([
@@ -1249,11 +1277,9 @@ export function LayoutSurfaceHost({
           style={
             staged
               ? undefined
-              : stacked || fits
+              : stacked
                 ? { width: "100%" }
-                : // At least the window: a window that grew past the strip's end
-                  // stretches it before React learns the new width.
-                  { width: `${stripPx}px`, minWidth: "100%" }
+                : { width: `max(${stripSize.share * 100}%, ${stripSize.minPx}px)` }
           }
         >
           {renderedTabIds.map((tabId) => {
@@ -1504,6 +1530,7 @@ function LayoutChatSurface({
   const claimFocus = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
     claimPaneFocus(tab.id);
+    renderWaitingChatNow(tab.id);
   };
 
   return (
@@ -1521,7 +1548,7 @@ function LayoutChatSurface({
         // of the window: Electron keeps applying its stale window drag regions.
         !visible &&
           "pointer-events-none -translate-x-[calc(100%+100vw)] [content-visibility:hidden]",
-        !visible && paneStyle === undefined && "inset-0",
+        !visible && (paneStyle === undefined ? "inset-0" : "top-0 left-0"),
         visible && (split || staged) && "overflow-clip rounded-pane pane-surface",
         // A lone pane paints flat before its chat does, not the inset's grain behind it.
         visible && !(split || staged) && "bg-background",
@@ -1568,11 +1595,32 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
   /** Under the overview: a chat not rendered yet draws its thumbnail at once. */
   thumbnail: boolean;
 }) {
+  const [paintedTarget, setPaintedTarget] = useState(target);
+  const [request, setRequest] = useState({ target, deferred: false });
+  if (request.target !== target) {
+    setRequest({
+      target,
+      deferred: paintedTarget !== request.target,
+    });
+  }
+  // An isolated switch renders immediately; only a chat already behind navigation yields.
+  const deferredTarget = useDeferredValue(target);
+  const [inputTarget, setInputTarget] = useState(target);
+  // Draft handoffs retain their synchronous editor lifetime.
+  const shownTarget =
+    !request.deferred ||
+    inputTarget === target ||
+    target.kind === "draft" ||
+    deferredTarget.kind === "draft"
+      ? target
+      : deferredTarget;
   // Panel motion holds off for this chat's own first frame and thread swaps.
   // The window-wide suppression flips on every navigation, and every focus
   // move navigates, so it re-rendered every mounted chat twice per keypress.
   const panelAnimationsSuppressed = usePanelNavigationSuppression(
-    target.kind === "draft" ? `draft:${target.draftId}` : scopedThreadKey(target.threadRef),
+    shownTarget.kind === "draft"
+      ? `draft:${shownTarget.draftId}`
+      : scopedThreadKey(shownTarget.threadRef),
   );
   // Paint the pane before rendering ChatView in a separate task. Avoid transitions, whose
   // interruption can destroy the composer editor beneath the pane. The first frame after a
@@ -1581,6 +1629,12 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
   const [rendered, setRendered] = useState(
     () => !documentFirstFrameDrawn && wanted && (paneState.focused || paneState.related),
   );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- A committed chat must reach a browser frame before the next jump counts as isolated.
+  useLayoutEffect(() => {
+    if (!rendered) return;
+    const frame = window.requestAnimationFrame(() => setPaintedTarget(shownTarget));
+    return () => window.cancelAnimationFrame(frame);
+  }, [rendered, shownTarget]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Mark the document's first frame as committed so later panes keep the stand-in.
   useEffect(() => {
     documentFirstFrameDrawn = true;
@@ -1635,23 +1689,28 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
     if (!covering || !loaded) return;
     return queueChatRender(() => setDrawn(false), "normal");
   }, [covering, loaded]);
-  // A shortcut for this chat arriving before then renders it at once.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Register an unrendered chat with the external shortcut wake-up registry.
-  useEffect(() => {
-    if (rendered || tabId === null) return;
-    return registerWaitingChat(tabId, () => setRendered(true));
-  }, [rendered, tabId]);
+  // Input must land on the selected thread even before its deferred render commits.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Publish the synchronous input gate before any key or pointer can reach the previous chat.
+  useLayoutEffect(() => {
+    if ((rendered && shownTarget === target) || tabId === null) return;
+    return registerWaitingChat(tabId, () => {
+      setInputTarget(target);
+      setRendered(true);
+    });
+  }, [rendered, shownTarget, tabId, target]);
   return (
     <ChatPanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <LayoutPaneContext value={paneState}>
         {rendered ? (
-          <ThreadRouteView
-            target={target}
-            tabId={paneState.tabId}
-            background={background}
-            // The URL stays on the chat while its surface tab has focus.
-            focused={paneState.focused || paneState.related}
-          />
+          <DeferredChatContext value={request.deferred}>
+            <ThreadRouteView
+              target={shownTarget}
+              tabId={paneState.tabId}
+              background={background}
+              // The URL stays on the chat while its surface tab has focus.
+              focused={paneState.focused || paneState.related}
+            />
+          </DeferredChatContext>
         ) : null}
         {/* Near on the strip it is about to render: its stand-in, as before. */}
         {drawn && (thumbnail || !near) ? (
@@ -1724,7 +1783,6 @@ function LayoutSurfaceTabSurface({
   // Focus that lands on the pane (cmd+J, alt+cmd+B, a launcher's letter, a
   // click on its tab) moves the keyboard in.
   usePaneKeyboard(slotRef, focused && !staged, surfaceKeyboardTarget);
-  useKeepClosingPane(slotRef, tabId);
   return (
     <div
       ref={slotRef}
@@ -1772,17 +1830,6 @@ function settingsKeyboardTarget(pane: HTMLElement): HTMLElement {
 function launcherKeyboardTarget(pane: HTMLElement): HTMLElement | null {
   const launcher = pane.querySelector<HTMLElement>("[data-new-tab-launcher]");
   return launcher ? launcherFocusTarget(launcher) : null;
-}
-
-function useKeepClosingPane(paneRef: React.RefObject<HTMLElement | null>, tabId: string): void {
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Copy a closed tab's pane before React detaches it, so its ghost slides away showing it.
-  useLayoutEffect(() => {
-    const pane = paneRef.current;
-    return () => {
-      const closed = !findLayoutTab(useLayoutStore.getState().layout, (tab) => tab.id === tabId);
-      if (pane && closed) keepClosingPane(tabId, pane);
-    };
-  }, [paneRef, tabId]);
 }
 
 /** Release DOM focus immediately when layout focus leaves, even if the next pane is still rendering;
@@ -2074,7 +2121,6 @@ function LayoutPageSurface({
   } satisfies LayoutPaneState;
   const settingsRef = useRef<HTMLDivElement | null>(null);
   usePaneKeyboard(settingsRef, focused && !staged, settingsKeyboardTarget);
-  useKeepClosingPane(settingsRef, tabId);
   return (
     <div
       ref={settingsRef}

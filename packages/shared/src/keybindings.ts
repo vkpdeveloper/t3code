@@ -5,10 +5,11 @@ import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
-  type ResolvedKeybindingRule,
+  ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
 export {
   EVENT_CODE_SHORTCUT_KEYS,
@@ -79,6 +80,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+w", command: "tab.close", when: "!terminalFocus" },
   { key: "mod+shift+t", command: "view.reopenClosed" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  // The browser keeps mod+l for its address bar while it has focus.
+  { key: "mod+l", command: "pullRequests.toggle", when: "!terminalFocus && !previewFocus" },
   // Layout panes: cmd+\ opens a new pane to the right, alt+cmd+shift+D below.
   { key: "mod+\\", command: "layout.splitRight", when: "!terminalFocus" },
   { key: "mod+alt+shift+d", command: "layout.splitDown", when: "!terminalFocus" },
@@ -134,6 +137,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod++", command: "preview.zoomIn", when: "previewFocus" },
   { key: "mod+-", command: "preview.zoomOut", when: "previewFocus" },
   { key: "mod+0", command: "preview.resetZoom", when: "previewFocus" },
+  { key: "mod+f", command: "preview.find", when: "previewFocus" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
@@ -466,9 +470,17 @@ export const RETIRED_DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+t", command: "rightPanel.new", when: "rightPanelOpen && !terminalFocus" },
 ];
 
+const retiredResolvedKeybindings = compileResolvedKeybindingsConfig(RETIRED_DEFAULT_KEYBINDINGS);
+const sameResolvedKeybinding = Schema.toEquivalence(ResolvedKeybindingRule);
+
 export function mergeWithDefaultKeybindings(
   custom: ResolvedKeybindingsConfig,
 ): ResolvedKeybindingsConfig {
+  // Older servers still send saved defaults that would shadow the client replacements.
+  custom = custom.filter(
+    (binding) =>
+      !retiredResolvedKeybindings.some((retired) => sameResolvedKeybinding(binding, retired)),
+  );
   if (custom.length === 0) {
     return [...DEFAULT_RESOLVED_KEYBINDINGS];
   }

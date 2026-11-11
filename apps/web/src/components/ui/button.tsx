@@ -65,14 +65,14 @@ const buttonVariants = cva(
           "[--control-icon-color:currentColor] border-transparent text-muted-foreground [:hover,[data-pressed]]:surface-ghost-hover [:hover,[data-pressed]]:text-destructive-foreground",
         // Floats over content: a solid round chip.
         floating:
-          "bg-background [--control-icon-color:var(--contrast-muted-foreground)] rounded-full border-border/60 text-foreground shadow-sm before:rounded-full [:hover,[data-pressed]]:border-border",
+          "surface-floating [--control-icon-color:var(--contrast-muted-foreground)] rounded-full text-foreground before:rounded-full [:hover,[data-pressed]]:surface-floating-hover",
         link: "border-transparent underline-offset-4 [:hover,[data-pressed]]:underline",
         "media-close":
-          "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white shadow-sm ring-1 ring-white/20 [:hover,[data-pressed]]:bg-black/80 focus-visible:outline-white",
+          "[--control-icon-color:currentColor] border-transparent bg-black/65 text-white surface-media-control [:hover,[data-pressed]]:bg-black/80 focus-visible:outline-white",
         "media-navigation":
           "[--control-icon-color:currentColor] absolute top-1/2 z-20 -translate-y-1/2 border-transparent text-white/90 [:hover,[data-pressed]]:bg-white/10 [:hover,[data-pressed]]:text-white focus-visible:outline-white",
         overlay: "border-transparent bg-black/70 text-white/65 [:hover,[data-pressed]]:bg-black/90",
-        pill: "surface-pill [--pill-fill:var(--ss-default-pill-fill)] [--pill-foreground:var(--ss-default-pill-foreground)] [--pill-icon:var(--ss-default-pill-icon)] [--pill-rim:var(--ss-default-pill-rim,var(--ss-default-raised-rim))] [--pill-shadow:var(--ss-default-pill-shadow)] text-foreground [:hover,[data-pressed]]:surface-raised-hover",
+        pill: "surface-neutral-pill text-foreground [:hover,[data-pressed]]:surface-raised-hover",
         // Secondary: the raised recipe.
         secondary:
           "surface-raised focus-visible:[--surface-rim:var(--surface-fill)] text-foreground [:hover,[data-pressed]]:surface-raised-hover",
@@ -115,13 +115,15 @@ const contentButtonVariants = cva("outline-none", {
         "cursor-pointer overflow-hidden rounded-card border border-transparent text-left transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-pressed:bg-settings-effective-fill not-aria-pressed:surface-card-settings-rim not-aria-pressed:hover:surface-ghost-hover aria-pressed:shadow-[inset_0_0_0_1px_var(--settings-active-rim)]",
       "drag-chip":
         "flex h-6.5 cursor-grab items-center gap-1.5 rounded-item surface-raised px-2.25 text-meta text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing",
+      "selection-action":
+        "flex h-5.5 cursor-pointer items-center gap-1.5 rounded-row surface-selected px-2 text-caption text-foreground hover:text-strong-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring",
       panel:
         "flex flex-col overflow-hidden rounded-item bg-background text-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:ring-1 aria-expanded:ring-inset aria-expanded:ring-strong-foreground/70",
       "action-row":
         "flex h-7.5 items-center gap-2 rounded-control px-2 text-start text-label text-foreground hover:surface-ghost-hover focus-visible:surface-ghost-hover disabled:pointer-events-none disabled:opacity-64",
       "action-row-destructive":
         "flex h-7.5 items-center gap-2 rounded-control px-2 text-start text-label text-destructive-foreground hover:surface-ghost-hover focus-visible:surface-ghost-hover disabled:pointer-events-none disabled:opacity-64",
-      tab: "inline-flex h-7 min-w-0 max-w-80 cursor-pointer items-center gap-1.75 rounded-control px-2.5 text-left text-control text-muted-foreground [-webkit-app-region:no-drag] hover:surface-ghost-hover hover:text-foreground focus-visible:inset-ring-2 focus-visible:inset-ring-ring",
+      tab: "inline-flex h-7 min-w-0 max-w-80 cursor-pointer items-center gap-1.75 rounded-control px-2.5 text-left text-control text-muted-foreground [-webkit-app-region:no-drag] hover:surface-ghost-hover hover:text-foreground group-hover/tab:surface-ghost-hover group-hover/tab:text-foreground focus-visible:inset-ring-2 focus-visible:inset-ring-ring",
       breadcrumb:
         "inline-flex h-7 min-w-0 cursor-pointer items-center gap-1.75 rounded-control px-2.5 text-left text-control [&>:first-child]:shrink-0 text-muted-foreground [-webkit-app-region:no-drag] hover:surface-ghost-hover hover:text-foreground focus-visible:inset-ring-2 focus-visible:inset-ring-ring",
       "tab-close":

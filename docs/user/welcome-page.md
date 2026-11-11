@@ -1,7 +1,7 @@
 # Welcome page
 
-T3 Code shows a Welcome page when you open a new installation with no projects.
-Existing workspaces skip it. It shows what T3 Code found on the computer you are using,
+T3 Code shows a Welcome page when you open a new installation. Existing
+workspaces skip it. It shows what T3 Code found on the computer you are using,
 on one page: your agents, projects from your Claude Code, Codex, and Pi history,
 and the phone app. Only an agent is needed to start chatting.
 
@@ -13,7 +13,10 @@ it asks you to sign in to T3 Connect, then to install T3 Code and run
 `t3 connect` on your computer. From home, it adds compatible computers linked to your account and
 opens the app. To add more computers later, use **Settings → Environments**.
 
-If T3 Code cannot read your saved settings, it shows **Couldn't load your settings**.
+If T3 Code cannot confirm the workspace during startup, it shows
+**Still connecting** instead of opening the app. Select **Reload** to try again.
+
+If T3 Code cannot read your saved settings, it shows **Could not read settings**.
 Select **Retry** after storage becomes available. Setup does not replace
 unreadable settings with defaults.
 

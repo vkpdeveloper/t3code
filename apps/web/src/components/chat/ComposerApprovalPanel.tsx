@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { formatWorkspaceRelativeDetail, formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { ShieldIcon } from "lucide-react";
 import { use, useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
 import { BackgroundThreadContext } from "./backgroundThread";
@@ -54,6 +54,10 @@ export function ComposerApprovalPanel({
   const backgroundThread = use(BackgroundThreadContext);
   const paneFocusedRef = useLayoutPaneFocusedRef();
   const showShortcutHints = useSyncExternalStore(subscribeApprovalFocus, approvalKeysAvailable);
+  const detail =
+    approval.requestKind === "file-change"
+      ? formatWorkspaceRelativeDetail(approval.detail, workspaceRoot)
+      : approval.detail;
   const [expanded, setExpanded] = useState(true);
   const [alwaysAllow, setAlwaysAllow] = useState(false);
   const canRespond =
@@ -104,7 +108,7 @@ export function ComposerApprovalPanel({
         render={<CollapsibleTrigger render={<button type="button" />} />}
         icon={<ShieldIcon />}
         title={title}
-        sub={expanded ? null : approval.detail}
+        sub={expanded ? null : detail}
         trailing={
           <>
             {count > 1 ? <ComposerRequestCard.Counter index={1} total={count} /> : null}
@@ -139,7 +143,7 @@ export function ComposerApprovalPanel({
               approval.requestKind === "command" && "font-mono text-foreground",
             )}
           >
-            {approval.detail}
+            {detail}
           </div>
           {approval.files?.map((file) => (
             <div key={file.path} className="flex min-w-0 items-center gap-2 px-2 pb-1 text-meta">

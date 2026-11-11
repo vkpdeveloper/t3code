@@ -33,8 +33,8 @@ export function renderLoopbackAuthorizationCompleteHtml(
       .brand { display: flex; align-items: baseline; gap: 6px; font-size: 18px; font-weight: 500; }
       .brand svg { width: auto; height: 12px; }
       .stage { padding: 2px 6px; border: 1px solid #dedede; border-radius: 6px; font-size: 12px; color: #636363; }
-      h1 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 600; }
-      .description { margin: 8px 0 0; color: #636363; font-size: 14px; line-height: 1.5; }
+      h1 { margin: 0; font-size: clamp(26px, 5vw, 34px); line-height: 1.3; font-weight: 600; }
+      .description { margin: 8px 0 0; color: #636363; font-size: 15px; line-height: 1.5; }
       @media (prefers-color-scheme: dark) {
         :root { background: #151515; color: #d4d4d4; }
         main { background: #191919; border-color: #333; box-shadow: 0 4px 16px #0003; }

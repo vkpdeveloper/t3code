@@ -3,12 +3,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
-import { TerminalIcon } from "lucide-react";
+import { TerminalIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { ContextChip, ContextChipLabel } from "../ContextChip";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
-import { ChevronDown, ChevronRight } from "lucide";
-import { MorphIcon } from "../MorphIcon";
 
 export const MESSAGE_HEADING_LEVEL = 3;
 
@@ -114,7 +112,7 @@ export function WorkingBarChip({
  * The label starts on the assistant text's edge, 4px into the lane.
  */
 export const WORKING_BAR_CLASS_NAME =
-  "timeline-work-row group/timeline-row relative flex h-8 min-w-0 items-center gap-2.5 border-b border-(--timeline-working-rule,var(--border)) ps-1.25 pe-1";
+  "group/timeline-row relative flex h-8 min-w-0 items-center gap-2.5 border-b border-(--timeline-working-rule,var(--border)) ps-1.25 pe-1 min-[640px]:[--type-body:0.8125rem] min-[640px]:[--type-label:0.8125rem]";
 
 /** A provider command in the timeline: in a work row's trailing slot, or opening a prompt. */
 export function SlashCommandChip({ name }: { name: string }) {
@@ -135,15 +133,23 @@ export function WorkFoldCaret({
   hidden?: boolean;
   fade?: boolean;
 }) {
-  return (
-    <MorphIcon
+  return expanded ? (
+    <ChevronDownIcon
       aria-hidden
       className={cn(
         "size-3 shrink-0 text-dim-foreground",
         fade && "transition-opacity duration-200 ease-out motion-reduce:transition-none",
         hidden && "opacity-0",
       )}
-      icon={expanded ? ChevronDown : ChevronRight}
+    />
+  ) : (
+    <ChevronRightIcon
+      aria-hidden
+      className={cn(
+        "size-3 shrink-0 text-dim-foreground",
+        fade && "transition-opacity duration-200 ease-out motion-reduce:transition-none",
+        hidden && "opacity-0",
+      )}
     />
   );
 }

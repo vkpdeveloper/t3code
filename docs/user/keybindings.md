@@ -125,14 +125,14 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
 `previewOpen`, `rightPanelOpen`, `modelPickerOpen`, `usagePageOpen`, `composerFocus`,
-`draftThreadRoute`, `turnRunning`, `assistantSelection`, `editableFocus`, `isWeb`, and `isDesktop`.
-`rightPanelOpen` applies only to `rightPanel.new` and is true while the right panel is
-open; the default `mod+t` uses it to open the panel's new-tab menu.
+`draftThreadRoute`, `turnRunning`, `assistantSelection`, `editableFocus`, `isWeb`, `isDesktop`, and `isMac`.
+`rightPanelOpen` is true while a side pane is open. `mod+t` opens a new tab in the
+focused pane.
 `draftThreadRoute` is true on a draft thread, including a restored draft, until it is first sent.
 `assistantSelection` is true while a citable passage of an assistant response is selected.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
-desktop app. Unknown keys evaluate to `false`.
+desktop app. `isMac` is true on macOS. Unknown keys evaluate to `false`.
 
 `mod+1` through `mod+9` jump to the first nine threads, and to models while the
 model picker is open. The thread jumps do not run while the model picker is open.
@@ -154,6 +154,13 @@ update an older server to enable it. Select **Retry** if a search fails. It defa
 `mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
 and **Escape** to close find.
 
+## Find on a browser page
+
+`preview.find` (`mod+f` while a browser has focus) searches the open page in the desktop app. It
+is also in the browser's **⋮** menu and the command palette. A page that handles `mod+f` itself,
+such as a code editor, keeps its own find. Use the **⋮** menu to reach the browser's find there.
+Streamed browser tabs and T3 Code in a web browser do not support it.
+
 ## Precedence
 
 The last rule whose key and condition both match wins, even if it belongs to a
@@ -164,6 +171,9 @@ a shortcut.
 
 `thread.stop` interrupts the running turn in the focused thread. It has no default
 shortcut; assign one in **Settings → Keybindings**.
+
+`thread.regenerateTitle` generates a new title for the focused thread, like
+**Regenerate title** in the thread menu. It has no default shortcut.
 
 `thread.undo` (`mod+z` by default) reverses the actions shown in the notice at the
 bottom of the sidebar, such as unpin, settle, snooze, archive, or discarding a

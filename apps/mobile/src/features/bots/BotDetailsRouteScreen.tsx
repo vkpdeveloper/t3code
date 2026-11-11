@@ -194,7 +194,7 @@ function BotAvatarSection(props: { readonly project: BotProject }) {
           />
           <Button
             label={generating ? "Generating image..." : "Generate image"}
-            icon="sparkles"
+            icon="photo"
             disabled={generating || !canUpdate}
             onPress={generate}
           />

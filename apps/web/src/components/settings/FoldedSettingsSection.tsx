@@ -38,21 +38,22 @@ export function FoldedSettingsSection({
     return (
       <section id={id} ref={targetRef} tabIndex={-1} className="outline-none">
         <Collapsible open={open} onOpenChange={setOpen}>
+          {/* Same header geometry as SettingsSection: title on the card edge, 8px above it. */}
           <div className="space-y-2">
             <div
               data-settings-scroll-target
-              className="flex min-h-10 items-center justify-between gap-4"
+              className="flex min-h-7 items-start justify-between gap-4"
             >
               <h2>
-                <CollapsibleTrigger className="flex min-h-10 items-center gap-1.5 rounded-md text-meta font-medium text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                <CollapsibleTrigger className="flex min-h-7 items-center gap-2 rounded-md text-title text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                  {title}
                   <ChevronRightIcon
                     aria-hidden
                     className={cn(
-                      "size-3.5 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
+                      "size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none",
                       open && "rotate-90",
                     )}
                   />
-                  {title}
                 </CollapsibleTrigger>
               </h2>
               {control}
@@ -71,15 +72,15 @@ export function FoldedSettingsSection({
       <Collapsible open={open} onOpenChange={setOpen} render={<SettingsGroup divided={false} />}>
         {/* On a narrow screen the controls drop below the title instead of covering it. */}
         <div className="flex flex-wrap items-center gap-x-4 px-3 sm:px-4">
-          <CollapsibleTrigger className="flex min-h-10 min-w-0 flex-1 basis-40 items-center gap-1.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring rounded-md">
+          <CollapsibleTrigger className="flex min-h-11 min-w-0 flex-1 basis-40 items-center gap-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring rounded-md">
             <ChevronRightIcon
               aria-hidden
               className={cn(
-                "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
+                "size-4 shrink-0 text-dim-foreground transition-transform duration-150 motion-reduce:transition-none",
                 open && "rotate-90",
               )}
             />
-            <span className="shrink-0 text-meta font-medium text-muted-foreground">{title}</span>
+            <span className="shrink-0 text-label text-foreground">{title}</span>
             {summary ? (
               <span className="min-w-0 truncate text-body text-muted-foreground [--type-body:var(--type-meta)]">
                 {summary}

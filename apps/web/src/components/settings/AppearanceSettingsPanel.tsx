@@ -216,7 +216,7 @@ export function AppearanceSettingsPanel() {
                 value={settings.appearanceContrast}
               />
               <output
-                className="min-w-16 text-right text-meta tabular-nums text-muted-foreground"
+                className="min-w-12 text-right text-caption tabular-nums text-muted-foreground"
                 htmlFor="appearance-contrast"
               >
                 {settings.appearanceContrast === DEFAULT_UNIFIED_SETTINGS.appearanceContrast
@@ -372,8 +372,7 @@ export function AppearanceSettingsPanel() {
               }}
             >
               <SelectTrigger
-                variant="well"
-                size="compact"
+                size="sm"
                 className="w-full sm:w-40"
                 aria-label="Environment identification"
               >
@@ -396,11 +395,11 @@ export function AppearanceSettingsPanel() {
           {...searchableSetting("panel-animations")}
           description="Set how fast panels open and close."
           control={
-            <div className="grid w-full grid-cols-[5rem_minmax(0,1fr)] items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
+            <div className="grid w-full grid-cols-1 items-center gap-3 sm:w-auto sm:grid-cols-[7rem_13rem] sm:gap-4">
               <PanelAnimationsPreview durationMs={settings.panelAnimationDurationMs} />
               <div className="flex w-full items-center gap-3">
                 <output
-                  className="min-w-16 text-right text-meta tabular-nums text-muted-foreground"
+                  className="min-w-16 rounded-control surface-card px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
                   htmlFor="panel-animation-duration"
                 >
                   {settings.panelAnimationDurationMs} ms

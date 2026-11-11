@@ -6,7 +6,7 @@ import { useLayoutPane, useLayoutPaneOwnsThreadRef } from "../../layout/layoutPa
 import { registerLayoutOpenBesideAction, type LayoutBesideKind } from "../../layout/layoutActions";
 import { requestLayoutSurfacePlacement } from "../../layout/surfaceSync";
 import { getLayoutBehavior } from "../../layout/layoutBehavior";
-import { toggleThreadDiff, toggleThreadSidePane } from "../../layout/openRules";
+import { toggleThreadSidePane, toggleThreadSurfaceTab } from "../../layout/openRules";
 import type { useChatTerminalActions } from "./useChatTerminalActions";
 import { isPreviewSupportedInRuntime } from "../../previewStateStore";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -21,7 +21,6 @@ import {
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { type ThreadPanelPresentation } from "../../rightPanelLayout";
 import {
-  selectActiveRightPanel,
   selectThreadPanelOpen,
   type RightPanelSurface,
   useRightPanelStore,
@@ -59,7 +58,6 @@ interface RightPanelActionsInput {
   readonly previewPanelOpen: boolean;
   readonly supportsPullRequests: boolean;
   readonly pullRequestsSurfaceAvailable: boolean;
-  readonly explicitDiffOpenRef: { current: ScopedThreadRef | null };
   readonly onDiffPanelOpen: (() => void) | undefined;
 }
 
@@ -87,7 +85,6 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     previewPanelOpen,
     supportsPullRequests,
     pullRequestsSurfaceAvailable,
-    explicitDiffOpenRef,
     onDiffPanelOpen,
   } = input;
 
@@ -101,9 +98,15 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const onToggleDiff = () => {
     if (!isServerThread || !activeThreadRef) return;
-    toggleThreadDiff(activeThreadRef, () => {
+    toggleThreadSurfaceTab(activeThreadRef, "diff", () => {
       if (!diffOpen) onDiffPanelOpen?.();
       useRightPanelStore.getState().toggle(activeThreadRef, "diff");
+    });
+  };
+  const onTogglePullRequests = () => {
+    if (!isServerThread || !activeThreadRef) return;
+    toggleThreadSurfaceTab(activeThreadRef, "pull-requests", () => {
+      useRightPanelStore.getState().toggle(activeThreadRef, "pull-requests");
     });
   };
   const createBrowserSurface = (profileId?: string) => {
@@ -273,18 +276,12 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
 
   const onOpenTurnDiff = (runId: RunId, filePath?: string) => {
     if (!isServerThread || !activeThreadRef) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
     useDiffPanelStore.getState().selectTurn(activeThreadRef, runId, filePath);
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
   };
   const onOpenToolDiffStable = useStableCallback((target: ToolCallDiffTarget) => {
     if (!isServerThread || !activeThreadRef) return;
-    const diffOpen =
-      selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, activeThreadRef) === "diff";
-    explicitDiffOpenRef.current = diffOpen ? null : activeThreadRef;
     useDiffPanelStore.getState().selectToolCall(activeThreadRef, target);
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
@@ -307,6 +304,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     "rightPanel.toggle": () => toggleSidePane(),
     "threadPanel.toggle": () => toggleThreadPanel(),
     "diff.toggle": () => onToggleDiff(),
+    "pullRequests.toggle": () => onTogglePullRequests(),
   } satisfies ChatShortcutCommands;
 
   return {

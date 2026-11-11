@@ -19,7 +19,7 @@ export function getComposerPromptInputLength(prompt: string): number {
   );
 }
 
-export function getComposerPromptLengthValidationMessage(prompt: string): string | null {
+function getComposerPromptLengthValidationMessage(prompt: string): string | null {
   const inputLength = getComposerPromptInputLength(prompt);
   const excessCharacters = inputLength - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
   if (excessCharacters <= 0) return null;
@@ -37,6 +37,20 @@ export function getComposerSubmissionValidationMessage(
   return options.submissionTarget === "provider-turn"
     ? getComposerPromptLengthValidationMessage(options.providerInput ?? options.prompt)
     : null;
+}
+
+// Answering a question responds to the open request instead of starting a provider turn, so
+// provider and turn-send state must not block it. Its own attachments and connection still do.
+export function isComposerSubmissionBlocked(input: {
+  submissionTarget: ComposerSubmissionInput["submissionTarget"];
+  noProviderAvailable: boolean;
+  sendDisabledReason: string | null;
+  attachmentBlockReason: string | null;
+  environmentUnavailable: boolean;
+}): boolean {
+  return input.submissionTarget === "pending-user-input"
+    ? input.attachmentBlockReason !== null || input.environmentUnavailable
+    : input.noProviderAvailable || input.sendDisabledReason !== null;
 }
 
 export function submitComposerDraft(

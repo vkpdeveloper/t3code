@@ -16,6 +16,7 @@ import {
   CircleDotIcon,
   CircleSlashIcon,
   CircleXIcon,
+  MessageSquarePlusIcon,
   UserCheckIcon,
   UserRoundIcon,
   UserRoundXIcon,
@@ -25,7 +26,7 @@ import { type CSSProperties, type ReactNode, useState } from "react";
 import { cn } from "~/lib/utils";
 
 import { Badge } from "../ui/badge";
-import { InlineButton } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { PullRequestReviewOutcome } from "./pullRequestDetail.logic";
 import { pullRequestLabelColor } from "./pullRequestList.logic";
@@ -36,31 +37,57 @@ import {
   type PullRequestGlyphIcon,
 } from "./pullRequestIcons";
 
+export function AddToChatIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button size="icon-xs" variant="ghost-muted" aria-label="Add to chat" onClick={onClick} />
+        }
+      >
+        <MessageSquarePlusIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup>Add to chat</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export function PullRequestLabelChip({
   label,
   size = "sm",
   className,
+  focusable = false,
   children,
   ...props
 }: {
-  label: Pick<PullRequestLabel, "name" | "color">;
+  label: Pick<PullRequestLabel, "name" | "color" | "description">;
   size?: "sm" | "default";
   className?: string;
+  focusable?: boolean;
   children?: ReactNode;
   "data-row-label"?: string;
 }) {
   const color = pullRequestLabelColor(label.color);
-  return (
+  const badge = (
     <Badge
       {...props}
       size={size}
       variant={color ? "label" : "secondary"}
       className={cn("min-w-0 max-w-40 shrink justify-start", className)}
+      {...(focusable && label.description ? { tabIndex: 0 } : {})}
       {...(color ? { style: { "--label": color } as CSSProperties } : {})}
     >
       <span className="truncate">{label.name}</span>
+      {label.description ? <span className="sr-only">: {label.description}</span> : null}
       {children}
     </Badge>
+  );
+  if (!label.description) return badge;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={badge} />
+      <TooltipPopup>{label.description}</TooltipPopup>
+    </Tooltip>
   );
 }
 
