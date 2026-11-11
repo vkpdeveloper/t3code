@@ -437,7 +437,7 @@ const MachineMenu = memo(function MachineMenu({
           render={
             <span
               className={cn(
-                "inline-flex h-7 min-w-0 max-w-[48%] flex-initial items-center justify-start gap-1 rounded-md border border-transparent ps-2 pe-1.75 text-meta text-dim-foreground sm:h-6",
+                "inline-flex h-7 max-w-[48%] shrink-0 items-center justify-start gap-1.5 rounded-md border border-transparent ps-2 pe-1.75 text-meta text-dim-foreground sm:h-6",
                 environmentUnavailable && "text-warning-foreground",
               )}
               aria-label={`Run on: ${environmentLabel}`}
@@ -468,7 +468,7 @@ const MachineMenu = memo(function MachineMenu({
             <MenuTrigger
               render={<ComposerControl size="xs" />}
               className={cn(
-                "min-w-0 max-w-full",
+                "max-w-full shrink-0",
                 environmentUnavailable && "text-warning-foreground",
               )}
               aria-label={`Run on: ${environmentLabel}`}
