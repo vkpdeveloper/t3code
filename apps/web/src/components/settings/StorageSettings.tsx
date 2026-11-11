@@ -112,6 +112,8 @@ const MAX_RETENTION_DAYS = 3650;
 /** The days a retention starts at when turned on from Off, matching main. */
 const DEFAULT_RETENTION_DAYS = 8;
 
+type SaveOptions = Parameters<ReturnType<typeof useUpdateScopedSettings>>[1];
+
 function formatRetentionDays(days: number): string {
   return `After ${days} ${days === 1 ? "day" : "days"}`;
 }
@@ -128,28 +130,94 @@ function RetentionControl({
 }: {
   label: string;
   value: number | null;
-  onChange: (value: number | null) => void;
+  onChange: (value: number | null, onFailed: () => void) => void;
   minimum?: number;
 }) {
   const isPreset = value !== null && (RETENTION_PRESET_DAYS as readonly number[]).includes(value);
   const [customRequested, setCustomRequested] = useState(false);
-  const custom = value !== null && (!isPreset || customRequested);
-  const selected = value === null ? "off" : custom ? "custom" : String(value);
+  // Saving an age can start a cleanup sweep, so a typed age waits for Enter or for focus to
+  // leave the row, and Custom from Off opens an unsaved draft.
+  const [draft, setDraft] = useState<string | null>(null);
+  // The age of a rule's first save while it is in flight, so its failure can return to Off.
+  const [pendingDays, setPendingDays] = useState<number | null>(null);
+  const pendingSubmission = useRef<object | null>(null);
+  const selectOpen = useRef(false);
+  const committing = useRef(false);
+  const [savedValue, setSavedValue] = useState(value);
+  if (savedValue !== value) {
+    setSavedValue(value);
+    setDraft(null);
+    setPendingDays(null);
+    if (value === null) setCustomRequested(false);
+  }
+  const custom = customRequested || (value !== null && !isPreset);
+  const selected = custom ? "custom" : value === null ? "off" : String(value);
+  const savedDays = value ?? pendingDays;
+  const shown = draft ?? String(savedDays ?? DEFAULT_RETENTION_DAYS);
+
+  const discardDraft = () => {
+    setDraft(null);
+    setPendingDays(null);
+    pendingSubmission.current = null;
+  };
+
+  const commit = (text: string) => {
+    setDraft(null);
+    const days = Number(text);
+    if (
+      text.trim() === "" ||
+      !Number.isInteger(days) ||
+      days < minimum ||
+      days > MAX_RETENTION_DAYS ||
+      days === savedDays
+    ) {
+      return;
+    }
+    if (value !== null) {
+      onChange(days, () => {});
+      return;
+    }
+    const submission = {};
+    pendingSubmission.current = submission;
+    setPendingDays(days);
+    onChange(days, () => {
+      if (pendingSubmission.current !== submission) return;
+      pendingSubmission.current = null;
+      setPendingDays(null);
+      setCustomRequested(false);
+    });
+  };
 
   return (
-    <div className="flex items-center gap-2">
+    <div
+      className="flex items-center gap-2"
+      onBlur={(event) => {
+        // Focus moving to this row's select (or its open list) holds the draft, so choosing
+        // Off or a preset never saves an edited age first.
+        if (event.currentTarget.contains(event.relatedTarget) || selectOpen.current) return;
+        // Enter commits even an untouched draft; leaving one untouched discards it.
+        const text = draft ?? (committing.current ? shown : null);
+        committing.current = false;
+        if (text !== null) commit(text);
+        else if (value === null && pendingDays === null) setCustomRequested(false);
+      }}
+    >
       <Select
         value={selected}
+        onOpenChange={(open) => {
+          selectOpen.current = open;
+        }}
         onValueChange={(next) => {
-          if (next === "off") {
-            setCustomRequested(false);
-            onChange(null);
-          } else if (next === "custom") {
+          if (next === "custom") {
             setCustomRequested(true);
-            if (value === null) onChange(DEFAULT_RETENTION_DAYS);
+            return;
+          }
+          discardDraft();
+          setCustomRequested(false);
+          if (next === "off") {
+            if (value !== null) onChange(null, () => {});
           } else if (next !== null) {
-            setCustomRequested(false);
-            onChange(Number(next));
+            onChange(Number(next), () => {});
           }
         }}
       >
@@ -178,61 +246,34 @@ function RetentionControl({
           <SelectItem value="custom">Custom</SelectItem>
         </SelectPopup>
       </Select>
-      {custom && value !== null ? (
-        <RetentionDaysInput label={label} value={value} onChange={onChange} minimum={minimum} />
+      {custom ? (
+        <InputGroup className="w-24">
+          <InputGroupInput
+            size="settings"
+            type="number"
+            min={minimum}
+            max={MAX_RETENTION_DAYS}
+            value={shown}
+            aria-label={`${label} in days`}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (event.key === "Enter") {
+                committing.current = true;
+                event.currentTarget.blur();
+              } else if (event.key === "Escape" && (draft !== null || savedDays === null)) {
+                // An unhandled Escape closes the settings page.
+                event.preventDefault();
+                event.stopPropagation();
+                setDraft(null);
+                if (savedDays === null) setCustomRequested(false);
+              }
+            }}
+          />
+          <InputGroupUnit>days</InputGroupUnit>
+        </InputGroup>
       ) : null}
     </div>
-  );
-}
-
-function RetentionDaysInput({
-  label,
-  value,
-  onChange,
-  minimum,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  minimum: number;
-}) {
-  // Keep partial values local: committing a retention setting can start cleanup.
-  const [draft, setDraft] = useState(String(value));
-  const [savedValue, setSavedValue] = useState(value);
-  if (savedValue !== value) {
-    setSavedValue(value);
-    setDraft(String(value));
-  }
-  return (
-    <InputGroup className="w-24">
-      <InputGroupInput
-        size="settings"
-        type="number"
-        min={minimum}
-        max={MAX_RETENTION_DAYS}
-        value={draft}
-        aria-label={`${label} in days`}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-        }}
-        onBlur={() => {
-          const parsed = Number(draft);
-          if (
-            draft.trim() !== "" &&
-            Number.isInteger(parsed) &&
-            parsed >= minimum &&
-            parsed <= MAX_RETENTION_DAYS
-          ) {
-            setDraft(String(parsed));
-            if (parsed !== value) onChange(parsed);
-          } else {
-            setDraft(String(value));
-          }
-        }}
-      />
-      <InputGroupUnit>days</InputGroupUnit>
-    </InputGroup>
   );
 }
 
@@ -562,12 +603,12 @@ export function WorktreeCleanupSection({ title = "Cleanup" }: { title?: string }
   // A policy locks these through worktreeCleanup, which also reaches each project's own rules.
   const lockablePath = (key: keyof WorktreeCleanupRules) =>
     isProjectScope ? ["worktreeCleanup"] : ["worktreeCleanup", `storageCleanup.${key}`];
-  const update = (patch: Partial<StorageCleanupSettings>) =>
-    updateSettings({ storageCleanup: patch });
-  const updateWorktree = (patch: Partial<WorktreeCleanupRules>) =>
+  const update = (patch: Partial<StorageCleanupSettings>, options?: SaveOptions) =>
+    updateSettings({ storageCleanup: patch }, options);
+  const updateWorktree = (patch: Partial<WorktreeCleanupRules>, options?: SaveOptions) =>
     isProjectScope
-      ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
-      : update(patch);
+      ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } }, options)
+      : update(patch, options);
 
   if (
     isProjectScope &&
@@ -681,7 +722,9 @@ export function WorktreeCleanupSection({ title = "Cleanup" }: { title?: string }
                 <RetentionControl
                   label="Delete inactive worktrees"
                   value={settings.worktreeAfterDays}
-                  onChange={(worktreeAfterDays) => updateWorktree({ worktreeAfterDays })}
+                  onChange={(worktreeAfterDays, onFailed) =>
+                    updateWorktree({ worktreeAfterDays }, { onFailed })
+                  }
                 />
               }
             />
@@ -713,8 +756,8 @@ export function WorktreeCleanupSection({ title = "Cleanup" }: { title?: string }
                         label="Delete settled worktrees"
                         value={settings.worktreeSettledAfterDays}
                         minimum={0}
-                        onChange={(worktreeSettledAfterDays) =>
-                          updateWorktree({ worktreeSettledAfterDays })
+                        onChange={(worktreeSettledAfterDays, onFailed) =>
+                          updateWorktree({ worktreeSettledAfterDays }, { onFailed })
                         }
                       />
                     }
@@ -806,8 +849,8 @@ export function StorageCleanupSections() {
       ? "Mixed across selected machines"
       : undefined;
   if (scope.kind === "project" || scope.kind === "checkout") return null;
-  const update = (patch: Partial<StorageCleanupSettings>) =>
-    updateSettings({ storageCleanup: patch });
+  const update = (patch: Partial<StorageCleanupSettings>, options: SaveOptions) =>
+    updateSettings({ storageCleanup: patch }, options);
   const databaseStorageNotice = (
     <DatabaseStorageNotice
       environments={connectedEnvironments.filter(
@@ -842,7 +885,9 @@ export function StorageCleanupSections() {
               <RetentionControl
                 label="Delete old browser artifacts"
                 value={settings.browserArtifactsAfterDays}
-                onChange={(browserArtifactsAfterDays) => update({ browserArtifactsAfterDays })}
+                onChange={(browserArtifactsAfterDays, onFailed) =>
+                  update({ browserArtifactsAfterDays }, { onFailed })
+                }
               />
             }
           />
@@ -858,7 +903,7 @@ export function StorageCleanupSections() {
               <RetentionControl
                 label="Delete old rotated logs"
                 value={settings.logsAfterDays}
-                onChange={(logsAfterDays) => update({ logsAfterDays })}
+                onChange={(logsAfterDays, onFailed) => update({ logsAfterDays }, { onFailed })}
               />
             }
           />

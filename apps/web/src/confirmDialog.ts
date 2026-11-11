@@ -1,11 +1,12 @@
 import type { ConfirmDialogOptions, ConfirmDialogVariant } from "@t3tools/contracts";
 
-/** What the host shows: the message, plus the caller's explicit title and action label. */
+/** What the host shows: the message, plus the caller's explicit title, action label, and focus. */
 type ConfirmDialogRequest = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
   readonly title?: string | undefined;
   readonly confirmLabel?: string | undefined;
+  readonly initialFocus?: ConfirmDialogOptions["initialFocus"];
 };
 
 export type ConfirmDialogState =
@@ -23,6 +24,7 @@ function requestOf(confirmation: ConfirmDialogRequest): ConfirmDialogRequest {
     variant: confirmation.variant,
     title: confirmation.title,
     confirmLabel: confirmation.confirmLabel,
+    initialFocus: confirmation.initialFocus,
   };
 }
 
@@ -78,6 +80,7 @@ export function requestConfirmDialog(
       variant: options?.variant ?? "default",
       title: options?.title,
       confirmLabel: options?.confirmLabel,
+      initialFocus: options?.initialFocus,
       resolve,
     } satisfies PendingConfirmation;
     if (activeConfirmation || state.status === "closing") {

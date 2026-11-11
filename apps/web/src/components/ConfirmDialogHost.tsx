@@ -11,6 +11,7 @@ import { returnKeyboardToFocusedPane } from "../layout/layoutPaneContext";
 import {
   AlertDialog,
   AlertDialogClose,
+  AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -69,6 +70,7 @@ export function ConfirmDialogHost() {
   const confirmLabel = (state.status === "idle" ? undefined : state.confirmLabel) ?? "Confirm";
   // A destructive "Delete ..." action carries the trash icon.
   const showDeleteIcon = confirmVariant === "destructive" && /^delete\b/i.test(confirmLabel);
+  const focusConfirm = state.status !== "idle" && state.initialFocus === "confirm";
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -112,10 +114,16 @@ export function ConfirmDialogHost() {
           <AlertDialogClose render={<Button size="standard" variant="secondary" />}>
             Cancel
           </AlertDialogClose>
-          <Button size="standard" variant={confirmVariant} onClick={onConfirm}>
-            {showDeleteIcon ? <Trash2Icon aria-hidden /> : null}
-            {confirmLabel}
-          </Button>
+          {focusConfirm && confirmVariant === "default" ? (
+            <AlertDialogAction size="standard" onClick={onConfirm}>
+              {confirmLabel}
+            </AlertDialogAction>
+          ) : (
+            <Button size="standard" variant={confirmVariant} onClick={onConfirm}>
+              {showDeleteIcon ? <Trash2Icon aria-hidden /> : null}
+              {confirmLabel}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>

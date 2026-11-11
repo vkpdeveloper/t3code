@@ -145,7 +145,8 @@ export function PullRequestResolvedThreadRow({
   defaultOpen = false,
 }: {
   defaultOpen?: boolean;
-  path: string;
+  /** Null for a thread on the whole change request, such as a GitLab overview thread. */
+  path: string | null;
   line: number | null | undefined;
   outdated: boolean;
   /** The thread is still open on the host, but the review that started it was dismissed. */
@@ -155,7 +156,7 @@ export function PullRequestResolvedThreadRow({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const label = `${path}${line ? `:${line}` : ""}`;
+  const label = path === null ? "Overview" : `${path}${line ? `:${line}` : ""}`;
   const comments = `${commentCount} ${commentCount === 1 ? "comment" : "comments"}`;
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -170,7 +171,9 @@ export function PullRequestResolvedThreadRow({
           ) : (
             <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success-foreground" />
           )}
-          <span className="min-w-0 flex-1 truncate font-mono">{label}</span>
+          <span className={cn("min-w-0 flex-1 truncate", path !== null && "font-mono")}>
+            {label}
+          </span>
           {outdated ? <span className="shrink-0">Outdated</span> : null}
           <span className="shrink-0">{comments}</span>
           <ChevronDownIcon

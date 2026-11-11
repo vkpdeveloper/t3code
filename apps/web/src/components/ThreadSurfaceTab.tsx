@@ -11,6 +11,7 @@ import {
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
+  type EditorId,
   type PreviewAnnotationPayload,
   type ProjectId,
   type ScopedThreadRef,
@@ -74,7 +75,7 @@ import {
   useQuietThreadProjection,
 } from "../state/entities";
 import { previewEnvironment } from "../state/preview";
-import { primaryServerAvailableEditorsAtom, primaryServerKeybindingsAtom } from "../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import {
   readEnvironmentScope,
   useEnvironmentScope,
@@ -134,6 +135,7 @@ const PullRequestDetailPanel = lazy(() =>
   })),
 );
 
+const EMPTY_EDITORS: ReadonlyArray<EditorId> = [];
 const EMPTY_PENDING: ReadonlySet<string> = new Set();
 const noop = () => undefined;
 
@@ -660,7 +662,9 @@ function ThreadSurfaceContent({
   const bridge = useThreadChatBridge(threadRef);
   const { paneId } = useLayoutPane();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
+  const availableEditors =
+    useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId))?.availableEditors ??
+    EMPTY_EDITORS;
   const workspaceMutationId = bridge?.workspaceMutationId ?? null;
   const [pendingFiles, setPendingFiles] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const onPendingChange = (relativePath: string, pending: boolean) => {
