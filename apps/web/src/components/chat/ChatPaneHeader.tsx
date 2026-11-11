@@ -29,6 +29,7 @@ export function ChatPaneHeader({
       ref={ref}
       {...workspaceAreaProps("tabs", 0.5, "Thread tabs")}
       data-chat-header
+      data-sidebar-slide-children=""
       data-pane-header
       className={chatPaneHeaderClassName({
         leadingEdge,
@@ -63,7 +64,8 @@ export function chatPaneHeaderClassName({
   windowDrag: boolean;
 }): string {
   return cn(
-    // Keep tab menus above the timeline.
+    // Keep tab menus above the timeline. Ease the collapsed-sidebar inset with the sidebar so the
+    // tab moves with its pane.
     "relative z-10 bg-background md:pl-0",
     isElectron
       ? cn(
@@ -108,6 +110,7 @@ export function ChatPaneHeaderControls({
           : "fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] mr-px md:right-(--workspace-pane-inset) md:mr-0",
       )}
       data-workspace-titlebar-controls
+      data-sidebar-slide-hold={split || local ? undefined : ""}
     >
       <PaneNotch side="right" marksHost={marksHost}>
         <div className="pointer-events-auto flex h-full items-center gap-1.5">{children}</div>
