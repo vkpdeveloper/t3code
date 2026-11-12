@@ -25,8 +25,12 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { useAtomValue } from "@effect/atom-react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { shortcutLabelForCommand } from "../keybindings";
+import { primaryServerKeybindingsAtom } from "../state/server";
+import { Kbd } from "./ui/kbd";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useServerConfigs, useThreadShellsForProjectRefs } from "../state/entities";
 import {
@@ -216,6 +220,8 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
   onUsePreviousWorktree,
 }: WorkspaceMenuProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const branchShortcut = branch ? shortcutLabelForCommand(keybindings, "composer.branch") : null;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
   const open = branch?.open ?? workspaceOpen;
@@ -305,6 +311,7 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
           <span className="flex flex-col gap-0.5">
             {branch ? <span>{branch.label}</span> : null}
             <span>{workspaceLabel}</span>
+            {branchShortcut ? <Kbd>{branchShortcut}</Kbd> : null}
           </span>
         </TooltipPopup>
       </Tooltip>
@@ -407,12 +414,16 @@ const MachineMenu = memo(function MachineMenu({
 }: MachineMenuProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const popupRef = useRef<HTMLDivElement>(null);
   const activeEnvironment = availableEnvironments?.find(
     (env) => env.environmentId === environmentId,
   );
   const environmentLabel = autoEnvironmentLabel ?? activeEnvironment?.label ?? environmentId;
   const canPickEnvironment = (showEnvironmentPicker && !envLocked) || addTargets.length > 0;
+  const hostShortcut = canPickEnvironment
+    ? shortcutLabelForCommand(keybindings, "composer.host")
+    : null;
   const icon = autoEnvironmentLabel ? (
     <ScaleIcon aria-hidden className="size-3 shrink-0" />
   ) : (
@@ -423,8 +434,13 @@ const MachineMenu = memo(function MachineMenu({
   );
   const tooltip = (
     <TooltipPopup>
-      {environmentLabel}
-      {environmentUnavailable ? " (offline)" : ""}
+      <span className="flex flex-col gap-1">
+        <span>
+          {environmentLabel}
+          {environmentUnavailable ? " (offline)" : ""}
+        </span>
+        {hostShortcut ? <Kbd>{hostShortcut}</Kbd> : null}
+      </span>
     </TooltipPopup>
   );
 
