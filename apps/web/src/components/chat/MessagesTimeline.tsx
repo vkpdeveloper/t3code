@@ -1672,7 +1672,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           dataLength={rows.length}
           latestRunId={latestRun?.runId ?? null}
           runStatus={latestRun?.status ?? null}
-          foldCollapsing={workingHistoryCollapsing}
+          foldCollapsing={workingHistoryMoving}
         />
       ) : null}
       <MarkdownFindContext value={findActive}>
