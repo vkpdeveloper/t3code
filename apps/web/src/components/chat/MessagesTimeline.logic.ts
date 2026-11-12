@@ -765,7 +765,7 @@ function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<Timeli
   return new Set(lastAssistantMessageIdByResponseKey.values());
 }
 
-export type TurnFoldEnding = "worked" | "stopped" | "failed" | "limited";
+export type TurnFoldEnding = "worked" | "stopped" | "failed" | "limited" | "waiting";
 
 interface TurnFold {
   runId: RunId;
@@ -1212,6 +1212,7 @@ function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   terminalAssistantMessageIds: ReadonlySet<string>;
   latestRun: TimelineLatestRun | null;
+  latestRunAwaitsBackgroundWork: boolean;
   unfoldedRunIds: ReadonlySet<RunId>;
   runlessWorkActive: boolean;
   failedRunIds: ReadonlySet<RunId>;
@@ -1442,7 +1443,9 @@ function deriveTurnFolds(input: {
         : "failed"
       : isLatestInterruptedTurn || interruptedRunIds.has(runId)
         ? "stopped"
-        : "worked";
+        : input.latestRunAwaitsBackgroundWork && input.latestRun?.runId === runId
+          ? "waiting"
+          : "worked";
     const label = turnFoldLabel(ending, elapsedMs);
     // The checkpoint diff is what the changed-files card shows; provider
     // counts are the fallback for turns without a checkpoint.
@@ -1480,9 +1483,19 @@ function turnFoldLabel(ending: TurnFoldEnding, elapsedMs: number | null): string
       return duration ? `Failed after ${duration}` : "Failed";
     case "limited":
       return duration ? `Limited at ${duration}` : "Limited";
+    case "waiting":
+      return duration ? `Progress after ${duration}` : "In progress";
     case "worked":
       return duration ? `Worked for ${duration}` : "Worked";
   }
+}
+
+function firstIndexById(entries: ReadonlyArray<TimelineEntry>): Map<string, number> {
+  const indexById = new Map<string, number>();
+  for (const [index, entry] of entries.entries()) {
+    if (!indexById.has(entry.id)) indexById.set(entry.id, index);
+  }
+  return indexById;
 }
 
 function gatherOpenFoldWork(
@@ -1492,14 +1505,20 @@ function gatherOpenFoldWork(
 ) {
   const gatheredByAnchorId = new Map<string, TimelineEntry[]>();
   const foldsByAnchorEntryId = new Map<string, TurnFold>();
+  // One index for every open fold; searching the entries per fold made each update quadratic.
+  let indexById: Map<string, number> | undefined;
   for (const fold of folds) {
-    const anchorIndex = isOpen(fold)
-      ? entries.findIndex((entry) => entry.id === fold.anchorEntryId)
-      : -1;
-    const gathered =
-      anchorIndex > 0
-        ? entries.slice(0, anchorIndex).filter((entry) => fold.hiddenEntryIds.has(entry.id))
-        : [];
+    let gathered: TimelineEntry[] = [];
+    if (isOpen(fold)) {
+      indexById ??= firstIndexById(entries);
+      const anchorIndex = indexById.get(fold.anchorEntryId) ?? -1;
+      const indexes: number[] = [];
+      for (const id of fold.hiddenEntryIds) {
+        const index = indexById.get(id);
+        if (index !== undefined && index < anchorIndex) indexes.push(index);
+      }
+      gathered = indexes.sort((a, b) => a - b).map((index) => entries[index]!);
+    }
     if (gathered.length > 0) gatheredByAnchorId.set(fold.anchorEntryId, gathered);
     foldsByAnchorEntryId.set(gathered[0]?.id ?? fold.anchorEntryId, fold);
   }
@@ -1714,20 +1733,50 @@ export function liveAnswerPreview(entries: ReadonlyArray<TimelineEntry>): string
   return null;
 }
 
-function timelineRowEntries(
-  input: Pick<
-    MessagesTimelineRowsInput,
-    | "timelineEntries"
-    | "toolCallVisibility"
-    | "revealedMessageId"
-    | "isWorking"
-    | "latestRun"
-    | "runningRunId"
-    | "pendingApprovalRequestIds"
-  >,
-) {
+function withoutRetriedPrompts(entries: ReadonlyArray<TimelineEntry>) {
+  return entries.filter(
+    (entry) => entry.kind !== "message" || entry.message.retryOfRunId === undefined,
+  );
+}
+
+type RowEntriesInput = Pick<
+  MessagesTimelineRowsInput,
+  | "timelineEntries"
+  | "toolCallVisibility"
+  | "revealedMessageId"
+  | "isWorking"
+  | "latestRun"
+  | "runningRunId"
+  | "pendingApprovalRequestIds"
+>;
+
+// Row derivation and the working window filter the same entries on one update.
+const rowEntriesCache = new WeakMap<
+  ReadonlyArray<TimelineEntry>,
+  { readonly input: RowEntriesInput; readonly entries: ReadonlyArray<TimelineEntry> }
+>();
+
+function timelineRowEntries(input: RowEntriesInput) {
+  const cached = rowEntriesCache.get(input.timelineEntries);
+  if (
+    cached !== undefined &&
+    (cached.input.toolCallVisibility ?? "showAll") === (input.toolCallVisibility ?? "showAll") &&
+    (cached.input.revealedMessageId ?? null) === (input.revealedMessageId ?? null) &&
+    cached.input.isWorking === input.isWorking &&
+    shallow(cached.input.latestRun ?? null, input.latestRun ?? null) &&
+    (cached.input.runningRunId ?? null) === (input.runningRunId ?? null) &&
+    shallow(cached.input.pendingApprovalRequestIds, input.pendingApprovalRequestIds)
+  ) {
+    return cached.entries;
+  }
+  const entries = filterRowEntries(input);
+  rowEntriesCache.set(input.timelineEntries, { input, entries });
+  return entries;
+}
+
+function filterRowEntries(input: RowEntriesInput) {
   const visibility = input.toolCallVisibility ?? "showAll";
-  const entries = input.timelineEntries;
+  const entries = withoutRetriedPrompts(input.timelineEntries);
   let shown = entries;
   if (visibility === "zen") {
     const answering = input.isWorking && input.latestRun?.turnEnded !== true;
@@ -1789,6 +1838,7 @@ function deriveTimelineTurnFolds(
     latestRun: input.latestRun ?? null,
     unfoldedRunIds: activeVisualResponseRunIds,
     failedRunIds,
+    latestRunAwaitsBackgroundWork: false,
     runlessWorkActive: input.isWorking && input.runlessWorkActive === true,
     // Fold membership does not depend on the diff stat the fold header shows.
     turnDiffSummaries: [],
@@ -1802,6 +1852,8 @@ export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   pendingApprovalRequestIds?: ReadonlySet<RuntimeRequestId>;
   latestRun?: TimelineLatestRun | null;
+  /** The latest run's provider turn ended, but its agent still awaits background work. */
+  awaitingBackgroundWork?: boolean;
   runningRunId?: RunId | null;
   expandedRunIds?: ReadonlySet<RunId>;
   expandedAttemptIds?: ReadonlySet<RunAttemptId>;
@@ -1893,6 +1945,7 @@ export function deriveMessagesTimelineRows(input: {
           latestRun: input.latestRun ?? null,
           unfoldedRunIds: activeVisualResponseRunIds,
           failedRunIds,
+          latestRunAwaitsBackgroundWork: input.awaitingBackgroundWork === true,
           runlessWorkActive,
           turnDiffSummaries: input.turnDiffSummaries,
           liveSubagentEntryIds,
@@ -2988,11 +3041,13 @@ export function applyWorkingWindow(
   const compactionRowIds = new Set(
     rows.filter((row) => row.kind === "context-compaction").map((row) => row.id),
   );
-  const compactedRunIds = new Set(
-    entries.flatMap((entry) =>
-      timelineEntryIsCompaction(entry) ? [timelineEntryRunId(entry)] : [],
-    ),
-  );
+  let compactedRunIds: ReadonlySet<RunId | null> | undefined;
+  const runWasCompacted = (runId: RunId | null) =>
+    (compactedRunIds ??= new Set(
+      entries.flatMap((entry) =>
+        timelineEntryIsCompaction(entry) ? [timelineEntryRunId(entry)] : [],
+      ),
+    )).has(runId);
   const unsettledRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
   const runIds = deriveActiveVisualResponseRunIds({
     timelineEntries: entries,
@@ -3000,7 +3055,8 @@ export function applyWorkingWindow(
     isWorking: true,
   });
   const boundaryIndex = lastResponseBoundaryIndex(entries);
-  const replyIds = steerReplyEntryIds(entries);
+  // Steer replies reset at each response boundary, so only the last response's entries matter.
+  const replyIds = steerReplyEntryIds(entries.slice(Math.max(boundaryIndex, 0)));
   let key = entries[boundaryIndex]?.id ?? "working";
   const items: WorkingWindowItem[] = [];
   // A standalone `/compact` row already shows its run's compaction.
@@ -3045,9 +3101,9 @@ export function applyWorkingWindow(
           (compactCommandRunIds.has(runId) ||
             compactionRowIds.has(entry.id) ||
             workingRow.compacting !== undefined)) ||
-        (compactedRunIds.has(runId) &&
-          entry.entry.questionAnswer !== undefined &&
-          claudeResumeCompactionAge(entry.entry.questionAnswer) !== null) ||
+        (entry.entry.questionAnswer !== undefined &&
+          claudeResumeCompactionAge(entry.entry.questionAnswer) !== null &&
+          runWasCompacted(runId)) ||
         !workEntryIsVisibleInGroup(entry.entry, true)
       ) {
         continue;
@@ -3127,7 +3183,7 @@ export function applyWorkingWindow(
     failedTests: deriveFailedTests(items),
     retryAttempt: deriveRetryAttempt(items),
     stopping: interruptRequested && !interruptSettled,
-    answering: answer?.kind === "text" && answer.message.streaming,
+    answering: answer !== undefined,
     historyOpen: historyOpenKey === key,
   };
   // Steers move above the bar, next to the prompt they continue.
@@ -3154,6 +3210,19 @@ export function withRunGroupsOpen(
   return closed.length === 0 ? expanded : new Set([...expanded, ...closed]);
 }
 
+function entryTurnItem(entry: TimelineEntry) {
+  return (
+    timelineEntryTurnItem(entry) ??
+    (entry.kind === "work" ? entry.entry.structuredPayload : undefined)
+  );
+}
+
+function entryRunId(entry: TimelineEntry, item: ReturnType<typeof entryTurnItem>) {
+  return entry.kind === "message"
+    ? entry.message.runId
+    : (item?.runId ?? timelineEntryRunId(entry));
+}
+
 /** Fold persisted notification deliveries; ordinary prompts and actionable runs stay visible. */
 export function applyBackgroundActivityGroups(
   rows: MessagesTimelineRow[],
@@ -3167,22 +3236,27 @@ export function applyBackgroundActivityGroups(
   previousRows: ReadonlyArray<MessagesTimelineRow> = [],
 ): MessagesTimelineRow[] {
   const notifications = new Map<RunId, Map<string, OrchestrationV2Notification>>();
+  for (const entry of input.timelineEntries) {
+    const item = entryTurnItem(entry);
+    if (item?.type !== "notification") continue;
+    const runId = entryRunId(entry, item);
+    if (runId == null) continue;
+    const ids = notifications.get(runId) ?? new Map<string, OrchestrationV2Notification>();
+    ids.set(item.id, item);
+    notifications.set(runId, ids);
+  }
+  // Most threads have no deliveries to fold; only they need the per-entry runs and exclusions.
+  if (notifications.size === 0) return rows;
   const excluded = new Set<RunId>();
   const entryRuns = new Map<string, RunId>();
   const activeRunId = deriveUnsettledRunId(input.latestRun ?? null, input.runningRunId ?? null);
+  let activeRunHasEntries = false;
   for (const entry of input.timelineEntries) {
-    const item =
-      timelineEntryTurnItem(entry) ??
-      (entry.kind === "work" ? entry.entry.structuredPayload : undefined);
-    const runId =
-      entry.kind === "message" ? entry.message.runId : (item?.runId ?? timelineEntryRunId(entry));
+    const item = entryTurnItem(entry);
+    const runId = entryRunId(entry, item);
     if (runId == null) continue;
     entryRuns.set(entry.id, runId);
-    if (item?.type === "notification") {
-      const ids = notifications.get(runId) ?? new Map<string, OrchestrationV2Notification>();
-      ids.set(item.id, item);
-      notifications.set(runId, ids);
-    }
+    if (runId === activeRunId) activeRunHasEntries = true;
     if (
       (entry.kind === "message" && entry.message.role === "user") ||
       entry.kind === "proposed-plan" ||
@@ -3208,8 +3282,7 @@ export function applyBackgroundActivityGroups(
   }
   for (const runId of excluded) notifications.delete(runId);
   if (notifications.size === 0) return rows;
-  const pendingRunId =
-    activeRunId !== null && ![...entryRuns.values()].includes(activeRunId) ? activeRunId : null;
+  const pendingRunId = activeRunId !== null && !activeRunHasEntries ? activeRunId : null;
   const previousGroupIds = new Map<RunId, string>();
   for (const row of previousRows) {
     if (row.kind !== "background-activity") continue;
@@ -3452,7 +3525,6 @@ function replaceStreamingMessageRows(
   } = input;
   // Shell/checkpoint selectors rebuild summaries per event; compare contents.
   if (
-    timelineEntries.length !== previousEntries.length ||
     !shallow(previousContext, context) ||
     !shallow(previousRun, latestRun) ||
     !shallow(previousExpandedRuns, expandedRunIds) ||
@@ -3464,7 +3536,25 @@ function replaceStreamingMessageRows(
   ) {
     return null;
   }
-  const replacements = new Map<ChatMessage, Extract<TimelineEntry, { kind: "message" }>>();
+  const replacements = streamedMessageEntries(previousEntries, timelineEntries);
+  if (replacements === null) return null;
+  return replacements.size === 0
+    ? previous.rows
+    : withStreamedMessages(previous.rows, replacements);
+}
+
+type StreamedMessageEntries = Map<ChatMessage, Extract<TimelineEntry, { kind: "message" }>>;
+
+/**
+ * The message entries a streamed text update changed, keyed by their previous message, or
+ * null when anything else in the entries changed.
+ */
+function streamedMessageEntries(
+  previousEntries: ReadonlyArray<TimelineEntry>,
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+): StreamedMessageEntries | null {
+  if (timelineEntries.length !== previousEntries.length) return null;
+  const replacements: StreamedMessageEntries = new Map();
   for (let index = 0; index < timelineEntries.length; index += 1) {
     const entry = timelineEntries[index]!;
     const previousEntry = previousEntries[index]!;
@@ -3494,8 +3584,14 @@ function replaceStreamingMessageRows(
     if (!isStreamingMessageTextUpdate(previousEntry.message, entry.message)) return null;
     replacements.set(previousEntry.message, entry);
   }
-  if (replacements.size === 0) return previous.rows;
-  return previous.rows.map((row) => {
+  return replacements;
+}
+
+function withStreamedMessages(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  replacements: StreamedMessageEntries,
+): MessagesTimelineRow[] {
+  return rows.map((row) => {
     if (row.kind !== "message" && row.kind !== "assistant-meta") return row;
     const entry = replacements.get(row.message);
     return entry
@@ -3558,6 +3654,131 @@ function withPreviousWindowItems(
     return previousItem;
   });
   return reused ? { ...row, window: { ...row.window, items } } : row;
+}
+
+export type StableTimelineRowsInput = Parameters<typeof applyBackgroundActivityGroups>[1] & {
+  readonly pendingApprovalRequestIds: NonNullable<
+    MessagesTimelineRowsInput["pendingApprovalRequestIds"]
+  >;
+  readonly isWorking: boolean;
+  readonly runlessWorkActive: boolean;
+  readonly toolCallVisibility: Exclude<MessagesTimelineRowsInput["toolCallVisibility"], undefined>;
+  readonly revealedMessageId: Exclude<MessagesTimelineRowsInput["revealedMessageId"], undefined>;
+  readonly workingHistoryKey: string | null;
+  readonly windowlessCitation: boolean;
+  readonly activeFindEntryId: string | null;
+};
+
+export interface StableTimelineRowsProjection {
+  readonly source: MessagesTimelineRow[];
+  readonly input: StableTimelineRowsInput;
+  readonly stable: StableMessagesTimelineRowsState;
+}
+
+/** Everything the passes read besides the entries, compared by content where selectors rebuild it. */
+function sameStableRowsContext(
+  previous: StableTimelineRowsInput,
+  next: StableTimelineRowsInput,
+): boolean {
+  const {
+    timelineEntries: _previousEntries,
+    latestRun: previousRun,
+    expandedWorkGroupIds: previousGroups,
+    pendingApprovalRequestIds: previousApprovals,
+    ...previousContext
+  } = previous;
+  const {
+    timelineEntries: _nextEntries,
+    latestRun: nextRun,
+    expandedWorkGroupIds: nextGroups,
+    pendingApprovalRequestIds: nextApprovals,
+    ...nextContext
+  } = next;
+  return (
+    shallow(previousRun, nextRun) &&
+    shallow(previousGroups, nextGroups) &&
+    shallow(previousApprovals, nextApprovals) &&
+    shallow(previousContext, nextContext)
+  );
+}
+
+/**
+ * The working window, background groups and stable identities over derived rows. A streamed
+ * text update changes only its message rows, which those passes keep as they are, so the
+ * previous result takes the new rows instead of the passes running over the whole thread.
+ */
+export function deriveStableTimelineRows(
+  rows: MessagesTimelineRow[],
+  input: StableTimelineRowsInput,
+  previous: StableTimelineRowsProjection | null,
+): StableTimelineRowsProjection {
+  if (
+    previous !== null &&
+    previous.source === rows &&
+    previous.input.timelineEntries === input.timelineEntries &&
+    sameStableRowsContext(previous.input, input)
+  ) {
+    return previous;
+  }
+  const stable =
+    (previous === null ? null : streamedStableRows(rows, input, previous)) ??
+    passStableRows(rows, input, previous?.stable ?? { byId: new Map(), result: [] });
+  return { source: rows, input, stable };
+}
+
+function passStableRows(
+  rows: MessagesTimelineRow[],
+  input: StableTimelineRowsInput,
+  previous: StableMessagesTimelineRowsState,
+): StableMessagesTimelineRowsState {
+  const windowed = input.windowlessCitation
+    ? rows
+    : applyWorkingWindow(rows, input, input.workingHistoryKey);
+  const visibleRows =
+    input.activeFindEntryId !== null &&
+    windowed.some(
+      (row) =>
+        row.kind === "working" &&
+        row.window?.items.some((item) => item.id === input.activeFindEntryId),
+    )
+      ? rows
+      : windowed;
+  const groupedRows = applyBackgroundActivityGroups(visibleRows, input, previous.result);
+  return computeStableMessagesTimelineRows(groupedRows, previous);
+}
+
+function streamedStableRows(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  input: StableTimelineRowsInput,
+  previous: StableTimelineRowsProjection,
+): StableMessagesTimelineRowsState | null {
+  if (rows.length !== previous.source.length || !sameStableRowsContext(previous.input, input)) {
+    return null;
+  }
+  const replacements = streamedMessageEntries(
+    previous.input.timelineEntries,
+    input.timelineEntries,
+  );
+  if (replacements === null || replacements.size === 0) return null;
+  // The rows must be the previous ones with those messages patched, as the row step patches them.
+  const patchedSource = withStreamedMessages(previous.source, replacements);
+  let changedRows = 0;
+  for (const [index, row] of rows.entries()) {
+    const before = previous.source[index]!;
+    if (row === before) continue;
+    if (patchedSource[index] === before || !shallow(row, patchedSource[index])) return null;
+    changedRows += 1;
+  }
+  const result = withStreamedMessages(previous.stable.result, replacements);
+  const byId = new Map(previous.stable.byId);
+  let patchedRows = 0;
+  for (const [index, row] of result.entries()) {
+    if (row === previous.stable.result[index]) continue;
+    byId.set(row.id, row);
+    patchedRows += 1;
+  }
+  // A message the working window or a collapsed group took out of the rows keeps the full path.
+  return patchedRows === changedRows ? { byId, result } : null;
 }
 
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {

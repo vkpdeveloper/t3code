@@ -1265,6 +1265,7 @@ export function ChatComposer(props: ChatComposerProps) {
     attachControls: attachExpandedComposerControls,
     hiddenBlockCount: expandedControlsHiddenBlockCount,
     iconOnlyBlockCount: expandedControlsIconOnlyBlockCount,
+    traitsIconOnly: expandedControlsTraitsIconOnly,
     pickerIconOnly: expandedControlsPickerIconOnly,
   } = useRestingComposerControlsLayout(props.trayControlsHost ?? null);
   const pendingPrimaryAction = activePendingProgress
@@ -2509,6 +2510,7 @@ export function ChatComposer(props: ChatComposerProps) {
       effortDisplay={settings.effortDisplay}
       restingHiddenBlockCount={expandedControlsHiddenBlockCount}
       iconOnlyBlockCount={expandedControlsIconOnlyBlockCount}
+      traitsIconOnly={expandedControlsTraitsIconOnly}
       pickerIconOnly={expandedControlsPickerIconOnly}
       showProviderUnavailable={showProviderUnavailable}
       providerSetupInstanceId={providerSetupInstanceId}
@@ -3478,7 +3480,7 @@ export function ChatComposer(props: ChatComposerProps) {
             <div
               ref={attachExpandedComposerControls}
               data-chat-composer-resting-controls="true"
-              className="flex min-w-0 items-center gap-0.5"
+              className="flex min-w-0 items-center gap-0.5 @max-[620px]/composer-surface:[--composer-compact-labels:1]"
             >
               {composerControls}
             </div>,

@@ -35,6 +35,7 @@ import {
   withRunGroupsOpen,
   withTurnFoldOpen,
   deriveMessagesTimelineRowsWithState,
+  deriveStableTimelineRows,
   pendingApprovalSlotLabel,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
@@ -1235,7 +1236,7 @@ describe("deriveMessagesTimelineRows", () => {
       const rows = applyWorkingWindow(deriveMessagesTimelineRows(running), running);
       expect(rows.map((row) => row.id)).toEqual(["prompt", "working-indicator-row", "reply"]);
       expect(rows.filter((row) => row.kind === "working")).toMatchObject([
-        { createdAt: prompt.createdAt, window: { items: [], answering: streaming } },
+        { createdAt: prompt.createdAt, window: { items: [], answering: true } },
       ]);
       expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
     }
@@ -1606,6 +1607,70 @@ describe("deriveMessagesTimelineRows", () => {
         expanded: false,
       }),
     ]);
+  });
+
+  it("says Progress after while the latest turn awaits background work", () => {
+    const at = (second: number) => new Date(Date.UTC(2026, 0, 1, 0, 0, second)).toISOString();
+    const message = (
+      id: string,
+      role: "user" | "assistant",
+      runId: string | null,
+      second: number,
+      fields: { readonly end?: number; readonly streaming?: boolean } = {},
+    ) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt: at(second),
+      message: {
+        id: MessageId.make(id),
+        role,
+        text: id,
+        runId: runId === null ? null : RunId.make(runId),
+        createdAt: at(second),
+        updatedAt: at(fields.end ?? second),
+        streaming: fields.streaming ?? false,
+      },
+    });
+    const timelineEntries = [
+      message("hello", "user", null, 0),
+      message("hi", "assistant", "turn-1", 2, { end: 3 }),
+      message("build", "user", null, 10),
+      {
+        id: "build-work-entry",
+        kind: "work" as const,
+        createdAt: at(12),
+        entry: {
+          id: "build-work",
+          createdAt: at(12),
+          runId: RunId.make("turn-2"),
+          label: "Ran command",
+          tone: "tool" as const,
+        },
+      },
+      message("built", "assistant", "turn-2", 50, { end: 63 }),
+    ];
+    const input = {
+      timelineEntries,
+      latestRun: {
+        runId: RunId.make("turn-2"),
+        status: "completed" as const,
+        startedAt: at(10),
+        completedAt: at(63),
+      },
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    };
+    const foldLabel = (rows: ReturnType<typeof deriveMessagesTimelineRows>) =>
+      rows.flatMap((row) =>
+        row.kind === "turn-fold" && row.runId === "turn-2" ? [row.label] : [],
+      );
+
+    expect(foldLabel(deriveMessagesTimelineRows(input))).toEqual(["Worked for 53s"]);
+    expect(
+      foldLabel(deriveMessagesTimelineRows({ ...input, awaitingBackgroundWork: true })),
+    ).toEqual(["Progress after 53s"]);
   });
 
   it.each(["steer", "promoted_queued_to_steer"] as const)(
@@ -3973,6 +4038,42 @@ it("hands the list rows whose spacing, wake-up span or setup placement changed",
   expect(computeStableMessagesTimelineRows(next, previous).result).toEqual(next);
 });
 
+// The input the timeline gives the passes after row derivation, as MessagesTimeline builds it.
+function stableInput(rowsInput: Parameters<typeof deriveMessagesTimelineRows>[0]) {
+  return {
+    timelineEntries: rowsInput.timelineEntries,
+    pendingApprovalRequestIds: new Set<RuntimeRequestId>(),
+    latestRun: rowsInput.latestRun ?? null,
+    runningRunId: rowsInput.runningRunId ?? null,
+    expandedWorkGroupIds: new Set<string>(),
+    hasPendingRequest: false,
+    hasThreadError: false,
+    isWorking: rowsInput.isWorking,
+    runlessWorkActive: false,
+    toolCallVisibility: "showAll" as const,
+    revealedMessageId: null,
+    workingHistoryKey: null,
+    windowlessCitation: false,
+    activeFindEntryId: null,
+  };
+}
+
+/** The passes patched for a streamed update give what running them again gives. */
+function expectStableParity(
+  previous: {
+    input: Parameters<typeof deriveMessagesTimelineRows>[0];
+    rows: MessagesTimelineRow[];
+  },
+  next: { input: Parameters<typeof deriveMessagesTimelineRows>[0]; rows: MessagesTimelineRow[] },
+) {
+  const before = deriveStableTimelineRows(previous.rows, stableInput(previous.input), null);
+  const after = deriveStableTimelineRows(next.rows, stableInput(next.input), before);
+  expect(after.stable.result).toEqual(
+    deriveStableTimelineRows(next.rows, stableInput(next.input), null).stable.result,
+  );
+  return { before: before.stable.result, after: after.stable.result };
+}
+
 describe("streaming v2 row projection", () => {
   function fixture(text = "") {
     const source = makeStreamingTimelineFixture(text);
@@ -4069,6 +4170,57 @@ describe("streaming v2 row projection", () => {
         expect(next.rows[index]).toBe(row);
       }
     }
+    const stable = expectStableParity(previous, next);
+    for (const [index, row] of stable.before.entries()) {
+      if (
+        (row.kind === "message" || row.kind === "assistant-meta") &&
+        row.message.id === "live-assistant"
+      ) {
+        expect(stable.after[index]).toMatchObject({ message: { text: after } });
+      } else {
+        expect(stable.after[index]).toBe(row);
+      }
+    }
+  });
+
+  it("keeps a streamed message the working window holds up to date", () => {
+    const initial = fixture("Checking");
+    // A tool call after the streaming text makes it commentary inside the window.
+    const tool = initial.visibleTurnItems.find((row) => row.item.type === "dynamic_tool")!;
+    const later = {
+      ...tool,
+      position: tool.position + 100,
+      sourceItemId: TurnItemId.make("later-tool"),
+      item: { ...tool.item, id: TurnItemId.make("later-tool"), ordinal: 8, status: "running" },
+    } as OrchestrationV2ProjectedTurnItem;
+    const timelineInput = {
+      ...initial.timelineInput,
+      visibleTurnItems: [...initial.visibleTurnItems, later],
+    };
+    const timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput);
+    const previous = deriveMessagesTimelineRowsWithState({
+      ...initial.input,
+      timelineEntries: timeline.entries,
+    });
+    const nextTimeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(
+      {
+        ...timelineInput,
+        visibleTurnItems: updateText(timelineInput.visibleTurnItems, "Checking more"),
+      },
+      timeline,
+    );
+    const next = deriveMessagesTimelineRowsWithState(
+      { ...previous.input, timelineEntries: nextTimeline.entries },
+      previous,
+    );
+    const { after } = expectStableParity(previous, next);
+    const working = after.find((row) => row.kind === "working");
+    expect(working?.kind === "working" && working.window?.items).toContainEqual(
+      expect.objectContaining({
+        kind: "text",
+        message: expect.objectContaining({ text: "Checking more" }),
+      }),
+    );
   });
 
   it.each(["file", "image", "handoff", "streaming-image"] as const)(
@@ -4876,6 +5028,90 @@ describe("failed turn transcript", () => {
       });
     },
   );
+
+  it("shows a retried prompt once, with the retry's answer under it", () => {
+    const threadId = ThreadId.make("retried-thread");
+    const failedRunId = RunId.make("failed-run");
+    const retryRunId = RunId.make("retry-run");
+    const at = DateTime.makeUnsafe("2026-09-20T12:00:00Z");
+    const row = (
+      position: number,
+      runId: RunId,
+      item: Record<string, unknown> & { id: string },
+    ): OrchestrationV2ProjectedTurnItem => ({
+      position,
+      visibility: "local",
+      sourceThreadId: threadId,
+      sourceItemId: TurnItemId.make(item.id),
+      item: {
+        threadId,
+        runId,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: position,
+        title: null,
+        startedAt: at,
+        completedAt: at,
+        updatedAt: at,
+        status: "completed",
+        ...item,
+        id: TurnItemId.make(item.id),
+      } as OrchestrationV2TurnItem,
+    });
+    const prompt = {
+      type: "user_message",
+      createdBy: "user",
+      creationSource: "web",
+      inputIntent: "turn_start",
+      text: "Build it",
+      attachments: [],
+    };
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+        visibleTurnItems: [
+          row(0, failedRunId, { ...prompt, id: "user", messageId: MessageId.make("user") }),
+          row(1, failedRunId, {
+            id: "failure",
+            type: "error",
+            status: "failed",
+            failure: { class: "provider_error", message: "Failed.", code: null, retryable: true },
+          }),
+          row(2, retryRunId, {
+            ...prompt,
+            id: "retry",
+            messageId: MessageId.make("retry"),
+            retryOfRunId: failedRunId,
+          }),
+          row(3, retryRunId, {
+            id: "answer",
+            type: "assistant_message",
+            messageId: MessageId.make("answer"),
+            text: "Built it",
+            streaming: false,
+          }),
+        ],
+        optimisticMessages: [],
+      }),
+      latestRun: {
+        runId: retryRunId,
+        status: "completed",
+        startedAt: DateTime.formatIso(at),
+        completedAt: DateTime.formatIso(at),
+      },
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    expect(
+      rows.flatMap((row) => (row.kind === "message" ? [[row.message.role, row.message.text]] : [])),
+    ).toEqual([
+      ["user", "Build it"],
+      ["assistant", "Built it"],
+    ]);
+  });
 });
 
 describe("working window", () => {
@@ -5432,29 +5668,33 @@ it.each([
   [false, "failed"],
 ] as const)("groups consecutive notification responses (%s, %s)", (active, outcome) => {
   const fixture = makeStreamingTimelineFixture("Update received");
+  const visibleTurnItems = fixture.visibleTurnItems.map(
+    (row): OrchestrationV2ProjectedTurnItem =>
+      ({
+        ...row,
+        item:
+          row.item.type === "user_message"
+            ? {
+                ...row.item,
+                type: "notification",
+                source: { kind: outcome === "failed" ? "monitor" : "background_task" },
+                outcome: active && row.item.runId === fixture.runId ? "updated" : outcome,
+                summary:
+                  outcome === "failed" ? "#28844: checks failed" : "Background activity updated",
+              }
+            : row.item.type === "command_execution"
+              ? { ...row.item, status: "completed", exitCode: 0, output: "Passed" }
+              : row.item.type === "assistant_message"
+                ? {
+                    ...row.item,
+                    streaming: active && row.item.runId === fixture.runId,
+                    status: active && row.item.runId === fixture.runId ? "running" : "completed",
+                  }
+                : row.item,
+      }) as OrchestrationV2ProjectedTurnItem,
+  );
   const entries = deriveTimelineEntriesFromVisibleTurnItems({
-    visibleTurnItems: fixture.visibleTurnItems.map((row) => ({
-      ...row,
-      item:
-        row.item.type === "user_message"
-          ? {
-              ...row.item,
-              type: "notification",
-              source: { kind: outcome === "failed" ? "monitor" : "background_task" },
-              outcome: active && row.item.runId === fixture.runId ? "updated" : outcome,
-              summary:
-                outcome === "failed" ? "#28844: checks failed" : "Background activity updated",
-            }
-          : row.item.type === "command_execution"
-            ? { ...row.item, status: "completed", exitCode: 0, output: "Passed" }
-            : row.item.type === "assistant_message"
-              ? {
-                  ...row.item,
-                  streaming: active && row.item.runId === fixture.runId,
-                  status: active && row.item.runId === fixture.runId ? "running" : "completed",
-                }
-              : row.item,
-    })),
+    visibleTurnItems,
     optimisticMessages: [],
   });
   const input = {
@@ -5489,6 +5729,37 @@ it.each([
     const streaming = deriveMessagesTimelineRows(input);
     expect(keptAnswer(streaming)).toMatchObject([{ message: { streaming: true } }]);
     expect(applyBackgroundActivityGroups(streaming, input).slice(1)).toEqual(keptAnswer(streaming));
+    // A streamed delta into the answer a collapsed group keeps.
+    const timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState({
+      visibleTurnItems,
+      optimisticMessages: [],
+    });
+    const previous = deriveMessagesTimelineRowsWithState({
+      ...input,
+      timelineEntries: timeline.entries,
+    });
+    const nextTimeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(
+      {
+        visibleTurnItems: visibleTurnItems.map((row) =>
+          row.item.type === "assistant_message" && row.item.streaming
+            ? { ...row, item: { ...row.item, text: "Update received and read" } }
+            : row,
+        ),
+        optimisticMessages: [],
+      },
+      timeline,
+    );
+    const next = deriveMessagesTimelineRowsWithState(
+      { ...previous.input, timelineEntries: nextTimeline.entries },
+      previous,
+    );
+    const { after } = expectStableParity(previous, next);
+    expect(after[0]).toMatchObject({ kind: "background-activity", expanded: false });
+    expect(after).toContainEqual(
+      expect.objectContaining({
+        message: expect.objectContaining({ text: "Update received and read" }),
+      }),
+    );
   }
   expect(collapsed[0]).toMatchObject({
     kind: "background-activity",

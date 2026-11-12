@@ -91,6 +91,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
+import { RunningFor } from "./RunningFor";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
@@ -910,9 +911,19 @@ const WorkingWindowItemView = memo(function WorkingWindowItemView({
     if (entry.itemType === "approval_request" || entry.itemType === "user_input_request") {
       return <WorkingRequestRow entry={entry} />;
     }
+    const label = liveWorkEntryLabel(entry, ctx.workspaceRoot, true);
     return (
       <LiveActivityRow
-        label={liveWorkEntryLabel(entry, ctx.workspaceRoot, true)}
+        label={
+          entry.itemType === "command_execution" && entry.command?.trim() ? (
+            <>
+              {label}
+              <RunningFor startedAt={entry.createdAt} />
+            </>
+          ) : (
+            label
+          )
+        }
         iconName={workEntryIconName(entry)}
         toolIcon={entry.toolIcon ?? entry.toolSource?.icon}
         active={current}
@@ -966,20 +977,24 @@ function WorkingWindowView({
     if (open) return;
     setCollapseClips((windowRef.current?.scrollHeight ?? 0) > WORKING_WINDOW_COLLAPSED_HEIGHT);
   }, [open]);
-  const { onWorkingHistoryCollapsing } = ctx;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- older items stay mounted, and the timeline stops following its end, until the collapse transition finishes
+  const { onWorkingHistoryMoving, onWorkingHistorySettled } = ctx;
+  const hasHistory = history !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the timeline holds off following its end, and older items stay mounted, until the open or collapse transition finishes
   useEffect(() => {
-    if (open || history === null) return;
-    onWorkingHistoryCollapsing(true);
+    if (!open && !hasHistory) return;
+    onWorkingHistoryMoving(true);
     let cancelled = false;
     void transitionsSettled(windowRef.current).then(() => {
-      if (!cancelled) setHistory(null);
+      if (cancelled) return;
+      onWorkingHistoryMoving(false);
+      onWorkingHistorySettled();
+      if (!open) setHistory(null);
     });
     return () => {
       cancelled = true;
-      onWorkingHistoryCollapsing(false);
+      onWorkingHistoryMoving(false);
     };
-  }, [open, history, onWorkingHistoryCollapsing]);
+  }, [open, hasHistory, onWorkingHistoryMoving, onWorkingHistorySettled]);
   const head = history?.head;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as the timeline scroll brings them near the viewport
   useEffect(() => {
@@ -1123,7 +1138,12 @@ function CollapsedWorkingWindow({
     reportOverflow();
     return observeResize([content, viewport], () => {
       reportOverflow();
-      if (followRef.current) viewport.scrollTop = viewport.scrollHeight;
+      if (followRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
+      } else if (scrolledToEnd(viewport)) {
+        followRef.current = true;
+        setFollowing(true);
+      }
     });
   }, [onOverflowChange]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as scrolling brings the spacer near the viewport
@@ -1163,7 +1183,7 @@ function CollapsedWorkingWindow({
         onScrollCapture={(event) => {
           const viewport = getViewport();
           if (!viewport || event.target !== viewport || prependRef.current) return;
-          const atEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
+          const atEnd = scrolledToEnd(viewport);
           followRef.current = atEnd;
           setFollowing(atEnd);
           if (atEnd) setStart(Math.max(start, items.length - WORKING_WINDOW_TAIL));
@@ -1211,6 +1231,10 @@ function CollapsedWorkingWindow({
       ) : null}
     </div>
   );
+}
+
+function scrolledToEnd(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
 }
 
 function workingWindowItemIsLive(item: WorkingWindowItem | undefined): boolean {

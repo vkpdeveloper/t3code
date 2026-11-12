@@ -261,6 +261,8 @@ interface MessagesTimelineProps {
   onReplyToResponse?: TimelineRowSharedState["onReplyToResponse"];
   isWorking: boolean;
   runlessWorkActive?: boolean;
+  /** The latest turn ended, but its agent still awaits background work. */
+  awaitingBackgroundWork?: boolean;
   activeTurnStartedAt?: string | null;
   /** Replaces "Thinking" while the active run's provider has not started a turn. */
   providerStartingLabel?: string | null;
@@ -390,6 +392,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   onReplyToResponse,
   isWorking,
   runlessWorkActive = false,
+  awaitingBackgroundWork = false,
   activeTurnStartedAt = null,
   providerStartingLabel = null,
   worktreeSetup = null,
@@ -530,7 +533,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   // The open history belongs to the prompt that opened it; sending closes it.
   const [workingHistoryKey, setWorkingHistoryKey] = useState<string | null>(null);
-  const [workingHistoryCollapsing, setWorkingHistoryCollapsing] = useState(false);
+  const [workingHistoryMoving, setWorkingHistoryMoving] = useState(false);
   const normalizedFindQuery = findQuery.trim();
   const findActive = findExpanded;
 
@@ -612,7 +615,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     const list = listRef.current;
     if (list) {
       list.cancelScroll();
-      list.anchorVisibleContent({ key: "working-indicator-row" });
+      if (workingHistoryKey !== key) list.anchorVisibleContent({ key: "working-indicator-row" });
     }
     setWorkingHistoryKey((current) => (current === key ? null : key));
   };
@@ -697,6 +700,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     timelineEntries,
     pendingApprovalRequestIds,
     latestRun,
+    awaitingBackgroundWork,
     runningRunId,
     expandedRunIds: visibleExpandedRunIds,
     expandedAttemptIds: visibleExpandedAttemptIds,
@@ -1044,6 +1048,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
     data: true,
     size: true,
   };
+  const followHeldOff =
+    citationPositioning ||
+    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+    anchoredEndSpace !== undefined ||
+    !liveFollowEnabled ||
+    fullscreenAppRowId !== null;
+  const settleWorkingHistoryFollow = useStableCallback(() => {
+    const list = listRef.current;
+    const node = list?.getScrollableNode();
+    if (followHeldOff || !list || !node) return;
+    if (node.scrollHeight - node.clientHeight - node.scrollTop > node.clientHeight) {
+      navigateTimeline();
+    } else {
+      void list.scrollToEnd({ animated: !prefersReducedMotion });
+    }
+  });
 
   const refreshMinimap = useStableCallback(() => {
     const state = listRef.current?.getState?.();
@@ -1284,7 +1304,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
     onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
     onToggleWorkingHistory,
-    onWorkingHistoryCollapsing: setWorkingHistoryCollapsing,
+    onWorkingHistoryMoving: setWorkingHistoryMoving,
+    onWorkingHistorySettled: settleWorkingHistoryFollow,
     onFocusComposer: onFocusComposer ?? null,
     workGroupViewState,
   };
@@ -1381,13 +1402,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
 
   const maintainScrollAtEnd =
-    citationPositioning ||
-    (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-    anchoredEndSpace ||
-    !liveFollowEnabled ||
-    fullscreenAppRowId !== null ||
-    workingHistoryOpen ||
-    workingHistoryCollapsing
+    followHeldOff || workingHistoryMoving
       ? false
       : isWorking && !prefersReducedMotion && settlingListIdentity === null
         ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
@@ -1662,7 +1677,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           dataLength={rows.length}
           latestRunId={latestRun?.runId ?? null}
           runStatus={latestRun?.status ?? null}
-          foldCollapsing={workingHistoryCollapsing}
+          foldCollapsing={workingHistoryMoving}
         />
       ) : null}
       <MarkdownFindContext value={findActive}>
@@ -1705,6 +1720,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                   : maintainVisibleContentPosition
               }
               maintainScrollAtEndThreshold={1}
+              immediateWebShrinks={workingHistoryMoving}
               onScroll={handleScroll}
               onItemSizeChanged={scheduleMinimapRefresh}
               onMetricsChange={scheduleMinimapRefresh}

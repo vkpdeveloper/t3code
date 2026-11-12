@@ -347,6 +347,25 @@ export function selectLayoutPaneSlots(
   return { slots, stripWidth, fits, unitWidth };
 }
 
+export function selectLayoutStripSize(
+  workspace: LayoutWorkspace,
+  whenNoRoom: LayoutWhenNoRoom,
+): { share: number; minPx: number } {
+  const lone = workspace.columns.length === 1;
+  const weights = lone ? [1] : workspace.columns.map((column) => column.width);
+  const total = weights.reduce((sum, weight) => sum + weight, 0);
+  const arranged = workspace.cameraWidth;
+  if (whenNoRoom === "always-shrink") return { share: 1, minPx: 0 };
+  if (arranged === null) return { share: Math.max(1, total), minPx: 0 };
+  if (total * arranged > arranged + 0.5) return { share: 1, minPx: total * arranged };
+  const narrowest = Math.min(...weights);
+  const readableUnit =
+    lone || narrowest <= 0
+      ? 0
+      : Math.min(LAYOUT_READABLE_COLUMN_PX, narrowest * arranged) / narrowest;
+  return { share: Math.max(1, total), minPx: total * readableUnit };
+}
+
 /**
  * A top pane starting this close to the strip's left edge shares its row with
  * the collapsed sidebar's toggle and arrows, so its header makes room for them.
@@ -377,6 +396,18 @@ export function findLayoutPane(
   paneId: string,
 ): { workspace: LayoutWorkspace; column: LayoutColumn; pane: LayoutPane } | null {
   return findPane(state, paneId);
+}
+
+const layoutTabIds = (state: LayoutState): string[] =>
+  state.workspaces.flatMap((workspace) =>
+    workspace.columns.flatMap((column) =>
+      column.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)),
+    ),
+  );
+
+export function closedLayoutTabIds(before: LayoutState, after: LayoutState): string[] {
+  const open = new Set(layoutTabIds(after));
+  return layoutTabIds(before).filter((tabId) => !open.has(tabId));
 }
 
 /** How many tabs the layout holds across every workspace. */
@@ -1552,8 +1583,15 @@ export function moveLayoutTab(
     return state;
   }
 
+  const growPaneId =
+    destination.kind === "pane" &&
+    location.pane.tabs.length === 1 &&
+    location.column.panes.some((pane) => pane.id === destination.paneId)
+      ? destination.paneId
+      : null;
   // Detach without normalizing so the destination pane cannot disappear.
   const detached = mapPanes(state, (pane) => {
+    if (pane.id === growPaneId) return { ...pane, size: pane.size + location.pane.size };
     if (pane.id !== location.pane.id) return pane;
     const tabs = pane.tabs.filter((tab) => tab.id !== tabId);
     const activeTabId =
