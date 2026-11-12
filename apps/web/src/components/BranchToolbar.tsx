@@ -25,8 +25,12 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { useAtomValue } from "@effect/atom-react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { shortcutLabelForCommand } from "../keybindings";
+import { primaryServerKeybindingsAtom } from "../state/server";
+import { Kbd } from "./ui/kbd";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useProject, useServerConfigs, useThreadShellsForProjectRefs } from "../state/entities";
 import {
@@ -92,6 +96,7 @@ import { observeResize } from "~/lib/observeResize";
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
   focusBranchPicker: () => void;
+  toggleWorktreeMode: () => void;
   usePreviousWorktree: () => void;
 }
 
@@ -216,8 +221,11 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
   onUsePreviousWorktree,
 }: WorkspaceMenuProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const branchShortcut = branch ? shortcutLabelForCommand(keybindings, "composer.branch") : null;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
+  const openedWithoutPointerRef = useRef(false);
   const open = branch?.open ?? workspaceOpen;
   const setOpen = branch?.onOpenChange ?? setWorkspaceOpen;
   const inWorktree = forceNewWorktree || effectiveEnvMode === "worktree" || activeWorktreePath;
@@ -253,12 +261,17 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
   return (
     <Menu
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(nextOpen, details) => {
+        // A shortcut or Enter on the trigger clicks with no pointer (detail 0): typing filters refs.
+        openedWithoutPointerRef.current =
+          nextOpen && details.event instanceof MouseEvent && details.event.detail === 0;
+        setOpen(nextOpen);
+      }}
       onOpenChangeComplete={(nextOpen) => {
         if (nextOpen) {
           popupRef.current
             ?.querySelector<HTMLElement>(
-              branch?.focusSearch
+              branch?.focusSearch || (branch && openedWithoutPointerRef.current)
                 ? 'input[role="combobox"]'
                 : '[data-composer-workspace] [aria-checked="true"]',
             )
@@ -305,6 +318,7 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
           <span className="flex flex-col gap-0.5">
             {branch ? <span>{branch.label}</span> : null}
             <span>{workspaceLabel}</span>
+            {branchShortcut ? <Kbd>{branchShortcut}</Kbd> : null}
           </span>
         </TooltipPopup>
       </Tooltip>
@@ -407,12 +421,16 @@ const MachineMenu = memo(function MachineMenu({
 }: MachineMenuProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const popupRef = useRef<HTMLDivElement>(null);
   const activeEnvironment = availableEnvironments?.find(
     (env) => env.environmentId === environmentId,
   );
   const environmentLabel = autoEnvironmentLabel ?? activeEnvironment?.label ?? environmentId;
   const canPickEnvironment = (showEnvironmentPicker && !envLocked) || addTargets.length > 0;
+  const hostShortcut = canPickEnvironment
+    ? shortcutLabelForCommand(keybindings, "composer.host")
+    : null;
   const icon = autoEnvironmentLabel ? (
     <ScaleIcon aria-hidden className="size-3 shrink-0" />
   ) : (
@@ -423,8 +441,13 @@ const MachineMenu = memo(function MachineMenu({
   );
   const tooltip = (
     <TooltipPopup>
-      {environmentLabel}
-      {environmentUnavailable ? " (offline)" : ""}
+      <span className="flex flex-col gap-1">
+        <span>
+          {environmentLabel}
+          {environmentUnavailable ? " (offline)" : ""}
+        </span>
+        {hostShortcut ? <Kbd>{hostShortcut}</Kbd> : null}
+      </span>
     </TooltipPopup>
   );
 
@@ -1227,6 +1250,11 @@ export const BranchToolbar = memo(function BranchToolbar({
         if (onOpenWorkspaceDetails) onOpenWorkspaceDetails();
         else branchSelectorRef.current?.open();
       },
+      // Same gates as the Workspace menu's radios: a started worktree or a forced one is fixed.
+      toggleWorktreeMode: () => {
+        if (!showGitControls || envModeLocked || forceNewWorktree) return;
+        onEnvModeChange(effectiveEnvMode === "worktree" ? "local" : "worktree");
+      },
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -1235,6 +1263,10 @@ export const BranchToolbar = memo(function BranchToolbar({
     }),
     [
       canUsePreviousWorktree,
+      effectiveEnvMode,
+      envModeLocked,
+      forceNewWorktree,
+      onEnvModeChange,
       onOpenWorkspaceDetails,
       onComposerFocusRequest,
       onUsePreviousWorktree,
