@@ -205,7 +205,6 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
           ) : undefined,
         actions: (
           <>
-            {/* While backing off, Retry now skips the wait and tries now. */}
             {unavailableConnection.phase !== "connecting" ? (
               <Button
                 size="xs"

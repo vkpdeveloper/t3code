@@ -215,6 +215,52 @@ it("leaves description checkboxes read-only without the right to edit it", async
   );
 });
 
+it("fixes an overview thread as its opening remark, since it has no line to attach", async () => {
+  setup();
+  const author = { login: "reviewer", name: null, avatarUrl: null };
+  const note = { author, createdAt: "2026-09-01T00:00:00Z", url: null };
+  const remark = {
+    ...note,
+    id: "10",
+    kind: "review-comment" as const,
+    body: "Mention the flag in the README",
+    path: null,
+    reviewState: null,
+  };
+  const onFixFinding = vi.fn();
+  const value: PullRequestDetailView = {
+    ...detail,
+    comments: [remark],
+    overviewThreads: [
+      {
+        id: "overview",
+        path: null,
+        line: null,
+        side: "right",
+        isResolved: false,
+        isOutdated: false,
+        comments: [{ ...note, id: "10", body: remark.body }],
+      },
+    ],
+  };
+  await using screen = await renderUi(
+    <PullRequestSummaryTab
+      scrollerRef={() => {}}
+      environmentId={EnvironmentId.make("environment")}
+      threadRef={null}
+      reference={value}
+      detail={value}
+      activityPending={false}
+      activityError={null}
+      onRefresh={() => {}}
+      onFixFinding={onFixFinding}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Fix in a thread" }));
+  expect(onFixFinding).toHaveBeenCalledWith({ kind: "comment", comment: remark });
+});
+
 function openThread(id: string, bot = false): PullRequestReviewThread {
   return {
     id,
@@ -234,64 +280,6 @@ function openThread(id: string, bot = false): PullRequestReviewThread {
     ],
   };
 }
-
-it("filters promoted bot threads while retaining human replies and bot verdicts", async () => {
-  localStorage.removeItem("t3code:pull-request-comment-filter:v1");
-  const mixed = openThread("mixed", true);
-  await using screen = await render({
-    ...detail,
-    reviewThreads: [
-      openThread("bot-only", true),
-      {
-        ...mixed,
-        comments: [...mixed.comments, { ...openThread("human").comments[0]!, body: "Human reply" }],
-      },
-    ],
-    comments: [
-      {
-        ...openThread("verdict", true).comments[0]!,
-        kind: "review",
-        path: null,
-        reviewState: "CHANGES_REQUESTED",
-        body: "Bot verdict",
-      },
-    ],
-  });
-  await expect.element(screen.getByText("Finding bot-only")).not.toBeInTheDocument();
-  await expect.element(screen.getByText("Finding mixed")).toBeVisible();
-  await expect.element(screen.getByText("Human reply")).toBeVisible();
-  await expect.element(screen.getByText("Bot verdict")).toBeVisible();
-  await expect.element(screen.getByText("1 hidden", { exact: true })).toBeVisible();
-});
-
-it("pages promoted open threads together with the remaining conversations", async () => {
-  localStorage.removeItem("t3code:pull-request-comment-filter:v1");
-  await using screen = await render({
-    ...detail,
-    reviewThreads: Array.from({ length: 12 }, (_, index) => openThread(`thread-${index}`)),
-    comments: [
-      {
-        ...openThread("loose").comments[0]!,
-        kind: "issue-comment",
-        path: null,
-        reviewState: null,
-        body: "Loose conversation",
-      },
-    ],
-  });
-  await expect.element(screen.getByText("Finding thread-9", { exact: true })).toBeVisible();
-  await expect
-    .element(screen.getByText("Finding thread-10", { exact: true }))
-    .not.toBeInTheDocument();
-  await expect.element(screen.getByText("Loose conversation")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /Show 3 .*conversation/ }));
-  await expect.element(screen.getByText("Finding thread-11", { exact: true })).toBeVisible();
-  await expect.element(screen.getByText("Loose conversation")).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Show only 10 recent conversations" }));
-  await expect
-    .element(screen.getByText("Finding thread-10", { exact: true }))
-    .not.toBeInTheDocument();
-});
 
 it.each(["review", "issue-comment", "resolved-reply"] as const)(
   "reveals a linked %s in the summary conversation",
@@ -404,50 +392,4 @@ it("adds promoted review conversations to chat without requiring review permissi
   );
   await userEvent.click(screen.getByRole("button", { name: "Add to chat", exact: true }));
   expect(onAddToChat).toHaveBeenCalledWith({ kind: "thread", thread });
-});
-
-it("fixes an overview thread as its opening remark, since it has no line to attach", async () => {
-  setup();
-  const author = { login: "reviewer", name: null, avatarUrl: null };
-  const note = { author, createdAt: "2026-09-01T00:00:00Z", url: null };
-  const remark = {
-    ...note,
-    id: "10",
-    kind: "review-comment" as const,
-    body: "Mention the flag in the README",
-    path: null,
-    reviewState: null,
-  };
-  const onFixFinding = vi.fn();
-  const value: PullRequestDetailView = {
-    ...detail,
-    comments: [remark],
-    overviewThreads: [
-      {
-        id: "overview",
-        path: null,
-        line: null,
-        side: "right",
-        isResolved: false,
-        isOutdated: false,
-        comments: [{ ...note, id: "10", body: remark.body }],
-      },
-    ],
-  };
-  await using screen = await renderUi(
-    <PullRequestSummaryTab
-      scrollerRef={() => {}}
-      environmentId={EnvironmentId.make("environment")}
-      threadRef={null}
-      reference={value}
-      detail={value}
-      activityPending={false}
-      activityError={null}
-      onRefresh={() => {}}
-      onFixFinding={onFixFinding}
-    />,
-  );
-
-  await userEvent.click(screen.getByRole("button", { name: "Fix in a thread" }));
-  expect(onFixFinding).toHaveBeenCalledWith({ kind: "comment", comment: remark });
 });

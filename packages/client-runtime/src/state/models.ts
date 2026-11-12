@@ -89,6 +89,12 @@ export interface ThreadRunSummary {
    * generating while the server settles it.
    */
   readonly turnEnded?: boolean;
+  /**
+   * Set while the run is open but its provider has not started a turn, so the
+   * provider is still launching and nothing is generating. Clients show it
+   * instead of "Thinking".
+   */
+  readonly providerStartingLabel?: string;
   readonly sourcePlanRef?: {
     readonly threadId: ThreadId;
     readonly planId: PlanId;
@@ -105,8 +111,6 @@ export interface ThreadRuntimeSummary {
   readonly lastErrorClass?: OrchestrationV2ProviderFailureClass | null;
   readonly lastErrorCode?: string | null;
   readonly usageLimitResetAt?: string | null;
-  /** The latest run's provider turn ended, but its agent still awaits background work. */
-  readonly awaitingBackgroundWork?: boolean;
   readonly updatedAt: string;
 }
 

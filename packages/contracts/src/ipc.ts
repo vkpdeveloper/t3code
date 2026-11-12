@@ -1103,6 +1103,8 @@ export interface DesktopBridge {
   getSystemLocale: () => string | null;
   /** The OS's preferred languages, most preferred first; `navigator.languages` is pinned like the locale. */
   getPreferredSystemLanguages: () => readonly string[];
+  /** False when the OS turned off middle-click PRIMARY paste (`gtk-enable-primary-paste`). */
+  getPrimaryPasteEnabled?: () => boolean;
   getLocalEnvironmentBootstraps: () => readonly DesktopEnvironmentBootstrap[];
   getLocalEnvironmentEnabled: () => boolean;
   setLocalEnvironmentEnabled: (enabled: boolean) => Promise<void>;
@@ -1382,12 +1384,12 @@ export type ConfirmDialogVariant = "default" | "destructive";
 
 export interface ConfirmDialogOptions {
   readonly variant?: ConfirmDialogVariant;
+  /** Which button takes focus on open. Defaults to Cancel; destructive confirms always keep Cancel. */
+  readonly initialFocus?: "confirm" | "cancel";
   /** Replaces the title parsed from the message; the whole message becomes the description. */
   readonly title?: string;
   /** The confirm button's label. Defaults to "Confirm". */
   readonly confirmLabel?: string;
-  /** Which button takes focus on open. Defaults to Cancel; destructive confirms always keep Cancel. */
-  readonly initialFocus?: "confirm" | "cancel";
 }
 
 export interface LocalApi {

@@ -1,83 +1,47 @@
 import type { VoiceInputState } from "@t3tools/client-runtime/voice-input";
 import { CheckIcon, MicIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactElement } from "react";
 
 import {
   COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME,
   COMPOSER_PILL_SLOT_BUTTON_UNAVAILABLE_CLASS_NAME,
 } from "./ComposerPrimaryActions";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
-import { cn } from "~/lib/utils";
 import { VoiceInputErrorPill } from "./VoiceInputErrorPill";
 import { VoiceInputPill, VoiceWaveform } from "./VoiceInputPill";
+import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Text } from "../ui/text";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-type SpeechPresentation = {
-  status: string | null;
-  showsCancel: boolean;
-  showsConfirm: boolean;
-  confirmEnabled: boolean;
-  showsSend: boolean;
-};
+type DownloadProgress = { downloaded: number; total: number } | null;
 
+const keepFocus = (event: PointerEvent) => event.preventDefault();
+
+/** One short status line per phase; also mirrored into the preview annotation editor. */
 export function resolveSpeechPresentation(
   state: VoiceInputState,
-  progress: { downloaded: number; total: number } | null,
-): SpeechPresentation {
+  progress: DownloadProgress,
+): { status: string | null; active: boolean } {
   switch (state.phase) {
     case "idle":
-      return {
-        status: null,
-        showsCancel: false,
-        showsConfirm: false,
-        confirmEnabled: false,
-        showsSend: true,
-      };
+      return { status: null, active: false };
     case "error":
-      return {
-        status: state.error ?? "Voice input failed",
-        showsCancel: false,
-        showsConfirm: false,
-        confirmEnabled: false,
-        showsSend: true,
-      };
+      return { status: state.error ?? "Voice input failed", active: false };
     case "preparing":
       return {
         status: progress
-          ? `Downloading speech model ${Math.round((progress.downloaded / Math.max(1, progress.total)) * 100)}%`
-          : "Preparing",
-        showsCancel: true,
-        showsConfirm: true,
-        confirmEnabled: false,
-        showsSend: true,
+          ? `Downloading model ${Math.round((progress.downloaded / Math.max(1, progress.total)) * 100)}%`
+          : "Starting…",
+        active: true,
       };
     case "recording":
-      return {
-        status: "Recording",
-        showsCancel: true,
-        showsConfirm: true,
-        confirmEnabled: true,
-        showsSend: true,
-      };
+      return { status: "Recording", active: true };
     case "transcribing":
-      return {
-        status: "Transcribing",
-        showsCancel: true,
-        showsConfirm: true,
-        confirmEnabled: false,
-        showsSend: true,
-      };
+      return { status: "Transcribing…", active: true };
     case "post-processing":
-      return {
-        status: "Post-processing",
-        showsCancel: true,
-        showsConfirm: true,
-        confirmEnabled: false,
-        showsSend: true,
-      };
+      return { status: "Cleaning up…", active: true };
   }
 }
 
@@ -100,49 +64,39 @@ function RecordingStatus(props: { level: number; recordingLimitSeconds?: number 
 
   return (
     <>
-      <VoiceWaveform level={props.level} />
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
+      <span aria-hidden className="size-2 shrink-0 rounded-full bg-destructive" />
       <Text variant="meta" tone="muted" numeric>
         {formatElapsed(elapsedSeconds)}
         {props.recordingLimitSeconds !== undefined
           ? ` / ${formatElapsed(props.recordingLimitSeconds)}`
           : ""}
       </Text>
+      <div className="me-1.5 flex w-16 min-w-0 shrink grow">
+        <VoiceWaveform level={props.level} />
+      </div>
     </>
   );
 }
 
-function ComposerSpeechStatus(props: {
-  state: VoiceInputState;
-  progress: { downloaded: number; total: number } | null;
-  level: number;
-  recordingLimitSeconds?: number | undefined;
+function ShortcutTooltip(props: {
+  label: string;
+  shortcut?: string | null | undefined;
+  children: ReactElement;
 }) {
-  const presentation = resolveSpeechPresentation(props.state, props.progress);
-
-  if (!presentation.status) return null;
-  const isRecording = props.state.phase === "recording";
-  const isError = props.state.phase === "error";
-
   return (
-    <div
-      className="flex h-7 min-w-0 flex-1 items-center gap-2"
-      role="status"
-      aria-live={isRecording ? "off" : "polite"}
-      aria-label={presentation.status}
-    >
-      {isRecording ? (
-        <RecordingStatus level={props.level} recordingLimitSeconds={props.recordingLimitSeconds} />
-      ) : (
-        <span className="min-w-0 flex-1 truncate text-right">
-          <Text tone={isError ? "destructive" : "muted"}>{presentation.status}</Text>
-        </span>
-      )}
-    </div>
+    <Tooltip>
+      <TooltipTrigger render={props.children} />
+      <TooltipPopup side="top">
+        {props.label}
+        {props.shortcut ? ` (${props.shortcut})` : ""}
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
-export function ComposerSpeechCancelButton(props: {
+function ComposerSpeechCancelButton(props: {
+  inPill?: boolean;
+  size?: "default" | "compact" | undefined;
   state: VoiceInputState;
   shortcutLabel?: string | null;
   onCancel(): void;
@@ -151,27 +105,31 @@ export function ComposerSpeechCancelButton(props: {
   const label = props.state.phase === "error" ? "Dismiss voice input error" : "Cancel voice input";
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="icon-sm-pill"
-            variant="ghost"
-            aria-label={label}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={props.onCancel}
-            className="shrink-0"
-          >
-            <XIcon />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top">
-        {label}
-        {props.shortcutLabel ? ` (${props.shortcutLabel})` : ""}
-      </TooltipPopup>
-    </Tooltip>
+    <ShortcutTooltip label={label} shortcut={props.shortcutLabel}>
+      {props.inPill ? (
+        <button
+          type="button"
+          className={COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME}
+          aria-label={label}
+          onPointerDown={keepFocus}
+          onClick={props.onCancel}
+        >
+          <XIcon className="size-3.5 text-composer-icon" />
+        </button>
+      ) : (
+        <Button
+          type="button"
+          size={props.size === "compact" ? "icon-xs" : "icon-sm-pill"}
+          variant="ghost"
+          aria-label={label}
+          onPointerDown={keepFocus}
+          onClick={props.onCancel}
+          className="shrink-0"
+        >
+          <XIcon />
+        </Button>
+      )}
+    </ShortcutTooltip>
   );
 }
 
@@ -235,6 +193,8 @@ export function ComposerSpeechButton(props: {
   state: VoiceInputState;
   shortcutLabel?: string | null;
   disabled?: boolean;
+  /** Compact matches the `xs` buttons beside text-field editors. */
+  size?: "default" | "compact";
   /** Set when voice input cannot start here yet: the mic shows dimmed and the tooltip says why. */
   unavailableReason?: string | null | undefined;
   /**
@@ -242,7 +202,9 @@ export function ComposerSpeechButton(props: {
    * a spinner while busy (click skips post-processing). Without it the mic hides and the
    * recording pill takes over.
    */
-  dictation?: { level: number; onStop(): void; onSkipPostProcessing(): void } | undefined;
+  dictation?:
+    | { level: number; onStop(): void; onCancel(): void; onSkipPostProcessing(): void }
+    | undefined;
   onStart(): void;
 }) {
   const inPill = props.inPill ?? false;
@@ -286,64 +248,78 @@ export function ComposerSpeechButton(props: {
   };
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          inPill ? (
-            <button
-              type="button"
-              {...accessibilityProps}
-              disabled={phase === "idle" && props.disabled}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={onClick}
-              className={
-                unavailable
-                  ? COMPOSER_PILL_SLOT_BUTTON_UNAVAILABLE_CLASS_NAME
-                  : COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME
-              }
-            />
-          ) : (
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              {...accessibilityProps}
-              disabled={phase === "idle" && props.disabled}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={onClick}
-              className="relative shrink-0"
-            />
-          )
-        }
-      >
-        {glyph}
-      </TooltipTrigger>
-      <TooltipPopup side="top">
-        {unavailable ?? label}
-        {showsShortcut && props.shortcutLabel ? ` (${props.shortcutLabel})` : ""}
-        {phase !== "idle" && !isRecording ? " (Esc cancels)" : ""}
-      </TooltipPopup>
-    </Tooltip>
+    <>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            inPill ? (
+              <button
+                type="button"
+                {...accessibilityProps}
+                disabled={phase === "idle" && props.disabled}
+                onPointerDown={keepFocus}
+                onClick={onClick}
+                className={
+                  unavailable
+                    ? COMPOSER_PILL_SLOT_BUTTON_UNAVAILABLE_CLASS_NAME
+                    : COMPOSER_PILL_SLOT_BUTTON_CLASS_NAME
+                }
+              />
+            ) : (
+              <Button
+                type="button"
+                size={props.size === "compact" ? "icon-xs" : "icon-sm"}
+                variant="ghost"
+                {...accessibilityProps}
+                disabled={phase === "idle" && props.disabled}
+                onPointerDown={keepFocus}
+                onClick={onClick}
+                className="shrink-0"
+              />
+            )
+          }
+        >
+          {glyph}
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          {unavailable ?? label}
+          {showsShortcut && props.shortcutLabel ? ` (${props.shortcutLabel})` : ""}
+        </TooltipPopup>
+      </Tooltip>
+      {phase !== "idle" && dictation ? (
+        <ComposerSpeechCancelButton
+          inPill={inPill}
+          size={props.size}
+          state={props.state}
+          shortcutLabel="Esc"
+          onCancel={dictation.onCancel}
+        />
+      ) : null}
+    </>
   );
 }
 
 export function ComposerSpeechRecordingPill(props: {
   state: VoiceInputState;
-  progress: { downloaded: number; total: number } | null;
+  progress: DownloadProgress;
   finishShortcutLabel?: string | null;
   cancelShortcutLabel?: string | null;
   level: number;
   recordingLimitSeconds?: number | undefined;
+  /** Compact matches the `xs` buttons beside text-field editors. */
+  size?: "default" | "compact";
   onStart(): void;
   disabled?: boolean;
   onStop(): void;
   onCancel(): void;
   onSkipPostProcessing(): void;
 }) {
-  const presentation = resolveSpeechPresentation(props.state, props.progress);
-  if (props.state.phase === "error") {
+  const { phase } = props.state;
+  const compact = props.size === "compact";
+  if (phase === "error") {
     return (
       <VoiceInputErrorPill
+        size={props.size}
         error={props.state.error}
         errorAction={props.state.errorAction}
         disabled={props.disabled ?? false}
@@ -353,61 +329,74 @@ export function ComposerSpeechRecordingPill(props: {
       />
     );
   }
-  if (!presentation.showsConfirm) return null;
-
-  const label = presentation.confirmEnabled
-    ? "Finish voice input"
-    : (presentation.status ?? "Voice input is busy");
+  const presentation = resolveSpeechPresentation(props.state, props.progress);
+  if (!presentation.active) return null;
+  const recording = phase === "recording";
+  const trailing = recording || phase === "post-processing";
 
   return (
-    <VoiceInputPill>
-      <ComposerSpeechCancelButton
-        state={props.state}
-        shortcutLabel={props.cancelShortcutLabel ?? null}
-        onCancel={props.onCancel}
-      />
-      <ComposerSpeechStatus
-        state={props.state}
-        progress={props.progress}
-        level={props.level}
-        recordingLimitSeconds={props.recordingLimitSeconds}
-      />
-      {props.state.phase === "post-processing" ? (
+    <VoiceInputPill size={props.size}>
+      <ShortcutTooltip label="Cancel voice input" shortcut={props.cancelShortcutLabel}>
         <Button
           type="button"
-          size="sm-pill"
+          size={compact ? "icon-xs" : "icon-sm-pill"}
           variant="ghost"
-          onPointerDown={(event) => event.preventDefault()}
+          aria-label="Cancel voice input"
+          onPointerDown={keepFocus}
+          onClick={props.onCancel}
+          className="shrink-0"
+        >
+          <XIcon />
+        </Button>
+      </ShortcutTooltip>
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-2 overflow-hidden",
+          !trailing && "pe-2.5",
+        )}
+        role="status"
+        aria-live={recording ? "off" : "polite"}
+        aria-label={presentation.status ?? undefined}
+      >
+        {recording ? (
+          <RecordingStatus
+            level={props.level}
+            recordingLimitSeconds={props.recordingLimitSeconds}
+          />
+        ) : (
+          <>
+            <Spinner aria-hidden size="sm" tone="muted" className="shrink-0" />
+            <Text tone="muted" truncate>
+              {presentation.status}
+            </Text>
+          </>
+        )}
+      </div>
+      {phase === "post-processing" ? (
+        <Button
+          type="button"
+          size={compact ? "xs" : "sm-pill"}
+          variant="ghost"
+          onPointerDown={keepFocus}
           onClick={props.onSkipPostProcessing}
           className="shrink-0"
         >
           Skip
         </Button>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                size="icon-sm-pill"
-                aria-label={label}
-                disabled={!presentation.confirmEnabled}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={props.onStop}
-                className="shrink-0"
-              >
-                {presentation.confirmEnabled ? <CheckIcon /> : <Spinner aria-hidden />}
-              </Button>
-            }
-          />
-          <TooltipPopup side="top">
-            {label}
-            {presentation.confirmEnabled && props.finishShortcutLabel
-              ? ` (${props.finishShortcutLabel})`
-              : ""}
-          </TooltipPopup>
-        </Tooltip>
-      )}
+      ) : recording ? (
+        <ShortcutTooltip label="Finish voice input" shortcut={props.finishShortcutLabel}>
+          <Button
+            type="button"
+            size={compact ? "icon-xs" : "icon-sm-pill"}
+            aria-label="Finish voice input"
+            onPointerDown={keepFocus}
+            onClick={props.onStop}
+            className="shrink-0"
+          >
+            <CheckIcon />
+          </Button>
+        </ShortcutTooltip>
+      ) : null}
     </VoiceInputPill>
   );
 }

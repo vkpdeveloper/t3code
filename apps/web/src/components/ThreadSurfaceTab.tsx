@@ -7,16 +7,15 @@ import { DEFAULT_RUNTIME_MODE } from "../types";
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
-  orchestrationV2WorktreePending,
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
   AuthTerminalReadScope,
-  type EditorId,
   type PreviewAnnotationPayload,
   type ProjectId,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { orchestrationV2WorktreePending } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   projectScriptCwd,
   projectScriptRuntimeEnv,
@@ -135,7 +134,6 @@ const PullRequestDetailPanel = lazy(() =>
   })),
 );
 
-const EMPTY_EDITORS: ReadonlyArray<EditorId> = [];
 const EMPTY_PENDING: ReadonlySet<string> = new Set();
 const noop = () => undefined;
 
@@ -219,7 +217,7 @@ export function useThreadSurfaceOpeners(threadRef: ScopedThreadRef) {
       context.serverThread !== null &&
       context.serverThread.lineage.sideChat !== true &&
       context.serverThread.lineage.relationshipToParent !== "subagent" &&
-      context.serverThread.delegatedFrom === undefined &&
+      context.serverThread.delegatedFrom === null &&
       !orchestrationV2WorktreePending(context.worktreePath, projection?.runs ?? []) &&
       context.serverConfig?.environment.capabilities.sideChats === true
         ? threadRef
@@ -664,7 +662,7 @@ function ThreadSurfaceContent({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors =
     useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId))?.availableEditors ??
-    EMPTY_EDITORS;
+    [];
   const workspaceMutationId = bridge?.workspaceMutationId ?? null;
   const [pendingFiles, setPendingFiles] = useState<ReadonlySet<string>>(EMPTY_PENDING);
   const onPendingChange = (relativePath: string, pending: boolean) => {

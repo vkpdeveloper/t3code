@@ -7,16 +7,22 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import type { DraftId } from "../../composerDraftStore";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+
+import type { ComposerThreadTarget, DraftId } from "../../composerDraftStore";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
-import { BranchToolbar } from "../BranchToolbar";
+import { BranchToolbar, type BranchToolbarHandle } from "../BranchToolbar";
 import BaseGitActionsControl from "../GitActionsControl";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
-import { memo, useState, type ComponentProps } from "react";
+import { memo, useImperativeHandle, useRef, useState, type ComponentProps, type Ref } from "react";
+import { flushSync } from "react-dom";
+import { selectThreadPanelOpen, useRightPanelStore } from "../../rightPanelStore";
+import { requestWorkspaceFocus } from "../../lib/workspaceFocus";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
@@ -30,18 +36,24 @@ import {
 import { ThreadDetailsItemsMenuItems } from "./ThreadDetailsItemsMenu";
 import { resolveThreadDetailsVisibility } from "./threadDetailsItems";
 import { useClientSettings } from "../../hooks/useSettings";
+import { useProject, useServerConfigs } from "../../state/entities";
+import { ThreadDetailsThreadPrRows } from "./ThreadDetailsPrRows";
 import { SlidersHorizontalIcon } from "lucide-react";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { Menu, MenuItemLabel, MenuPopup } from "../ui/menu";
 import { BotDetails } from "../bots/BotDetails";
-import { useProject } from "../../state/entities";
 
 const GitActionsControl = memo(BaseGitActionsControl);
+
+export interface ThreadDetailsPanelHandle {
+  openBranch: (presentation: "inline" | "popover") => void;
+}
 
 interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
   "anchor" | "handle"
 > {
+  ref?: Ref<ThreadDetailsPanelHandle>;
   forceNewWorktree?: boolean;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -49,6 +61,7 @@ interface ThreadDetailsPanelProps extends Pick<
   worktreePath: string | null;
   isServerThread: boolean;
   draftId?: DraftId;
+  composerDraftTarget: ComposerThreadTarget;
   activeProjectName: string | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
@@ -82,19 +95,54 @@ interface ThreadDetailsPanelProps extends Pick<
   onDeleteProjectScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
   usage: ThreadDetailsUsageInput;
   onCompactContext?: () => void;
-  compactDisabled?: boolean;
+  compactUnavailableReason?: string | null;
 }
 
-export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
+export function ThreadDetailsPanel({ ref, ...props }: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
+  const branchToolbarRef = useRef<BranchToolbarHandle>(null);
+  const focusBranchOnOpen = useRef(false);
+  const focusBranch = () => {
+    if (props.isGitRepo) branchToolbarRef.current?.focusBranchPicker();
+    else requestWorkspaceFocus({ area: "details" });
+  };
+  useImperativeHandle(ref, () => ({
+    openBranch: (presentation) => {
+      focusBranchOnOpen.current =
+        presentation === "popover" &&
+        !selectThreadPanelOpen(
+          useRightPanelStore.getState().threadPanelVisibilityByThreadKey,
+          { environmentId: props.environmentId, threadId: props.threadId },
+          presentation,
+        );
+      flushSync(() => {
+        useRightPanelStore
+          .getState()
+          .setThreadPanelOpen(
+            { environmentId: props.environmentId, threadId: props.threadId },
+            presentation,
+            true,
+          );
+      });
+      focusBranch();
+    },
+  }));
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
-  const project = useProject({ environmentId: props.environmentId, projectId: props.projectId });
+  const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
   const bot = project?.bot ?? null;
+  const serverConfig = useServerConfigs().get(props.environmentId);
+  // A No project thread's folder sits inside the shared scratch root, so it must never get git.
+  // Until the config and project load, a No project thread looks like any other folder.
+  const offersGit =
+    props.gitCwd !== null &&
+    serverConfig !== undefined &&
+    project !== null &&
+    !isScratchProject(project, serverConfig.scratchWorkspaceRoot);
   // The branch picker owns PR state and portals its rows into the git group.
   const [prRowsContainer, setPrRowsContainer] = useState<HTMLDivElement | null>(null);
   const branchToolbarProps = {
@@ -128,6 +176,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
       threadRef={{ environmentId: props.environmentId, threadId: props.threadId }}
       anchor={props.anchor}
       handle={props.handle}
+      onFocusRequest={() => {
+        if (!focusBranchOnOpen.current) return false;
+        focusBranchOnOpen.current = false;
+        focusBranch();
+        return true;
+      }}
       onContextMenu={(event) => {
         // Popups the card opens bubble here through React; they, fields, links, and selected text
         // keep their own menus.
@@ -155,9 +209,11 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
           environment: density === "full" && visible.environment,
           openIn: density !== "essential" && visible.openIn && props.showOpenInPicker,
           scripts: visible.scripts && props.activeProjectScripts !== undefined,
-          branch: props.gitCwd !== null && props.isGitRepo && visible.branch,
+          branch: offersGit && props.isGitRepo && visible.branch,
+          // Without a branch selector, linked pull requests still need somewhere to show.
+          pullRequests: !(offersGit && props.isGitRepo) && visible.branch,
           git:
-            props.gitCwd !== null &&
+            offersGit &&
             props.activeProjectName !== undefined &&
             (visible.gitActions || (visible.changes && props.isGitRepo)),
         };
@@ -206,12 +262,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                       />
                     ) : null}
                     {show.branch || show.git ? (
-                      <div className="flex min-w-0 items-center">
+                      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center">
                         {show.branch ? (
                           <div className="min-w-0 flex-1">
                             <BranchToolbar
                               layout="panel"
                               panelSection="branch"
+                              ref={branchToolbarRef}
                               panelPrRowsContainer={prRowsContainer}
                               {...branchToolbarProps}
                             />
@@ -220,7 +277,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         {show.git && props.gitCwd ? (
                           <GitActionsControl
                             keybindings={props.keybindings}
-                            compact
                             displayMode="panel"
                             showActions={visible.gitActions}
                             showChanges={visible.changes}
@@ -234,6 +290,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                       </div>
                     ) : null}
                     <div ref={setPrRowsContainer} />
+                    {show.pullRequests ? (
+                      <ThreadDetailsThreadPrRows
+                        threadRef={activeThreadRef}
+                        project={project}
+                        composerTarget={props.composerDraftTarget}
+                      />
+                    ) : null}
                     {show.scripts && props.activeProjectScripts ? (
                       <ProjectScriptsControl
                         environmentId={props.environmentId}
@@ -254,7 +317,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                     <ThreadDetailsContext
                       usage={props.usage.contextWindow}
                       onCompact={props.onCompactContext}
-                      compactDisabled={props.compactDisabled}
+                      compactUnavailableReason={props.compactUnavailableReason}
                     />
                   ) : null}
                 </section>

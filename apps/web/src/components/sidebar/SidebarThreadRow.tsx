@@ -81,7 +81,6 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
-import { SIDEBAR_SORTING_SELECTOR } from "../Sidebar.motion";
 import {
   animateSidebarLayoutChanges,
   type SidebarV2TopStatusKind,
@@ -94,6 +93,7 @@ import {
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
   useRetainedValue,
+  withoutRemovedCheckout,
   useSidebarRowSubscriptionLease,
   setFileDragActive,
 } from "../Sidebar.logic";
@@ -528,14 +528,6 @@ type SortableThreadRowBag = Pick<
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
 >;
 
-// A drag and its drop settle hold hover details, so a popup never covers where a row lands.
-function holdDetailsWhileSorting(open: boolean, details: { event: Event; cancel: () => void }) {
-  const target = details.event?.target;
-  if (open && target instanceof Element && target.closest(SIDEBAR_SORTING_SELECTOR)) {
-    details.cancel();
-  }
-}
-
 export const draftSurfaceClassName = "bg-warning/4 hover:bg-warning/8";
 export const draftPenClassName = "size-3 shrink-0 text-warning-foreground";
 
@@ -572,14 +564,7 @@ export function SortableThreadRow(
   const bag = {
     listeners,
     setNodeRef,
-    transform: contextDrag
-      ? null
-      : transform && isDragging
-        ? {
-            ...transform,
-            scaleX: rowProps.pinnedDragPreview?.widthRatio ?? 1,
-          }
-        : transform,
+    transform: contextDrag ? null : transform,
     transition: contextDrag && isDragging ? "transform 150ms ease-out" : transition,
     isDragging: isDragging && !contextDrag,
   };
@@ -635,9 +620,8 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 type SidebarThreadRowProps = {
   thread: SidebarThreadSummary;
   // "folder" is a one-line row inside a boring sidebar project folder;
-  // "folder-multiline" adds the card's branch and PR line under it;
-  // "tile" is a compact cell of the pinned grid.
-  variant: "card" | "slim" | "folder" | "folder-multiline" | "tile";
+  // "folder-multiline" adds the card's branch and PR line under it.
+  variant: "card" | "slim" | "folder" | "folder-multiline";
   navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
@@ -647,7 +631,6 @@ type SidebarThreadRowProps = {
   pinningSupported: boolean;
   isPinned: boolean;
   sortable?: SortableThreadRowBag | undefined;
-  pinnedDragPreview?: { readonly widthRatio: number; readonly offsetX: number } | undefined;
   dropVerb: SidebarDropVerb | null;
   dragOverPinned: boolean;
   sweepAction: SidebarSweepAction | null;
@@ -656,7 +639,7 @@ type SidebarThreadRowProps = {
   wokeAt: string | null;
   isActive: boolean;
   // Set on the active row only; scrolls it into view when a reveal is owed.
-  revealRef?: ((row: HTMLElement, threadKey: string) => void) | undefined;
+  revealRef?: ((row: HTMLElement, threadKey: string) => (() => void) | undefined) | undefined;
   // Unlike isActive, never true for the ancestor standing in for an open
   // subagent: drafts and PR clicks care about which composer is on screen.
   isRouteThread: boolean;
@@ -675,7 +658,7 @@ type SidebarThreadRowProps = {
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
   onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
   onRenameTitleChange: (title: string) => void;
-  onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
+  onCommitRename: (threadRef: ScopedThreadRef, title: string) => void;
   onCancelRename: () => void;
   isRenaming: boolean;
   renamingTitle: string;
@@ -767,8 +750,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(props.isActive);
   const { revealRef } = props;
   const rowRef = (row: HTMLElement | null) => {
-    if (row !== null) revealRef?.(row, threadKey);
-    return leaseRowRef(row);
+    const stopReveal = row === null ? undefined : revealRef?.(row, threadKey);
+    const releaseLease = leaseRowRef(row);
+    if (!stopReveal) return releaseLease;
+    return () => {
+      stopReveal();
+      releaseLease?.();
+    };
   };
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
@@ -813,6 +801,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
+  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus);
   const pr = linkedPullRequestStatus?.pr ?? null;
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
   const currentLinkedPr = supportsMultiplePullRequests
@@ -877,11 +866,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     : formatModelSlugName(thread.modelSelection.model);
 
   const isRemote = thread.environmentId !== props.currentEnvironmentId;
-  const showsScratchMachine = !thread.branch && props.scratchMachineLabel !== null;
+  const showsScratchMachine = !checkoutThread.branch && props.scratchMachineLabel !== null;
 
   const detailsTooltip = (
     <SidebarThreadTooltip
-      thread={thread}
+      thread={checkoutThread}
       project={props.project}
       projectDisplayName={props.projectDisplayName}
       environmentLabel={props.environmentLabel}
@@ -1063,14 +1052,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
-        "data-sidebar-drag-source": sortable.isDragging ? "" : undefined,
         style: {
           transform: CSS.Translate.toString(sortable.transform),
-          transition:
-            variant === "tile" && sortable.transition
-              ? `${sortable.transition}, ${sortable.transition.replace("transform", "width")}`
-              : sortable.transition,
-          width: variant === "tile" ? `${(sortable.transform?.scaleX ?? 1) * 100}%` : undefined,
+          transition: sortable.transition,
           // A zero-height boundary also makes dnd-kit scale the source to
           // zero. Only projected peers use scaleY as a visibility sentinel.
           visibility:
@@ -1108,7 +1092,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       <ThreadRenameInput
         title={renamingTitle}
         onTitleChange={onRenameTitleChange}
-        onCommit={() => onCommitRename(threadRef, renamingTitle, thread.title)}
+        onCommit={() => onCommitRename(threadRef, renamingTitle)}
         onCancel={onCancelRename}
       />
     ) : (
@@ -1235,18 +1219,18 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const diff = latestRunDiff(thread);
   // Only the trailing icons would remain, so the row moves them to the title line instead.
   const metaLineEmpty =
-    !thread.branch &&
+    !checkoutThread.branch &&
     !showsScratchMachine &&
     prBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-meta font-normal">
-      {thread.branch ? (
+      {checkoutThread.branch ? (
         <>
-          <ThreadWorktreeIndicator thread={thread} />
+          <ThreadWorktreeIndicator thread={checkoutThread} />
           <span className="flex min-w-0 flex-1">
-            <MiddleTruncate value={thread.branch} showTitle={false} />
+            <MiddleTruncate value={checkoutThread.branch} showTitle={false} />
           </span>
         </>
       ) : showsScratchMachine ? (
@@ -1291,111 +1275,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     </span>
   ) : null;
 
-  const tileStatus = topStatus ? SIDEBAR_STATUSES[topStatus] : null;
-  if (variant === "tile") {
-    return (
-      <li
-        data-thread-item={threadKey}
-        {...sortableRootProps}
-        {...(fileDropHandlers ?? {})}
-        className={cn(
-          "@container/sidebar-tile list-none motion-reduce:transition-none!",
-          sortable?.isDragging && "relative z-20 h-[2.875rem]",
-        )}
-      >
-        <Tooltip disabled={sortable?.isDragging} onOpenChange={holdDetailsWhileSorting}>
-          <TooltipTrigger
-            render={
-              <div
-                ref={rowRef}
-                role="button"
-                tabIndex={0}
-                data-sidebar-row={threadKey}
-                data-sidebar-parent={props.navigationParent}
-                aria-label={accessibility.label}
-                aria-current={accessibility.current}
-                data-testid="sidebar-row-tile"
-                aria-busy={isRegeneratingTitle || undefined}
-                className={cn(
-                  rowSurfaceClassName,
-                  "flex h-full flex-col justify-center gap-0.5 px-2",
-                )}
-                onClick={handleClick}
-                onDoubleClick={handleDoubleClick}
-                onKeyDown={handleKeyDown}
-                onContextMenu={handleContextMenu}
-              />
-            }
-          >
-            {accessibleTitle}
-            <div className="relative flex h-4 min-w-0 items-center gap-1.5">
-              {props.project ? (
-                <ProjectFavicon project={props.project} className="size-4 shrink-0" />
-              ) : null}
-              {draftIndicator}
-              {props.projectDisplayName ? (
-                <span className="hidden min-w-0 flex-1 truncate text-meta text-secondary-label @min-[9rem]/sidebar-tile:block">
-                  {props.projectDisplayName}
-                </span>
-              ) : null}
-              {pinIndicator ? (
-                <span className="hidden shrink-0 @min-[9rem]/sidebar-tile:inline-flex">
-                  {pinIndicator}
-                </span>
-              ) : null}
-              {sortable?.isDragging ? (
-                dragDestination
-              ) : jumpHintLabel ? (
-                <span className="ml-auto flex shrink-0 items-center">
-                  <JumpHintBadge label={jumpHintLabel} />
-                </span>
-              ) : tileStatus ? (
-                <span
-                  className={cn(
-                    "ml-auto inline-flex shrink-0 items-center gap-1 text-meta",
-                    tileStatus.className,
-                  )}
-                >
-                  <tileStatus.Icon aria-hidden className="size-3.5" />
-                  <span className="hidden @min-[12rem]/sidebar-tile:inline">{topStatusLabel}</span>
-                </span>
-              ) : (
-                <span className="ml-auto hidden shrink-0 text-meta text-secondary-label tabular-nums @min-[12rem]/sidebar-tile:inline">
-                  <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
-                </span>
-              )}
-            </div>
-            <div className="relative flex min-h-4 min-w-0 items-center">
-              {isRenaming ? (
-                title
-              ) : (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "min-w-0 flex-1 truncate text-start text-meta @min-[12rem]/sidebar-tile:text-label",
-                    shouldRecede
-                      ? "text-(--sidebar-thread-title-foreground)/75 group-hover/sidebar-row:text-(--sidebar-thread-title-foreground) group-focus-visible/sidebar-row:text-(--sidebar-thread-title-foreground)"
-                      : "text-(--sidebar-thread-title-foreground)",
-                    isRegeneratingTitle && "opacity-55",
-                  )}
-                  dir={textDirection(thread.title)}
-                >
-                  {thread.title}
-                </span>
-              )}
-            </div>
-            {isRegeneratingTitle ? (
-              <span role="status" className="sr-only">
-                Regenerating title
-              </span>
-            ) : null}
-          </TooltipTrigger>
-          {detailsTooltip}
-        </Tooltip>
-      </li>
-    );
-  }
-
   if (variant !== "card") {
     return (
       <li
@@ -1408,7 +1287,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
           sortable?.isDragging && "relative z-20",
         )}
       >
-        <Tooltip disabled={sortable?.isDragging} onOpenChange={holdDetailsWhileSorting}>
+        <Tooltip disabled={sortable?.isDragging}>
           <TooltipTrigger
             render={
               <div
@@ -1567,7 +1446,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                             onClick={handleSettleClick}
                             onPointerDown={handleActionPointerDown}
                             className={cn(
-                              "pointer-events-none absolute inset-y-0 right-0 -mr-2 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-meta text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                              "pointer-events-none absolute inset-y-0 right-0 -mr-2 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-meta text-muted-foreground opacity-0 outline-none transition-opacity hover:surface-ghost-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                               isWoke && "group-any-hover/sidebar-row:static",
                             )}
                           />
@@ -1603,10 +1482,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         sortable?.isDragging && "relative z-20",
       )}
     >
-      <Tooltip
-        disabled={snoozeMenuOpen || sortable?.isDragging}
-        onOpenChange={holdDetailsWhileSorting}
-      >
+      <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
         <TooltipTrigger
           render={
             <div
@@ -1861,6 +1737,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
+  const checkoutThread = withoutRemovedCheckout(thread, visibleGitStatus);
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
     activeWorktreePath: thread.worktreePath,
@@ -1976,7 +1853,7 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
           </span>
         </TooltipTrigger>
         <SidebarThreadTooltip
-          thread={thread}
+          thread={checkoutThread}
           project={props.project}
           projectDisplayName={props.projectDisplayName}
           environmentLabel={props.environmentLabel}

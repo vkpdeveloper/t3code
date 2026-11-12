@@ -4,7 +4,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   isAtomCommandInterrupted,
@@ -12,6 +12,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { GitForkIcon, PlusIcon, SquarePenIcon, SquareTerminal } from "lucide-react";
 import {
+  Fragment,
   memo,
   useRef,
   useState,
@@ -20,6 +21,7 @@ import {
 } from "react";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
 import { Badge } from "../ui/badge";
+import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
@@ -37,7 +39,6 @@ import { BotAvatar } from "../bots/BotAvatar";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   PANE_GHOST_TAB_TITLE_CLASS,
-  PANE_INACTIVE_TAB_TITLE_CLASS,
   PANE_TAB_CLASS,
   PANE_TAB_TITLE_CLASS,
   PaneNotch,
@@ -58,6 +59,7 @@ import {
   LayoutPaneTab,
   LayoutPaneTabStrip,
   LayoutTabCloseButton,
+  ParentThreadLinkLabel,
   buildLayoutTabMenuItems,
   closeLayoutTabOnMiddleClick,
   ghostTabTooltip,
@@ -69,7 +71,7 @@ import {
   useLayoutTabGhostShown,
   useLayoutTabRenameRequested,
 } from "../../layout/PaneTabs";
-import { useProject, useQuietThreadShell } from "../../state/entities";
+import { useQuietThreadShell } from "../../state/entities";
 import { useLayoutStore } from "../../layout/layoutStore";
 
 interface ChatHeaderProps {
@@ -329,9 +331,10 @@ export const ChatHeader = memo(function ChatHeader({
   };
   // A bot is its one chat, so its tab names the bot rather than a project and thread.
   const tabTitle = bot ? (activeProjectName ?? activeThreadTitle) : activeThreadTitle;
+  // `parentThreadLink` is set only for a subagent, however its tab was opened.
   const tabIcon = bot ? (
     <BotAvatar avatar={bot.avatar} threadRef={activeThreadRef} className="size-4" />
-  ) : ghostOf ? (
+  ) : ghostOf || parentThreadLink ? (
     <GitForkIcon aria-hidden className="size-3.5 shrink-0" />
   ) : isServerThread ? (
     activeProject ? (
@@ -347,15 +350,16 @@ export const ChatHeader = memo(function ChatHeader({
   const tabTooltip = ghostShown
     ? ghostTabTooltip(ghostOf ? tabTitle : plainTooltip, ghostParent?.title)
     : plainTooltip;
-  // The parent's own tab already leads this one in the strip.
-  const parentTabShown =
-    parentThreadLink !== null &&
-    siblingTabs.before.some(
-      (tab) =>
-        tab.content.kind === "chat" &&
-        tab.content.target.kind === "server" &&
-        tab.content.target.threadRef.threadId === parentThreadLink.threadId,
-    );
+  // The parent's own tab, when it leads this one in the strip, becomes the back link.
+  const parentTabId =
+    parentThreadLink === null
+      ? null
+      : (siblingTabs.before.find(
+          (tab) =>
+            tab.content.kind === "chat" &&
+            tab.content.target.kind === "server" &&
+            tab.content.target.threadRef.threadId === parentThreadLink.threadId,
+        )?.id ?? null);
   return (
     <div
       className={cn(
@@ -367,15 +371,21 @@ export const ChatHeader = memo(function ChatHeader({
     >
       <PaneNotch>
         <LayoutPaneTabStrip>
-          {siblingTabs.before.map((tab) => (
-            <LayoutPaneTab key={tab.id} tab={tab} />
-          ))}
-          {parentThreadLink && !parentTabShown ? (
-            <ParentThreadTab
-              environmentId={activeThreadEnvironmentId}
-              link={parentThreadLink}
-              onOpenThread={onOpenThread}
-            />
+          {siblingTabs.before.map((tab) =>
+            tab.id === parentTabId ? (
+              <Fragment key={tab.id}>
+                <LayoutPaneTab tab={tab} parentLink />
+                <ParentThreadLinkSeparator />
+              </Fragment>
+            ) : (
+              <LayoutPaneTab key={tab.id} tab={tab} />
+            ),
+          )}
+          {parentThreadLink && parentTabId === null ? (
+            <>
+              <ParentThreadLink link={parentThreadLink} onOpenThread={onOpenThread} />
+              <ParentThreadLinkSeparator />
+            </>
           ) : null}
           {renamingTitle !== null ? (
             <div
@@ -595,23 +605,19 @@ function NewTabMenu(props: {
   );
 }
 
-/**
- * A subagent thread's way back to its parent when the parent has no tab in
- * this pane: an inactive tab like any other, ahead of the thread's own.
- */
-function ParentThreadTab({
-  environmentId,
+/** Sets the parent's back link apart from the child tabs after it. */
+function ParentThreadLinkSeparator() {
+  return <Separator orientation="vertical" className="mx-0.5 h-4" />;
+}
+
+/** A subagent thread's way back to its parent when the parent has no tab in this pane. */
+function ParentThreadLink({
   link,
   onOpenThread,
 }: {
-  readonly environmentId: EnvironmentId;
   readonly link: { threadId: ThreadId; title: string };
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
-  const parent = useQuietThreadShell(scopeThreadRef(environmentId, link.threadId));
-  const project = useProject(
-    parent ? scopeProjectRef(parent.environmentId, parent.projectId) : null,
-  );
   return (
     <span className={LAYOUT_TAB_SLOT_CLASS}>
       <Tooltip>
@@ -620,15 +626,12 @@ function ParentThreadTab({
             <ContentButton
               variant="tab"
               type="button"
-              aria-label={`Open parent thread: ${link.title}`}
+              aria-label={`Back to parent thread: ${link.title}`}
               onClick={() => onOpenThread(link.threadId)}
             />
           }
         >
-          {project ? <ProjectFavicon project={project} className="size-3.5 shrink-0" /> : null}
-          <span className={PANE_INACTIVE_TAB_TITLE_CLASS} dir={textDirection(link.title)}>
-            {link.title}
-          </span>
+          <ParentThreadLinkLabel title={link.title} />
         </TooltipTrigger>
         <TooltipPopup side="bottom" className="whitespace-pre-line">
           {`${link.title}\nParent thread`}

@@ -38,6 +38,7 @@ import {
 import { useAssetUrls } from "../../assets/assetUrls";
 import { threadEnvironment } from "../../state/threads";
 import { useQuietThreadShell, useThreadProjection } from "../../state/entities";
+import { useEnvironment } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { isImageAttachment, type ChatMessage } from "../../types";
 import { cn } from "~/lib/utils";
@@ -100,8 +101,10 @@ export function QueuedRunsControl({
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
   readonly onCancelEdit: () => void;
+  /** Withdraws a message the server has not saved yet, so it never goes out. */
+  readonly onRemovePending: (messageId: MessageId) => void;
   readonly timestampFormat: TimestampFormat;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const projection = useThreadProjection(
     scopeThreadRef(props.environmentId, props.threadId),
@@ -168,7 +171,7 @@ export function QueuedRunsControl({
       key: message.id,
       message: undefined,
       runId: null,
-      messageId: null,
+      messageId: message.id,
       freshContext: false,
       serverIndex: null,
       text: message.text,
@@ -331,7 +334,7 @@ export function QueuedRunsControl({
               aria-current={isEditing ? "true" : undefined}
               className={cn(
                 "group/queued flex min-h-7 w-full min-w-0 items-center gap-1 rounded-control px-1 text-dim-foreground hover:bg-foreground/5 hover:text-muted-foreground focus-within:text-muted-foreground",
-                draggedRunId === item.runId && "bg-foreground/8 shadow-md",
+                draggedRunId !== null && draggedRunId === item.runId && "bg-foreground/8 shadow-md",
               )}
               onDragOver={(event) => {
                 if (drag && item.runId !== drag.runId) {
@@ -476,9 +479,11 @@ export function QueuedRunsControl({
                             variant="ghost-muted"
                             aria-label="Remove queued message"
                             className="-me-1 sm:-me-[3px]"
-                            disabled={item.runId === null || busyRunId !== null}
+                            disabled={item.runId !== null && busyRunId !== null}
                             onClick={() => {
                               if (item.runId !== null) void remove(item.runId);
+                              else if (item.messageId !== null)
+                                props.onRemovePending(item.messageId);
                             }}
                           />
                         }
@@ -529,19 +534,22 @@ function QueuedMessage(props: {
   readonly thumbnails: ReadonlyArray<QueuedRowThumbnail>;
   readonly isEditing: boolean;
   readonly timestampFormat: TimestampFormat;
-  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenThread: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
   readonly children: ReactNode;
 }) {
   const presentation = props.message ? resolveUserMessagePresentation(props.message) : null;
   const attribution = presentation?.attribution ?? null;
   const scheduledTaskId = presentation?.scheduledTaskId;
   const senderThreadId = props.message?.senderThreadId;
+  // A linked environment's agent sent it from a thread there.
+  const senderRef =
+    props.message?.linkedSender ??
+    (senderThreadId === undefined ? null : scopeThreadRef(props.environmentId, senderThreadId));
   const [expanded, setExpanded] = useState(false);
   const taskTitle = useScheduledTaskTitle(props.environmentId, scheduledTaskId);
-  const senderShell = useQuietThreadShell(
-    attribution === "agent" && senderThreadId
-      ? { environmentId: props.environmentId, threadId: senderThreadId }
-      : null,
+  const senderShell = useQuietThreadShell(attribution === "agent" ? senderRef : null);
+  const linkedSenderEnvironment = useEnvironment(
+    props.message?.linkedSender?.environmentId ?? null,
   );
   const fold =
     attribution === "automation"
@@ -553,12 +561,26 @@ function QueuedMessage(props: {
       : attribution === "agent"
         ? {
             icon: MessagesSquareIcon,
-            label: senderShell?.title.trim() || "Agent",
+            label:
+              senderShell?.title.trim() || props.message?.linkedSender?.title.trim() || "Agent",
             summary: props.previewText.split(/\r?\n/).find((line) => line.trim()) ?? "",
           }
         : null;
   const bodyVisible = fold === null || expanded;
   const thumbnail = props.thumbnails[0];
+  const automationLink = scheduledTaskId ? (
+    <InlineButton
+      tone="muted"
+      render={
+        <Link
+          to="/settings/scheduled-tasks"
+          search={{ environmentId: props.environmentId, taskId: scheduledTaskId }}
+        />
+      }
+    >
+      Open automation
+    </InlineButton>
+  ) : null;
 
   return (
     <>
@@ -583,6 +605,7 @@ function QueuedMessage(props: {
       >
         {fold ? (
           <FoldedMessageHeader
+            queued
             icon={fold.icon}
             label={fold.label}
             summary={fold.summary}
@@ -594,7 +617,7 @@ function QueuedMessage(props: {
           <div
             className={cn(
               "flex min-w-0 items-center gap-2",
-              fold !== null && "max-h-96 overflow-auto px-3 pb-2",
+              fold !== null && "max-h-96 overflow-auto px-3 pb-2 max-sm:block",
             )}
           >
             {thumbnail ? (
@@ -631,30 +654,27 @@ function QueuedMessage(props: {
                 {props.previewText}
               </p>
             ) : null}
+            {automationLink ? (
+              <span className="mt-2 block text-meta sm:hidden">{automationLink}</span>
+            ) : null}
           </div>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-0.5 text-meta text-dim-foreground">
         {props.message ? (
           <span className="flex items-center gap-1">
-            {attribution === "agent" && senderThreadId ? (
-              <InlineButton tone="muted" onClick={() => props.onOpenThread(senderThreadId)}>
+            {attribution === "agent" &&
+            senderRef &&
+            // Only an environment this client is connected to can open the sender's thread there.
+            (props.message?.linkedSender === undefined || linkedSenderEnvironment !== null) ? (
+              <InlineButton
+                tone="muted"
+                onClick={() => props.onOpenThread(senderRef.threadId, senderRef.environmentId)}
+              >
                 Open thread
               </InlineButton>
             ) : null}
-            {scheduledTaskId ? (
-              <InlineButton
-                tone="muted"
-                render={
-                  <Link
-                    to="/settings/scheduled-tasks"
-                    search={{ environmentId: props.environmentId, taskId: scheduledTaskId }}
-                  />
-                }
-              >
-                Open automation
-              </InlineButton>
-            ) : null}
+            {automationLink ? <span className="max-sm:hidden">{automationLink}</span> : null}
             <span className="sr-only">
               <TimelineRowTimestamp
                 createdAt={DateTime.formatIso(props.message.createdAt)}

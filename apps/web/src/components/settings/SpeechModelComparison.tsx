@@ -1,7 +1,5 @@
 import type { EnvironmentSpeechModel, SpeechBenchmarkTier } from "@t3tools/contracts";
-import { CheckIcon } from "lucide-react";
 
-import { Button } from "../ui/button";
 import { Text } from "../ui/text";
 import { languageLabel } from "./SpeechLanguageSelect";
 
@@ -43,31 +41,6 @@ export function orderSpeechLanguages(languages: readonly string[], preferred: re
     (left, right) =>
       (rank.get(left) ?? order.length) - (rank.get(right) ?? order.length) ||
       languageLabel(left).localeCompare(languageLabel(right)),
-  );
-}
-
-export function LanguageRow({
-  label,
-  selected,
-  onClick,
-}: {
-  label: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="ghost"
-      aria-pressed={selected}
-      data-pressed={selected || undefined}
-      onClick={onClick}
-      className="shrink-0 justify-between"
-    >
-      {label}
-      {selected && <CheckIcon />}
-    </Button>
   );
 }
 

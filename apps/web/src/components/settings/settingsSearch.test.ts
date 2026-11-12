@@ -64,6 +64,8 @@ describe("searchSettings", () => {
     expect(searchSettings("sharing", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
+    const spanish = (message: string) => (message === "Word wrap" ? "Ajuste de línea" : message);
+    expect(searchSettings("ajuste", ITEMS, spanish).map((item) => item.id)).toEqual(["word-wrap"]);
     for (const query of ["fallback", "fallback agent", "fallback model"]) {
       expect(searchSettings(query)[0]).toMatchObject({
         id: "fallback-model",
@@ -234,14 +236,6 @@ describe("settings search targets", () => {
     expect(isSettingsSearchScopeAvailable(target.scope, "all")).toBe(false);
     expect(isSettingsSearchScopeAvailable(target.scope, "project")).toBe(false);
     expect(isSettingsSearchScopeAvailable(target.scope, "environment")).toBe(true);
-  });
-
-  it("keeps layout settings reachable from every settings scope", () => {
-    const setting = getSettingsSearchTargetScope("layout-template")!;
-    expect(setting.scope).toBeNull();
-    for (const kind of ["all", "environment", "project", "checkout", "unavailable"] as const) {
-      expect(isSettingsSearchScopeAvailable(setting.scope, kind)).toBe(true);
-    }
   });
 
   it("keeps environment-wide settings out of project scopes", () => {

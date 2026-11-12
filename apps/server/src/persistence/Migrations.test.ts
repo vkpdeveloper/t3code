@@ -29,7 +29,7 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect.each([78, 80, 81])(
+  it.effect.each([78, 80, 81, 82])(
     "upgrades bot builds that recorded ProjectionProjectBot as %i",
     (id) =>
       Effect.gen(function* () {
@@ -42,12 +42,16 @@ describe("runMigrations", () => {
 
         yield* runMigrations();
 
-        assert.deepStrictEqual((yield* history).slice(-5), [
+        assert.deepStrictEqual((yield* history).slice(-9), [
           [78, "DropOrchestrationEventCorrelationIndex"],
           [79, "DelegatedRecoveryIndexes"],
           [80, "ScheduledTaskThreadMode"],
           [81, "ProjectionMessageSearchText"],
-          [82, "ProjectionProjectBot"],
+          [82, "TurnItemConversationIndex"],
+          [83, "CommandReadIndexes"],
+          [84, "LastExecutedRunIndex"],
+          [85, "TurnItemCounts"],
+          [86, "ProjectionProjectBot"],
         ]);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -171,6 +175,20 @@ describe("runMigrations", () => {
       );
       assert.notInclude(String(exit), "57_ScheduledTaskWebhooks");
       assert.deepStrictEqual(yield* history, before);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("reapplies peer link migrations whose ledger rows are missing", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 72 });
+      yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id BETWEEN 70 AND 72`;
+
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id >= 70),
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 

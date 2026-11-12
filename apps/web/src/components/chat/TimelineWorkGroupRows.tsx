@@ -91,7 +91,6 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
-import { RunningFor } from "./RunningFor";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
@@ -350,6 +349,7 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
     isPreparingWorktree,
     backgroundWorktreeSetup,
     pendingRequest,
+    providerStartingLabel,
     worktreeSetupCardOwnsHeader,
   } = use(TimelineRowActivityCtx);
   const window = row.window;
@@ -388,6 +388,9 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
         "Compacting…"
       )}
     </span>
+  ) : providerStartingLabel ? (
+    // Until the provider opens a turn, the run is still launching it.
+    providerStartingLabel
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -471,13 +474,18 @@ function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnap
 
 export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "thinking" }> }) {
   const ctx = use(TimelineRowCtx);
-  const { isCompacting, isPreparingWorktree, liveAnswerPreview } = use(TimelineRowActivityCtx);
+  const { isCompacting, isPreparingWorktree, liveAnswerPreview, providerStartingLabel } =
+    use(TimelineRowActivityCtx);
   if (isPreparingWorktree || isCompacting) return <WorkLogRow label="" />;
   // A failed group keeps this disclosure while an approval waits, but nothing is thinking then.
   const live = ctx.pendingApprovals.size === 0;
   const { groupId } = row;
   const activity = (
-    <LiveActivityRow label={liveAnswerPreview ?? "Thinking"} iconName="brain" active={live} />
+    <LiveActivityRow
+      label={providerStartingLabel ?? liveAnswerPreview ?? "Thinking"}
+      iconName="brain"
+      active={live}
+    />
   );
   if (groupId === undefined) return activity;
   return (
@@ -503,7 +511,7 @@ function LiveWorkToggle({
       <button
         type="button"
         className={cn(
-          "group/live-work flex min-w-0 flex-1 cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          "group/live-work flex min-w-0 flex-1 cursor-pointer rounded-md text-left hover:surface-ghost-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           stacked ? "flex-col items-start" : "min-h-6 items-center",
         )}
         {...props}
@@ -853,7 +861,7 @@ function WorkingWindowText({
     item.projectedItemId,
   );
   const text = liveText ?? item.message.text;
-  const textRef = useCarriedTextFade(item.message.id);
+  const textRef = useCarriedTextFade(item.message.id, Boolean(item.message.streaming));
   if (text.trim().length === 0) return null;
   return (
     <div ref={textRef} className="min-w-0 px-1 py-2">
@@ -902,19 +910,9 @@ const WorkingWindowItemView = memo(function WorkingWindowItemView({
     if (entry.itemType === "approval_request" || entry.itemType === "user_input_request") {
       return <WorkingRequestRow entry={entry} />;
     }
-    const label = liveWorkEntryLabel(entry, ctx.workspaceRoot, true);
     return (
       <LiveActivityRow
-        label={
-          entry.itemType === "command_execution" && entry.command?.trim() ? (
-            <>
-              {label}
-              <RunningFor startedAt={entry.createdAt} />
-            </>
-          ) : (
-            label
-          )
-        }
+        label={liveWorkEntryLabel(entry, ctx.workspaceRoot, true)}
         iconName={workEntryIconName(entry)}
         toolIcon={entry.toolIcon ?? entry.toolSource?.icon}
         active={current}
@@ -944,8 +942,14 @@ function WorkingWindowView({
   onOverflowChange: (overflows: boolean) => void;
 }) {
   const ctx = use(TimelineRowCtx);
-  const { isCompacting, isPreparingWorktree, turnEnded, pendingRequest, liveAnswerPreview } =
-    use(TimelineRowActivityCtx);
+  const {
+    isCompacting,
+    isPreparingWorktree,
+    turnEnded,
+    pendingRequest,
+    liveAnswerPreview,
+    providerStartingLabel,
+  } = use(TimelineRowActivityCtx);
   const open = window.historyOpen;
   const [history, setHistory] = useState<{ head: number; tailStart: number } | null>(null);
   if (open && history === null) {
@@ -962,24 +966,20 @@ function WorkingWindowView({
     if (open) return;
     setCollapseClips((windowRef.current?.scrollHeight ?? 0) > WORKING_WINDOW_COLLAPSED_HEIGHT);
   }, [open]);
-  const { onWorkingHistoryMoving, onWorkingHistorySettled } = ctx;
-  const hasHistory = history !== null;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the timeline holds off following its end, and older items stay mounted, until the open or collapse transition finishes
+  const { onWorkingHistoryCollapsing } = ctx;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- older items stay mounted, and the timeline stops following its end, until the collapse transition finishes
   useEffect(() => {
-    if (!open && !hasHistory) return;
-    onWorkingHistoryMoving(true);
+    if (open || history === null) return;
+    onWorkingHistoryCollapsing(true);
     let cancelled = false;
     void transitionsSettled(windowRef.current).then(() => {
-      if (cancelled) return;
-      onWorkingHistoryMoving(false);
-      onWorkingHistorySettled();
-      if (!open) setHistory(null);
+      if (!cancelled) setHistory(null);
     });
     return () => {
       cancelled = true;
-      onWorkingHistoryMoving(false);
+      onWorkingHistoryCollapsing(false);
     };
-  }, [open, hasHistory, onWorkingHistoryMoving, onWorkingHistorySettled]);
+  }, [open, history, onWorkingHistoryCollapsing]);
   const head = history?.head;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as the timeline scroll brings them near the viewport
   useEffect(() => {
@@ -1027,6 +1027,7 @@ function WorkingWindowView({
   const showThinking =
     !turnEnded &&
     !pendingRequest &&
+    providerStartingLabel === null &&
     !window.answering &&
     !workingWindowItemIsLive(window.items.at(-1)) &&
     !isCompacting &&
@@ -1122,12 +1123,7 @@ function CollapsedWorkingWindow({
     reportOverflow();
     return observeResize([content, viewport], () => {
       reportOverflow();
-      if (followRef.current) {
-        viewport.scrollTop = viewport.scrollHeight;
-      } else if (scrolledToEnd(viewport)) {
-        followRef.current = true;
-        setFollowing(true);
-      }
+      if (followRef.current) viewport.scrollTop = viewport.scrollHeight;
     });
   }, [onOverflowChange]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- mounts older items as scrolling brings the spacer near the viewport
@@ -1167,7 +1163,7 @@ function CollapsedWorkingWindow({
         onScrollCapture={(event) => {
           const viewport = getViewport();
           if (!viewport || event.target !== viewport || prependRef.current) return;
-          const atEnd = scrolledToEnd(viewport);
+          const atEnd = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
           followRef.current = atEnd;
           setFollowing(atEnd);
           if (atEnd) setStart(Math.max(start, items.length - WORKING_WINDOW_TAIL));
@@ -1215,10 +1211,6 @@ function CollapsedWorkingWindow({
       ) : null}
     </div>
   );
-}
-
-function scrolledToEnd(viewport: HTMLElement) {
-  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 2;
 }
 
 function workingWindowItemIsLive(item: WorkingWindowItem | undefined): boolean {

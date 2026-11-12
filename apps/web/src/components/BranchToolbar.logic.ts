@@ -5,10 +5,12 @@ import type {
   ProjectId,
   WorktreeSubmodules,
 } from "@t3tools/contracts";
+import type { ThreadStructureRuntime } from "@t3tools/client-runtime/state/shell";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import { deriveCanInterruptRunningThread } from "../session-logic";
 export { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
 
 export interface EnvironmentOption {
@@ -81,20 +83,18 @@ const CONTEXT_STRIP_COMPACT_EXPAND_HYSTERESIS_PX = 16;
 
 export type ContextStripCompaction = "none" | "labels" | "branch";
 
-export function readContextStripCompaction(value: string | undefined): ContextStripCompaction {
-  return value === "labels" || value === "branch" ? value : "none";
-}
-
 export function resolveContextStripCompaction(input: {
   current: ContextStripCompaction;
   neededWidth: number;
-  labelsNeededWidth: number;
   availableWidth: number;
+  labelsSavedWidth: number;
 }): ContextStripCompaction {
   const fits = (width: number, expanding: boolean) =>
     width <= input.availableWidth - (expanding ? CONTEXT_STRIP_COMPACT_EXPAND_HYSTERESIS_PX : 0);
   if (fits(input.neededWidth, input.current !== "none")) return "none";
-  if (fits(input.labelsNeededWidth, input.current === "branch")) return "labels";
+  if (fits(input.neededWidth - input.labelsSavedWidth, input.current === "branch")) {
+    return "labels";
+  }
   return "branch";
 }
 
@@ -298,6 +298,17 @@ export function resolveBranchSelectionTarget(input: {
     nextWorktreePath,
     reuseExistingWorktree: false,
   };
+}
+
+export function isWorktreeChangeBlocked(input: {
+  runtime: ThreadStructureRuntime | null;
+  currentWorktreePath: string | null;
+  nextWorktreePath: string | null;
+}): boolean {
+  return (
+    input.nextWorktreePath !== input.currentWorktreePath &&
+    deriveCanInterruptRunningThread(true, input.runtime)
+  );
 }
 
 export function shouldIncludeBranchPickerItem(input: {

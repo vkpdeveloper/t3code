@@ -22,6 +22,10 @@ import { useEnvironmentQuery } from "~/state/query";
 import { sourceControlEnvironment } from "~/state/sourceControl";
 import { sourceControlIcon } from "~/sourceControlPresentation";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import {
+  isSourceControlProviderOffered,
+  type OfferedSourceControlProviders,
+} from "@t3tools/client-runtime/operations/projects";
 import { DialogSubmitKbd, isDialogSubmitShortcut } from "./DialogSubmitShortcut";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -163,6 +167,7 @@ export interface PublishRepositoryDialogProps {
   /** Thread the dialog was opened from, so the new repository can open beside it. */
   readonly threadRef: ScopedThreadRef | null;
   readonly gitCwd: string;
+  readonly offeredProviders: OfferedSourceControlProviders | undefined;
 }
 
 /**
@@ -200,13 +205,25 @@ export function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
       provider,
       sourceControlProviders: discoveredProviders ?? [],
     });
-  const firstReadyProvider = PUBLISH_PROVIDER_OPTIONS.find(
+  const offeredProviderOptions = PUBLISH_PROVIDER_OPTIONS.filter((option) =>
+    isSourceControlProviderOffered(props.offeredProviders, option.value),
+  );
+  const hasReadyProvider = offeredProviderOptions.some(
+    (option) => readinessByProvider(option.value).ready,
+  );
+  const firstReadyProvider = offeredProviderOptions.find(
     (option) => readinessByProvider(option.value).ready,
   )?.value;
-  const provider =
-    selectedProvider !== null && readinessByProvider(selectedProvider).ready
+  // The dialog stays mounted, so a host turned off after it was picked must not stay selected.
+  const offeredSelection =
+    selectedProvider !== null &&
+    isSourceControlProviderOffered(props.offeredProviders, selectedProvider)
       ? selectedProvider
-      : (firstReadyProvider ?? selectedProvider ?? sourceControlClients.get(undefined).kind);
+      : null;
+  const provider =
+    offeredSelection !== null && readinessByProvider(offeredSelection).ready
+      ? offeredSelection
+      : (firstReadyProvider ?? offeredSelection ?? sourceControlClients.get(undefined).kind);
   const providerOption =
     PUBLISH_PROVIDER_OPTIONS.find((option) => option.value === provider) ??
     PUBLISH_PROVIDER_OPTIONS[0]!;
@@ -219,6 +236,7 @@ export function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
   const repositoryPath = `${owner.trim()}/${repositoryName.trim()}`;
   const canSubmit =
     publishRepositoryAction.isAllowed &&
+    hasReadyProvider &&
     providerReady &&
     !publishRepositoryAction.isPending &&
     owner.trim().length > 0 &&
@@ -327,7 +345,7 @@ export function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                   role="group"
                   aria-label="Provider"
                 >
-                  {PUBLISH_PROVIDER_OPTIONS.map((option) => (
+                  {offeredProviderOptions.map((option) => (
                     <PublishProviderTile
                       key={option.value}
                       option={option}

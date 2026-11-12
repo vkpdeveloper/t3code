@@ -1,11 +1,12 @@
+import { cn } from "~/lib/utils";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { applyPullRequestDraftFilterChange } from "@t3tools/client-runtime/pull-request-query";
+import { pullRequestCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import { Spinner } from "~/components/ui/spinner";
 import type { PullRequestSpeedActionResult } from "~/components/pullRequest/PullRequestSpeedActions";
 import { usePullRequestCloseBatch } from "~/components/pullRequest/usePullRequestActions";
 import { SidebarPointerSensor } from "~/components/Sidebar.pointer";
 import { resolveSidebarSweepKeys } from "~/components/Sidebar.logic";
-import { sortProjectsByGroupOrder } from "@t3tools/client-runtime/state/project-grouping";
 import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import type {
   EnvironmentId,
@@ -21,19 +22,13 @@ import type {
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowDownUpIcon, CircleAlertIcon, LayersIcon, Plug2Icon } from "lucide-react";
-import {
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-  type ComponentProps,
-  type ReactNode,
-} from "react";
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 
 import {
   collectPullRequestListFacets,
   narrowPullRequestsToFilters,
   mergePullRequestDiffStats,
+  settlePullRequestSortStats,
   pullRequestDiffStatKey,
   pullRequestEntryKey,
   rankPullRequestMatches,
@@ -43,6 +38,7 @@ import {
   type EnvironmentPullRequestEntry,
   type MergedPullRequestList,
   type PullRequestDiffStats,
+  type PullRequestSortStats,
   type PullRequestStatsBatch,
   type PullRequestStatsPolicy,
   type PullRequestStatsScope,
@@ -99,12 +95,11 @@ import { RightPanelMaximizeControl } from "../chat/PanelLayoutControls";
 import { Button } from "../ui/button";
 import { MenuItem } from "../ui/menu";
 import { RefreshIcon } from "../ui/refresh-icon";
-import { SidebarInset } from "../ui/sidebar";
+import { SidebarInset, useMobileSidebarSheetMounted } from "../ui/sidebar";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useOpenPanelPullRequestUrl } from "~/hooks/useOpenPanelPullRequestUrl";
-import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
-import { toastManager } from "../ui/toast";
+import { copyThreadReference } from "~/lib/copyThreadReference";
 import { useLayoutPageLocation } from "~/layout/pageNavigation";
 import { useLayoutPane, useLayoutPaneFocusedRef } from "~/layout/layoutPaneContext";
 import { usePanelAnimationSettings, usePanelPresence } from "~/panelAnimations";
@@ -116,7 +111,6 @@ import {
   useRightPanelStore,
   type PullRequestSurface,
 } from "~/rightPanelStore";
-import { useSidebarProjectGroups } from "~/hooks/useSidebarProjectGroups";
 import {
   pullRequestEnvironment,
   usePullRequestList,
@@ -249,6 +243,7 @@ export function PullRequestsPage() {
           ...(next.repository ? { repository: next.repository } : {}),
           ...(next.number ? { number: next.number } : {}),
           ...(next.projectId ? { projectId: next.projectId } : {}),
+          ...(next.projectEnvironmentId ? { projectEnvironmentId: next.projectEnvironmentId } : {}),
           ...(next.environmentId ? { environmentId: next.environmentId } : {}),
           ...(next.host ? { host: next.host } : {}),
           ...(next.selectedHost ? { selectedHost: next.selectedHost } : {}),
@@ -349,7 +344,6 @@ export function PullRequestsPage() {
             state: search.state,
             involvement: search.involvement,
             limit: pageSize,
-            ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
             ...(projectIds ? { projectIds } : {}),
             ...(search.host ? { host: search.host } : {}),
             ...(hasFilters ? { filters } : {}),
@@ -374,7 +368,6 @@ export function PullRequestsPage() {
         state: search.state,
         involvement: search.involvement,
         limit: PAGE_SIZE,
-        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
         ...(search.host ? { host: search.host } : {}),
         ...(menuFiltered ? { filters: menuFilters } : {}),
@@ -400,7 +393,6 @@ export function PullRequestsPage() {
         state: "all",
         involvement: search.involvement,
         limit: PAGE_SIZE,
-        ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
         ...(projectIds ? { projectIds } : {}),
         ...(search.host ? { host: search.host } : {}),
       } satisfies PullRequestListInput,
@@ -410,7 +402,6 @@ export function PullRequestsPage() {
   const filterOptionScope = environmentQueries.map(({ environmentId, projectIds }) => ({
     environmentId,
     input: {
-      ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
       ...(projectIds ? { projectIds } : {}),
       ...(search.host ? { host: search.host } : {}),
     },
@@ -434,7 +425,6 @@ export function PullRequestsPage() {
           state: search.state,
           involvement,
           limit: PAGE_SIZE,
-          ...(scopedProjectId ? { projectId: scopedProjectId } : {}),
           ...(projectIds ? { projectIds } : {}),
           ...(search.host ? { host: search.host } : {}),
           ...(menuFiltered ? { filters: menuFilters } : {}),
@@ -572,10 +562,20 @@ export function PullRequestsPage() {
     }
     const entries = narrowPullRequestsToFilters(loaded.data.entries, {
       state: search.state,
-      projectId: scopedProjectId,
+      projectId: undefined,
       host: search.host,
     });
-    return entries.length === 0 ? null : { ...loaded.data, entries };
+    const scoped =
+      scopedProjectId === undefined
+        ? entries
+        : entries.filter((entry) =>
+            environmentQueries.some(
+              (query) =>
+                query.environmentId === entry.environmentId &&
+                query.projectIds?.includes(entry.projectId),
+            ),
+          );
+    return scoped.length === 0 ? null : { ...loaded.data, entries: scoped };
   })();
   // A grown page is read by the list and nothing else: the baseline always asks for one page, so
   // a host with no cursor to continue from — where "more" means asking for a longer page — would
@@ -751,6 +751,16 @@ export function PullRequestsPage() {
   });
 
   const visibleStatsKeys = useRef({ key: filterKey, values: new Set<string>() });
+  const sortStatsKey = JSON.stringify([
+    filterKey,
+    typedQuery,
+    sort,
+    pageSize,
+    sentCursors,
+    ...[listQuery, baselineQuery, authoredQuery, reviewingQuery].map((query) =>
+      query.observations.map(([environmentId, , timestamp]) => [environmentId, timestamp]),
+    ),
+  ]);
   const [statsByRow, setStatsByRow] = useState<PullRequestDiffStats>(() => new Map());
   if (
     panelEnvironmentId !== null &&
@@ -770,6 +780,7 @@ export function PullRequestsPage() {
   }
   const [statsTargetState, setStatsTargetState] = useState<{
     readonly key: string;
+    readonly sortKey?: string;
     readonly batches: ReadonlyArray<PullRequestStatsBatch>;
   }>({ key: filterKey, batches: [] });
   const statsBatches = statsTargetState.key === filterKey ? statsTargetState.batches : [];
@@ -827,10 +838,12 @@ export function PullRequestsPage() {
         activeBatches: batches,
         statsByRow: known,
       });
-      if (added.length === 0 && current.key === filterKey) return current;
-      return { key: filterKey, batches: [...batches, ...added] };
+      if (added.length === 0 && current.key === filterKey && current.sortKey === sortStatsKey) {
+        return current;
+      }
+      return { key: filterKey, sortKey: sortStatsKey, batches: [...batches, ...added] };
     });
-  }, [filterKey, entriesByStatsKey, statsPolicy]);
+  }, [filterKey, entriesByStatsKey, statsPolicy, sortStatsKey]);
   // The observer outlives the rows it watches, so it reads the rows held at the time it fires.
   const readStatsRows = useEffectEvent(() => entriesByStatsKey);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- IntersectionObserver on rows requests stats for rows that scroll into view
@@ -899,6 +912,20 @@ export function PullRequestsPage() {
     setMergedStats(stats);
     setStatsByRow((previous) => mergePullRequestDiffStats(previous, stats));
   }
+  const [sortStats, setSortStats] = useState<PullRequestSortStats | null>(null);
+  const nextSortStats = settlePullRequestSortStats(
+    sortStats,
+    sortStatsKey,
+    statsByRow,
+    statsPolicy === "eager" ? statsQuery.stats : null,
+    statsPolicy !== "eager" ||
+      (statsTargetState.sortKey === sortStatsKey &&
+        !statsQuery.isPending &&
+        !listQuery.isPending &&
+        !baselineQuery.isPending &&
+        (!partitionsWanted || (!authoredQuery.isPending && !reviewingQuery.isPending))),
+  );
+  if (nextSortStats !== sortStats) setSortStats(nextSortStats);
   // Stable so a refresh that resumes after awaiting the host compares against the scope on screen
   // by then, not the one it started from.
   const refreshListAndStats = useStableCallback(
@@ -955,6 +982,7 @@ export function PullRequestsPage() {
     host: search.host,
     groups,
     statsByRow,
+    sortStatsByRow: nextSortStats.stats,
     overrides,
     state: search.state,
     localFilters,
@@ -1067,6 +1095,7 @@ export function PullRequestsPage() {
     },
   );
   const rightPanelAvailable = selectedPullRequestSurface !== null;
+  const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
   const [maximized, setMaximized] = useState(false);
   const rightPanelMaximized = rightPanelState.isOpen && maximized;
   if (!rightPanelState.isOpen && maximized) setMaximized(false);
@@ -1074,15 +1103,19 @@ export function PullRequestsPage() {
     if (rightPanelState.isOpen) setMaximized((value) => !value);
   };
   const onGuideShown = () => setMaximized(true);
-  // updateSearch leaves selectedUrl out, so a reload does not reveal the link again.
-  const consumeLinkedUrl = useEffectEvent(() => updateSearch({}));
+  const linkedSelectionKey = linkedSelection === null ? null : JSON.stringify(linkedSelection);
+  const openLinkedPullRequest = useEffectEvent(() => {
+    if (rightPanelRef === null || linkedSelection === null) return;
+    useRightPanelStore.getState().openPullRequest(rightPanelRef, linkedSelection);
+    // updateSearch leaves selectedUrl out, so a reload does not reveal the link again.
+    if (linkedSelection.revealUrl !== undefined) updateSearch({});
+  });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the URL-linked pull request in the right panel store
   useEffect(() => {
-    if (!visible || !pullRequestsSupported || rightPanelRef === null || linkedSelection === null)
+    if (!visible || !pullRequestsSupported || rightPanelRef === null || linkedSelectionKey === null)
       return;
-    useRightPanelStore.getState().openPullRequest(rightPanelRef, linkedSelection);
-    if (linkedSelection.revealUrl !== undefined) consumeLinkedUrl();
-  }, [linkedSelection, pullRequestsSupported, rightPanelRef, visible]);
+    openLinkedPullRequest();
+  }, [linkedSelectionKey, pullRequestsSupported, rightPanelRef, visible]);
 
   const selected =
     rightPanelState.isOpen && activePullRequestSurface !== null
@@ -1164,7 +1197,10 @@ export function PullRequestsPage() {
   );
   const openPanelControls = rightPanelState.isOpen ? (
     <div
-      className="absolute top-[var(--workspace-pane-local-controls-top)] right-[var(--workspace-pane-local-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]"
+      className={cn(
+        "absolute top-[var(--workspace-pane-local-controls-top)] right-[var(--workspace-pane-local-controls-right)] z-50 mr-px flex h-[var(--workspace-topbar-height)] items-center gap-1 [-webkit-app-region:no-drag]",
+        mobileSidebarSheetMounted && "hidden",
+      )}
       data-workspace-titlebar-controls
     >
       <RightPanelMaximizeControl
@@ -1203,6 +1239,7 @@ export function PullRequestsPage() {
       labels: undefined,
       host: undefined,
       projectId: undefined,
+      projectEnvironmentId: undefined,
       environmentId: undefined,
     });
   const listFiltered =
@@ -1362,7 +1399,7 @@ export function PullRequestsPage() {
   );
   const hostEntries = hosts.length > 0 ? hosts : expectedHosts;
   const hostMenuOptions: ReadonlyArray<PullRequestFilterOption<string>> = [
-    { value: "", label: "All repositories", Icon: Plug2Icon },
+    { value: "", label: "All forges", Icon: Plug2Icon },
     ...hostEntries.map((entry) => {
       const summary = hosts.find((host) => host.host === entry.host);
       return {
@@ -1393,7 +1430,7 @@ export function PullRequestsPage() {
     />
   );
   const renderFiltersMenu = (compactItems?: ReactNode) => (
-    <PullRequestFiltersMenuInSidebarOrder
+    <PullRequestFiltersMenu
       {...(compactItems ? { compactItems } : {})}
       onOpenChange={setFiltersOpen}
       involvement={search.involvement}
@@ -1424,13 +1461,19 @@ export function PullRequestsPage() {
       optionScope={filterOptionScope}
       server={scopedEnvironmentId ?? undefined}
       serverOptions={serverMenuOptions}
-      onServer={(server) => updateListScope({ environmentId: server, projectId: undefined })}
+      onServer={(server) =>
+        updateListScope({
+          environmentId: server,
+          projectId: undefined,
+          projectEnvironmentId: undefined,
+        })
+      }
       projects={scopedProjects}
       projectId={scopedProjectId}
       projectEnvironmentId={scopedProject?.environmentId}
       unavailable={unavailableProjects}
       onProject={(projectId, environmentId) =>
-        updateListScope(environmentId === undefined ? { projectId } : { projectId, environmentId })
+        updateListScope({ projectId, projectEnvironmentId: environmentId })
       }
     />
   );
@@ -1516,26 +1559,10 @@ export function PullRequestsPage() {
     event.stopPropagation();
     if (event.repeat) return;
     const url = openPanelPullRequestUrl;
-    const { shortLabel, singular } = (
+    const { shortLabel } = (
       sourceControlClients.findByChangeRequestUrl(url) ?? sourceControlClients.get(undefined)
     ).changeRequest;
-    void writeTextToClipboard(url, `${singular} link`).then(
-      (didCopy) => {
-        if (didCopy)
-          toastManager.add({
-            type: "success",
-            title: `${shortLabel} link copied`,
-            description: url,
-          });
-      },
-      (error) => {
-        toastManager.add({
-          type: "error",
-          title: `Failed to copy ${shortLabel} link`,
-          description: error instanceof Error ? error.message : "An error occurred.",
-        });
-      },
-    );
+    void copyThreadReference(pullRequestCopyTarget(url, shortLabel));
   });
   const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (activePullRequestSurface === null) return;
@@ -1728,12 +1755,4 @@ export function PullRequestsPage() {
       </div>
     </SidebarInset>
   );
-}
-
-function PullRequestFiltersMenuInSidebarOrder(
-  props: ComponentProps<typeof PullRequestFiltersMenu>,
-) {
-  const sidebarProjectGroups = useSidebarProjectGroups();
-  const projects = sortProjectsByGroupOrder(props.projects, sidebarProjectGroups);
-  return <PullRequestFiltersMenu {...props} projects={projects} />;
 }

@@ -1,3 +1,4 @@
+import { Button } from "~/components/ui/button";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -17,7 +18,7 @@ import { cn, isMacPlatform } from "../lib/utils";
 import { sidewaysWheelScrollsStrip, wheelDeltaPx } from "../motion/gesture";
 import { usePaneMotion } from "../motion/paneMotion";
 import {
-  ChatPanelAnimationSuppressionProvider,
+  PanelAnimationSuppressionProvider,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import {
@@ -71,7 +72,6 @@ import {
   selectFocusedTab,
   selectFocusedWorkspace,
   selectLayoutPaneSlots,
-  selectLayoutStripSize,
   selectWindowStartPaneId,
   type LayoutColumn,
   type LayoutSurfaceContent,
@@ -143,18 +143,19 @@ interface UnseenPeeks {
  */
 function UnseenPeekDot({ side, tabId }: { side: "left" | "right"; tabId: string }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon-fixed-xs"
       aria-label={side === "left" ? "New pane to the left" : "New pane to the right"}
       data-layout-unseen-peek={side}
       className={cn(
-        "absolute top-1/2 z-30 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center",
+        "absolute top-1/2 z-30 -translate-y-1/2",
         side === "left" ? "left-0" : "right-0",
       )}
       onClick={() => useLayoutStore.getState().focusTab(tabId)}
     >
       <StatusDot tone="info" size="md" />
-    </button>
+    </Button>
   );
 }
 
@@ -255,7 +256,7 @@ function selectShownSlots(
 ): {
   slots: LayoutPaneSlot[];
   stripWidth: number;
-  stripSize: { share: number; minPx: number };
+  fits: boolean;
   unitWidth: number;
   paneCount: number;
 } {
@@ -266,9 +267,7 @@ function selectShownSlots(
     maximizedTabId === null
       ? null
       : (all.slots.find((slot) => slot.activeTabId === maximizedTabId) ?? null);
-  if (paneCount < 2 || (!narrow && !maximizedSlot)) {
-    return { ...all, paneCount, stripSize: selectLayoutStripSize(workspace, viewport.whenNoRoom) };
-  }
+  if (paneCount < 2 || (!narrow && !maximizedSlot)) return { ...all, paneCount };
   const onlySlot =
     (narrow ? null : maximizedSlot) ??
     all.slots.find((slot) => slot.paneId === workspace.focusedPaneId) ??
@@ -286,7 +285,7 @@ function selectShownSlots(
       },
     ],
     stripWidth: 1,
-    stripSize: { share: 1, minPx: 0 },
+    fits: true,
     unitWidth: viewport.width,
   };
 }
@@ -323,33 +322,15 @@ function selectStackRows(
  */
 const LAYOUT_INLINE_RIGHT_PANEL_MIN_PX = 981;
 
-/** The strip's visible width in px, taken once a window or sidebar resize has settled. */
-function useSettledWidth(ref: React.RefObject<HTMLElement | null>): number {
+/** The strip's visible width in px, kept current as the window or sidebar resizes. */
+function useElementWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Observes the strip DOM width; pane geometry follows a resize in CSS and React learns the width a frame after it stops.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the strip DOM width so pane geometry follows window and sidebar resizes
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     setWidth(element.clientWidth);
-    let resized = false;
-    let frame: number | null = null;
-    const settle = () => {
-      if (resized) {
-        resized = false;
-        frame = window.requestAnimationFrame(settle);
-        return;
-      }
-      frame = null;
-      setWidth(element.clientWidth);
-    };
-    const stopObserving = observeResize(element, () => {
-      resized = true;
-      if (frame === null) frame = window.requestAnimationFrame(settle);
-    });
-    return () => {
-      stopObserving();
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
+    return observeResize(element, () => setWidth(element.clientWidth));
   }, [ref]);
   return width;
 }
@@ -424,7 +405,7 @@ function useSurfacePlacement(
   const overviewPhase = useOverviewPhase();
   const workspaceStack = useWorkspaceStack();
   const viewport = { width: viewportWidth, whenNoRoom };
-  const { slots, stripWidth, stripSize, unitWidth, paneCount } = selectShownSlots(
+  const { slots, stripWidth, fits, unitWidth, paneCount } = selectShownSlots(
     workspace,
     viewport,
     narrow,
@@ -519,7 +500,7 @@ function useSurfacePlacement(
   return {
     slots,
     stripWidth,
-    stripSize,
+    fits,
     unitWidth,
     paneCount,
     chatTabsById,
@@ -566,7 +547,7 @@ export function LayoutSurfaceHost({
       element.focus({ preventScroll: true });
     }
   }, [active]);
-  const viewportWidth = useSettledWidth(scrollerRef);
+  const viewportWidth = useElementWidth(scrollerRef);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Publish the measured desktop strip width for imperative pane placement.
   useEffect(() => {
     // Below md one pane fills the window; columns stay arranged for the last
@@ -580,7 +561,7 @@ export function LayoutSurfaceHost({
   const {
     slots,
     stripWidth,
-    stripSize,
+    fits,
     unitWidth,
     paneCount,
     chatTabsById,
@@ -1277,9 +1258,11 @@ export function LayoutSurfaceHost({
           style={
             staged
               ? undefined
-              : stacked
+              : stacked || fits
                 ? { width: "100%" }
-                : { width: `max(${stripSize.share * 100}%, ${stripSize.minPx}px)` }
+                : // At least the window: a window that grew past the strip's end
+                  // stretches it before React learns the new width.
+                  { width: `${stripPx}px`, minWidth: "100%" }
           }
         >
           {renderedTabIds.map((tabId) => {
@@ -1517,8 +1500,8 @@ function LayoutChatSurface({
     paneId,
     // Staged, every pane draws its own; a window-fixed header cluster would
     // land in the stage's corner, over whichever workspace sits on top.
-    split: visible && (split || staged),
-    narrow: visible && narrow,
+    split: split || staged,
+    narrow,
     leadingEdge,
     trailingEdge,
     focused: focused && !background,
@@ -1699,7 +1682,7 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
     });
   }, [rendered, shownTarget, tabId, target]);
   return (
-    <ChatPanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
+    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
       <LayoutPaneContext value={paneState}>
         {rendered ? (
           <DeferredChatContext value={request.deferred}>
@@ -1731,7 +1714,7 @@ const LayoutChatSurfaceBody = memo(function LayoutChatSurfaceBody({
           <div aria-hidden className="min-h-0 min-w-0 flex-1 bg-background" />
         )}
       </LayoutPaneContext>
-    </ChatPanelAnimationSuppressionProvider>
+    </PanelAnimationSuppressionProvider>
   );
 });
 

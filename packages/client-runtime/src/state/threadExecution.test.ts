@@ -301,6 +301,49 @@ describe("thread execution presentation", () => {
     });
   });
 
+  // The server marks a run running before the provider opens, which can take minutes.
+  it("labels an open run whose provider has not started a turn", () => {
+    const attemptId = RunAttemptId.make("attempt-starting");
+    const openRun = { ...run("run-starting", 1, "running"), activeAttemptId: attemptId };
+    const session = {
+      id: ProviderSessionId.make("session-starting"),
+      driver: ProviderDriverKind.make("claudeAgent"),
+      providerInstanceId: openRun.providerInstanceId,
+      status: "starting" as const,
+      cwd: "/repo",
+      model: null,
+      // The label reads only the driver.
+      capabilities: {} as never,
+      createdAt: now,
+      updatedAt: now,
+      lastError: null,
+    };
+    const starting = { ...v2Projection, runs: [openRun], providerSessions: [session] };
+
+    expect(deriveThreadActivityRun(starting)?.providerStartingLabel).toBe("Starting Claude");
+    expect(
+      deriveThreadActivityRun({ ...starting, providerSessions: [] })?.providerStartingLabel,
+    ).toBe("Starting");
+    expect(
+      deriveThreadActivityRun({
+        ...starting,
+        providerTurns: [
+          {
+            id: ProviderTurnId.make("provider-turn-starting"),
+            providerThreadId: ProviderThreadId.make("provider-thread-starting"),
+            nodeId: NodeId.make("node-starting"),
+            runAttemptId: attemptId,
+            nativeTurnRef: null,
+            ordinal: 1,
+            status: "running",
+            startedAt: now,
+            completedAt: null,
+          },
+        ],
+      })?.providerStartingLabel,
+    ).toBeUndefined();
+  });
+
   it("presents a held queue as the stopped run instead of queued work", () => {
     const interrupted = { ...run("run-interrupted", 1, "interrupted"), completedAt: now };
     const held = { ...run("run-held", 2, "queued"), queueHeld: true };
@@ -548,6 +591,51 @@ describe("provider-reported model selection", () => {
 });
 
 describe("formatModelSelectionEffort", () => {
+  it.each([
+    { id: "reasoningEffort" },
+    { id: "effort" },
+    { id: "reasoning_effort" },
+    { id: "reasoning" },
+    { id: "variant" },
+    { id: "thinking_level" },
+    { id: "thinking" },
+    { id: "agent/thought-level", role: "reasoning" as const },
+  ])("labels a saved $id without loading thread details", (option) => {
+    const selection = createModelSelection(ProviderInstanceId.make("provider"), "model", [
+      { id: option.id, value: "medium" },
+    ]);
+    const models = [
+      {
+        slug: "model",
+        name: "Model",
+        isCustom: false,
+        capabilities: createModelCapabilities({
+          optionDescriptors: [
+            {
+              ...option,
+              label: "Reasoning",
+              type: "select",
+              options: [
+                { id: "medium", label: "Medium" },
+                { id: "high", label: "High", isDefault: true },
+              ],
+            },
+          ],
+        }),
+      },
+    ];
+
+    expect(formatModelSelectionEffort(selection, models)).toBe("Medium");
+    if (option.id !== "variant") {
+      expect(
+        formatModelSelectionEffort(
+          createModelSelection(selection.instanceId, selection.model),
+          models,
+        ),
+      ).toBeNull();
+    }
+  });
+
   it("labels an old Ultracode effort by the effort it runs at", () => {
     const models = [
       {

@@ -6,13 +6,14 @@ import type {
   ThreadId,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
-import type { Dispatch, SetStateAction } from "react";
+import { type Dispatch, type SetStateAction, useState } from "react";
 import { getDefaultServerModel } from "../../providerModels";
 import { providerStatusBannerItem } from "./ProviderStatusBanner";
 import { dismissThreadErrorBannerForSession, threadErrorBannerItem } from "./ThreadErrorBanner";
 import {
-  useLowLimitDismissed,
+  isLowLimitDismissed,
   lowLimitBannerItem,
+  readLowLimitDismissals,
   resolveLowLimitSignal,
   resolveLowLimitSwitchTarget,
 } from "./ComposerUsageLimits";
@@ -22,6 +23,7 @@ import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 export function useChatBannerLane(input: {
   readonly environmentId: EnvironmentId;
   readonly activeProviderStatus: ServerProvider | null;
+  readonly selectedModel: string | undefined;
   readonly providerStatuses: ReadonlyArray<ServerProvider>;
   readonly usageLimitSources: UsageLimitSourceSnapshots;
   readonly canSwitchProvider: boolean;
@@ -65,14 +67,19 @@ export function useChatBannerLane(input: {
     setThreadError,
     setThreadErrorBannerDismissTick,
   } = input;
+  const [lowLimitDismissals, setLowLimitDismissals] = useState(readLowLimitDismissals);
   const lowLimitSignal = resolveLowLimitSignal(
     activeProviderStatus,
     providerStatuses,
     usageLimitSources,
     environmentId,
+    input.selectedModel ??
+      (activeProviderStatus
+        ? getDefaultServerModel([activeProviderStatus], activeProviderStatus.driver)
+        : undefined),
   );
-  const lowLimitDismissed = useLowLimitDismissed(lowLimitSignal?.key ?? null);
-  const lowLimitVisible = lowLimitSignal !== null && !lowLimitDismissed;
+  const lowLimitVisible =
+    lowLimitSignal !== null && !isLowLimitDismissed(lowLimitDismissals, lowLimitSignal);
   const lowLimitSwitchTarget =
     lowLimitVisible && activeProviderStatus !== null && canSwitchProvider
       ? resolveLowLimitSwitchTarget(activeProviderStatus, providerStatuses)
@@ -116,6 +123,7 @@ export function useChatBannerLane(input: {
                 sources: usageLimitSources,
               }
             : null,
+        onDismissed: setLowLimitDismissals,
       }),
     );
   }

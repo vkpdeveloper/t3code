@@ -368,21 +368,32 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 const isSelected =
                   isOptimisticallySelected || draftSelectedOptions?.[index] === true;
                 return (
-                  <QuestionOptionRow
-                    textAlign={questionTextAlign}
-                    key={`${activeQuestion.id}:${optionValue}`}
-                    label={option.label}
-                    description={
-                      option.description && option.description !== option.label
-                        ? option.description
-                        : null
-                    }
-                    multiSelect={activeQuestion.multiSelect === true}
-                    selected={isSelected}
-                    shortcutKey={index < 9 ? index + 1 : null}
-                    disabled={disabled || isResponding}
-                    onSelect={() => handleOptionSelection(activeQuestion.id, optionValue)}
-                  />
+                  // The preview sits outside the row: it can hold links, and a click on a single-select option advances.
+                  <div key={`${activeQuestion.id}:${optionValue}`}>
+                    <QuestionOptionRow
+                      textAlign={questionTextAlign}
+                      label={option.label}
+                      description={
+                        option.description && option.description !== option.label
+                          ? option.description
+                          : null
+                      }
+                      multiSelect={activeQuestion.multiSelect === true}
+                      selected={isSelected}
+                      shortcutKey={index < 9 ? index + 1 : null}
+                      disabled={disabled || isResponding}
+                      onSelect={() => handleOptionSelection(activeQuestion.id, optionValue)}
+                    />
+                    {option.preview ? (
+                      <ChatMarkdown
+                        text={option.preview}
+                        cwd={cwd}
+                        threadRef={threadRef}
+                        lineBreaks
+                        className="ps-8.5 pe-2 pb-1.5 text-meta text-foreground/70"
+                      />
+                    ) : null}
+                  </div>
                 );
               })}
               {canWriteAnswer ? (
@@ -462,7 +473,7 @@ function QuestionOptionRow({
 }) {
   const className = cn(
     textAlign,
-    "group flex w-full items-center gap-2.5 rounded-row px-2.5 py-2 text-foreground outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+    "group flex w-full items-center gap-2.5 rounded-row px-2.5 py-2 text-foreground outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     selected ? "bg-selection-neutral" : "bg-transparent hover:surface-ghost-hover",
     disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
   );

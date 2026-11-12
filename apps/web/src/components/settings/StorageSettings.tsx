@@ -106,13 +106,13 @@ export function WorktreesDirectoryRow() {
   );
 }
 
+type SaveOptions = Parameters<ReturnType<typeof useUpdateScopedSettings>>[1];
+
 const RETENTION_PRESET_DAYS = [1, 3, 7, 14, 30, 60, 90, 180, 365] as const;
 const MIN_RETENTION_DAYS = 1;
 const MAX_RETENTION_DAYS = 3650;
-/** The days a retention starts at when turned on from Off, matching main. */
+// Opening a custom draft must not enable cleanup before its first save.
 const DEFAULT_RETENTION_DAYS = 8;
-
-type SaveOptions = Parameters<ReturnType<typeof useUpdateScopedSettings>>[1];
 
 function formatRetentionDays(days: number): string {
   return `After ${days} ${days === 1 ? "day" : "days"}`;
@@ -133,91 +133,77 @@ function RetentionControl({
   onChange: (value: number | null, onFailed: () => void) => void;
   minimum?: number;
 }) {
-  const isPreset = value !== null && (RETENTION_PRESET_DAYS as readonly number[]).includes(value);
   const [customRequested, setCustomRequested] = useState(false);
-  // Saving an age can start a cleanup sweep, so a typed age waits for Enter or for focus to
-  // leave the row, and Custom from Off opens an unsaved draft.
-  const [draft, setDraft] = useState<string | null>(null);
-  // The age of a rule's first save while it is in flight, so its failure can return to Off.
-  const [pendingDays, setPendingDays] = useState<number | null>(null);
-  const pendingSubmission = useRef<object | null>(null);
-  const selectOpen = useRef(false);
-  const committing = useRef(false);
+  const [draft, setDraft] = useState(String(value ?? DEFAULT_RETENTION_DAYS));
   const [savedValue, setSavedValue] = useState(value);
+  const edited = useRef(false);
+  const menuOpen = useRef(false);
+  const pending = useRef<{ days: number | null } | null>(null);
+  const [submitted, setSubmitted] = useState<{ days: number | null } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const row = useRef<HTMLDivElement>(null);
   if (savedValue !== value) {
     setSavedValue(value);
-    setDraft(null);
-    setPendingDays(null);
-    if (value === null) setCustomRequested(false);
+    setSubmitted(null);
+    setDraft(String(value ?? DEFAULT_RETENTION_DAYS));
   }
-  const custom = customRequested || (value !== null && !isPreset);
-  const selected = custom ? "custom" : value === null ? "off" : String(value);
-  const savedDays = value ?? pendingDays;
-  const shown = draft ?? String(savedDays ?? DEFAULT_RETENTION_DAYS);
-
-  const discardDraft = () => {
-    setDraft(null);
-    setPendingDays(null);
-    pendingSubmission.current = null;
-  };
-
-  const commit = (text: string) => {
-    setDraft(null);
-    const days = Number(text);
-    if (
-      text.trim() === "" ||
-      !Number.isInteger(days) ||
-      days < minimum ||
-      days > MAX_RETENTION_DAYS ||
-      days === savedDays
-    ) {
-      return;
-    }
-    if (value !== null) {
-      onChange(days, () => {});
-      return;
-    }
-    const submission = {};
-    pendingSubmission.current = submission;
-    setPendingDays(days);
+  const currentValue = submitted ? submitted.days : value;
+  const isPreset =
+    currentValue !== null && (RETENTION_PRESET_DAYS as readonly number[]).includes(currentValue);
+  const custom = customRequested || (currentValue !== null && !isPreset);
+  const selected = custom ? "custom" : currentValue === null ? "off" : String(currentValue);
+  const save = (days: number | null) => {
+    edited.current = false;
+    const submission = { days };
+    pending.current = submission;
+    setSubmitted(submission);
     onChange(days, () => {
-      if (pendingSubmission.current !== submission) return;
-      pendingSubmission.current = null;
-      setPendingDays(null);
-      setCustomRequested(false);
+      if (pending.current !== submission) return;
+      pending.current = null;
+      setSubmitted(null);
+      setDraft(String(value ?? DEFAULT_RETENTION_DAYS));
+      if (value === null) setCustomRequested(false);
     });
   };
-
+  const commit = () => {
+    const parsed = Number(draft);
+    edited.current = false;
+    if (
+      draft.trim() !== "" &&
+      Number.isInteger(parsed) &&
+      parsed >= minimum &&
+      parsed <= MAX_RETENTION_DAYS
+    ) {
+      setDraft(String(parsed));
+      if (parsed !== currentValue) save(parsed);
+    } else setDraft(String(currentValue ?? DEFAULT_RETENTION_DAYS));
+  };
   return (
     <div
+      ref={row}
       className="flex items-center gap-2"
       onBlur={(event) => {
-        // Focus moving to this row's select (or its open list) holds the draft, so choosing
-        // Off or a preset never saves an edited age first.
-        if (event.currentTarget.contains(event.relatedTarget) || selectOpen.current) return;
-        // Enter commits even an untouched draft; leaving one untouched discards it.
-        const text = draft ?? (committing.current ? shown : null);
-        committing.current = false;
-        if (text !== null) commit(text);
-        else if (value === null && pendingDays === null) setCustomRequested(false);
+        if (menuOpen.current || event.currentTarget.contains(event.relatedTarget)) return;
+        if (edited.current) commit();
+        else if (value === null && pending.current === null) setCustomRequested(false);
       }}
     >
       <Select
         value={selected}
         onOpenChange={(open) => {
-          selectOpen.current = open;
+          menuOpen.current = open;
         }}
         onValueChange={(next) => {
-          if (next === "custom") {
-            setCustomRequested(true);
-            return;
-          }
-          discardDraft();
-          setCustomRequested(false);
+          edited.current = false;
           if (next === "off") {
-            if (value !== null) onChange(null, () => {});
+            setCustomRequested(false);
+            if (currentValue !== null) save(null);
+          } else if (next === "custom") {
+            setCustomRequested(true);
+            setDraft(String(value ?? DEFAULT_RETENTION_DAYS));
           } else if (next !== null) {
-            onChange(Number(next), () => {});
+            setCustomRequested(false);
+            save(Number(next));
           }
         }}
       >
@@ -236,7 +222,11 @@ function RetentionControl({
                 : formatRetentionDays(Number(selected))}
           </SelectValue>
         </SelectTrigger>
-        <SelectPopup align="end" alignItemWithTrigger={false}>
+        <SelectPopup
+          align="end"
+          alignItemWithTrigger={false}
+          finalFocus={custom ? input : undefined}
+        >
           <SelectItem value="off">Off</SelectItem>
           {RETENTION_PRESET_DAYS.map((days) => (
             <SelectItem key={days} value={String(days)}>
@@ -249,24 +239,29 @@ function RetentionControl({
       {custom ? (
         <InputGroup className="w-24">
           <InputGroupInput
+            ref={input}
+            autoFocus
             size="settings"
             type="number"
             min={minimum}
             max={MAX_RETENTION_DAYS}
-            value={shown}
+            value={draft}
             aria-label={`${label} in days`}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              edited.current = true;
+              setDraft(event.target.value);
+            }}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing || event.keyCode === 229) return;
               if (event.key === "Enter") {
-                committing.current = true;
+                commit();
                 event.currentTarget.blur();
-              } else if (event.key === "Escape" && (draft !== null || savedDays === null)) {
-                // An unhandled Escape closes the settings page.
+              } else if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
-                setDraft(null);
-                if (savedDays === null) setCustomRequested(false);
+                edited.current = false;
+                setDraft(String(value ?? DEFAULT_RETENTION_DAYS));
+                if (value === null) setCustomRequested(false);
               }
             }}
           />

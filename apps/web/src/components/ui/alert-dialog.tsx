@@ -54,7 +54,6 @@ function AlertDialogPopup({
   className,
   bottomStickOnMobile = true,
   portalContainer,
-  initialFocus: requestedInitialFocus,
   ...props
 }: AlertDialogPrimitive.Popup.Props & {
   bottomStickOnMobile?: boolean;
@@ -62,7 +61,7 @@ function AlertDialogPopup({
 }) {
   const defaultId = useId();
   const popupId = props.id ?? defaultId;
-  const { popupRef, initialFocus } = useDialogActionInitialFocus(requestedInitialFocus);
+  const { popupRef, initialFocus } = useDialogActionInitialFocus();
   const popup = useRender({
     ref: popupRef,
     render: (

@@ -37,6 +37,7 @@ export function BotModelPickerRouteScreen({
     <ThreadSettingsPickerScreen
       environmentId={environmentId}
       projectId={null}
+      cwd={null}
       providerGroups={providerGroups}
       selectedModel={selection}
       prompt=""

@@ -1,5 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
-import { PanelTabActions, PanelTabBreadcrumb, useInPanelTabBar } from "./PanelTabBreadcrumb";
+import {
+  PanelTabActions,
+  PanelTabBreadcrumb,
+  useInPanelTabBar,
+  usePanelTabBreadcrumbOnBar,
+} from "./PanelTabBreadcrumb";
 import type { FileDiffContentsLoader, FileDiffMetadata } from "@pierre/diffs";
 import {
   isAtomCommandInterrupted,
@@ -28,6 +33,7 @@ import {
 import * as Schema from "effect/Schema";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useCodeViewFileReveal } from "./diffs/useCodeViewFileReveal";
+import { useCodeViewScrollRestore } from "./diffs/useCodeViewScrollRestore";
 import { useFilesystemReadAccess } from "~/state/filesystem";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { useFileContextMenuHandler } from "../fileContextMenu";
@@ -73,7 +79,7 @@ import { formatRelativeTimeLabel, formatShortTimestamp } from "../timestampForma
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { PanelEmptyState } from "./PanelEmptyState";
-import { AnnotatableCodeView } from "./diffs/AnnotatableCodeView";
+import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
 import { FileExplorerPane } from "./files/FileExplorerPane";
 import { DiffViewControls } from "./diffs/DiffViewControls";
@@ -262,6 +268,8 @@ export default function DiffPanel({
     wordWrap: settings.wordWrap,
   }));
   const inPanelTabBar = useInPanelTabBar();
+  // On the pane's bar the breadcrumb also shares the row with the pane's tabs.
+  const crumbOnBar = usePanelTabBreadcrumbOnBar();
   const diffLayout = settings.diffLayout;
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const diffIgnoreWhitespace =
@@ -746,12 +754,27 @@ export default function DiffPanel({
   const allDiffFilesCollapsed = areAllDiffFilesCollapsed(shownFileKeys, collapsedDiffFileKeys);
   const fileTreeEntries = diffFileTreeEntries(renderableFiles.filter(isFileShown));
   const codeViewReveal = useCodeViewFileReveal();
+  // Lazy files that sat above the saved position load again only when asked for.
+  const codeViewScroll = useCodeViewScrollRestore(
+    collapseScopeKey,
+    !isRefreshingDiff && remainingFileCount === 0,
+    remainingFileCount > 0 ? loadNextFiles : null,
+  );
+  const attachCodeView = useStableCallback((handle: AnnotatableCodeViewHandle | null) => {
+    codeViewScroll.attach(handle);
+    codeViewReveal.attach(handle);
+  });
+  const flushCodeView = useStableCallback(() => {
+    codeViewScroll.flush();
+    codeViewReveal.flush();
+  });
   const revealDiffFile = (filePath: string) => {
     const index = renderableFileEntries.findIndex(
       (candidate) => resolveFileDiffPath(candidate.fileDiff) === filePath,
     );
     const file = renderableFileEntries[index];
     if (!file) return false;
+    codeViewScroll.discard();
     updateCollapsedDiffFiles((current) => {
       const next = new Set(current);
       next.delete(file.fileKey);
@@ -828,6 +851,7 @@ export default function DiffPanel({
   });
 
   const toggleDiffFileCollapse = () => {
+    codeViewScroll.discard();
     setCodeViewRevision((current) => current + 1);
     updateCollapsedDiffFiles((current) => toggleAllDiffFiles(shownFileKeys, current));
   };
@@ -874,9 +898,8 @@ export default function DiffPanel({
   // Keep the comparison picker reachable even when the labels truncate.
   const crowdedTab =
     inPanelTabBar &&
-    selectedRunId === null &&
-    selectedGitScope === "branch" &&
-    !!selectedGitSource?.baseRef;
+    (crumbOnBar ||
+      (selectedRunId === null && selectedGitScope === "branch" && !!selectedGitSource?.baseRef));
   const scopeCrumb = (
     <PanelTabBreadcrumb>
       <span className="flex min-w-0 items-center gap-3">
@@ -1190,8 +1213,8 @@ export default function DiffPanel({
         wordWrap={wordWrap}
         onWordWrapChange={setWordWrap}
         ignoreWhitespace={diffIgnoreWhitespace}
-        onIgnoreWhitespaceChange={(ignore) =>
-          useDiffPanelSessionStore.getState().setIgnoreWhitespace(ignore)
+        onIgnoreWhitespaceChange={(value) =>
+          useDiffPanelSessionStore.getState().setIgnoreWhitespace(value)
         }
         hasFiles={diffFileKeys.length > 0}
         testFileCount={testFileCount}
@@ -1416,7 +1439,8 @@ export default function DiffPanel({
                     key={collapseScopeKey ?? reviewSectionId}
                     environmentId={activeThread?.environmentId}
                     projectId={activeThread?.projectId}
-                    viewerRef={codeViewReveal.attach}
+                    viewerRef={attachCodeView}
+                    onScroll={codeViewScroll.onScroll}
                     codeViewKey={codeViewMountKey}
                     className="h-full min-h-0 overflow-auto"
                     files={codeViewFiles}
@@ -1480,7 +1504,7 @@ export default function DiffPanel({
                       preferredHighlighter: PREFERRED_HIGHLIGHTER,
                       themeType: resolvedTheme as DiffThemeType,
                       stickyHeaders: true,
-                      onPostRender: codeViewReveal.flush,
+                      onPostRender: flushCodeView,
                       ...(currentLoadDiffFiles ? { loadDiffFiles } : {}),
                     }}
                   />

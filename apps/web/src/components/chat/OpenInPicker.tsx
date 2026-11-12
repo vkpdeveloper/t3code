@@ -299,11 +299,18 @@ export const OpenInPicker = memo(function OpenInPicker({
     });
   };
 
+  const unavailableReason =
+    remote.mode === "remote-unavailable"
+      ? `No SSH route to ${environmentLabel}`
+      : remote.mode === "remote-links" && options.length === 0
+        ? `Open from a computer to edit on ${environmentLabel}`
+        : null;
+
   const editorItems = (
     <>
-      {remote.mode === "remote-unavailable" ? (
+      {unavailableReason !== null ? (
         <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-          No SSH route to {environmentLabel}
+          {unavailableReason}
         </MenuItem>
       ) : (
         <>
@@ -409,12 +416,19 @@ export const OpenInPicker = memo(function OpenInPicker({
           <TooltipPopup>{primaryLabel}</TooltipPopup>
         </Tooltip>
         <Menu open={menuOpen} onOpenChange={setMenuOpen}>
-          <MenuTrigger
-            disabled={isHostEditorDenied}
-            render={<ThreadDetailsControl part="icon" aria-label="Choose editor" />}
-          >
-            <ChevronDownIcon />
-          </MenuTrigger>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <MenuTrigger
+                  disabled={isHostEditorDenied}
+                  render={<ThreadDetailsControl part="icon" aria-label="Choose editor" />}
+                />
+              }
+            >
+              <ChevronDownIcon />
+            </TooltipTrigger>
+            <TooltipPopup>Choose editor</TooltipPopup>
+          </Tooltip>
           <MenuPopup side="bottom" align="end">
             {editorItems}
           </MenuPopup>
@@ -423,56 +437,74 @@ export const OpenInPicker = memo(function OpenInPicker({
     );
   }
 
+  const primaryControlLabel = compact ? "Open file in preferred editor" : primaryLabel;
   return (
     <ActionGroup
       aria-label="Open in editor"
       role="group"
       {...(ghost ? { className: "flex shrink-0 items-center gap-0.5" } : {})}
     >
-      <ThreadDetailsControl
-        aria-label={compact ? "Open file in preferred editor" : primaryLabel}
-        size={ghost ? "icon-sm" : "xs"}
-        variant={ghost ? "ghost" : "secondary"}
-        panel={false}
-        disabled={!preferredEditor || !openInCwd || !canOpenEditor}
-        {...(enableShortcut && (focused || related) && !backgroundThread
-          ? { [OPEN_FAVORITE_EDITOR_ATTRIBUTE]: "" }
-          : {})}
-        onClick={handleOpenPreferredEditor}
-      >
-        {primaryOption?.Icon ? (
-          <primaryOption.Icon
-            aria-hidden="true"
-            className={cn("size-3.5", getOpenInIconClass(primaryOption.kind))}
-          />
-        ) : null}
-        <span
-          className={
-            compact
-              ? "sr-only"
-              : "sr-only @4xl/header-actions:not-sr-only @4xl/header-actions:ml-0.5"
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ThreadDetailsControl
+              aria-label={primaryControlLabel}
+              // Tooltip replaces the button data-slot, so toolbar theming needs a separate hook.
+              data-toolbar-control=""
+              size={ghost ? "icon-sm" : "xs"}
+              variant={ghost ? "ghost" : "secondary"}
+              panel={false}
+              disabled={!preferredEditor || !openInCwd || !canOpenEditor}
+              {...(enableShortcut && (focused || related) && !backgroundThread
+                ? { [OPEN_FAVORITE_EDITOR_ATTRIBUTE]: "" }
+                : {})}
+              onClick={handleOpenPreferredEditor}
+            />
           }
         >
-          {primaryLabel}
-        </span>
-      </ThreadDetailsControl>
+          {primaryOption?.Icon ? (
+            <primaryOption.Icon
+              aria-hidden="true"
+              className={cn("size-3.5", getOpenInIconClass(primaryOption.kind))}
+            />
+          ) : null}
+          <span
+            className={
+              compact
+                ? "sr-only"
+                : "sr-only @4xl/header-actions:not-sr-only @4xl/header-actions:ml-0.5"
+            }
+          >
+            {primaryLabel}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{primaryControlLabel}</TooltipPopup>
+      </Tooltip>
       {ghost ? null : (
         <GroupSeparator {...(!compact ? { className: "hidden @4xl/header-actions:block" } : {})} />
       )}
       <Menu open={menuOpen} onOpenChange={setMenuOpen}>
-        <MenuTrigger
-          disabled={isHostEditorDenied}
-          render={
-            <ThreadDetailsControl
-              aria-label="Choose editor"
-              size={ghost ? "icon-sm" : "icon-xs"}
-              variant={ghost ? "ghost" : "secondary"}
-              panel={false}
-            />
-          }
-        >
-          <ChevronDownIcon aria-hidden="true" className={ghost ? "size-3.5" : "size-4"} />
-        </MenuTrigger>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                disabled={isHostEditorDenied}
+                render={
+                  <ThreadDetailsControl
+                    aria-label="Choose editor"
+                    data-toolbar-control=""
+                    size={ghost ? "icon-sm" : "icon-xs"}
+                    variant={ghost ? "ghost" : "secondary"}
+                    panel={false}
+                  />
+                }
+              />
+            }
+          >
+            <ChevronDownIcon aria-hidden="true" className={ghost ? "size-3.5" : "size-4"} />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Choose editor</TooltipPopup>
+        </Tooltip>
         <MenuPopup align="end" className="min-w-60">
           <MenuGroup>
             <MenuGroupLabel>Open in…</MenuGroupLabel>

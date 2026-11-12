@@ -118,7 +118,7 @@ export function PullRequestCommentForm({
         // Lock while posting because success clears the draft.
         disabled={locked}
         readOnly={speech.freezesEditor}
-        value={body}
+        value={speech.displayText}
         rows={3}
         placeholder="Leave a comment"
         aria-label={`Comment on this ${sourceControlClients.get(detail.provider).changeRequest.singular}`}
@@ -138,9 +138,7 @@ export function PullRequestCommentForm({
         }}
       />
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <div className="mr-auto flex min-w-0 flex-wrap items-center gap-1">
-          <TextFieldSpeechControls speech={speech} disabled={locked} />
-        </div>
+        <TextFieldSpeechControls speech={speech} disabled={locked} />
         {followUpAction === null ? null : (
           <Button
             size="xs"

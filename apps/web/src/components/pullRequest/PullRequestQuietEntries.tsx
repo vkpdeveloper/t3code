@@ -145,7 +145,6 @@ export function PullRequestResolvedThreadRow({
   defaultOpen = false,
 }: {
   defaultOpen?: boolean;
-  /** Null for a thread on the whole change request, such as a GitLab overview thread. */
   path: string | null;
   line: number | null | undefined;
   outdated: boolean;
@@ -171,9 +170,7 @@ export function PullRequestResolvedThreadRow({
           ) : (
             <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success-foreground" />
           )}
-          <span className={cn("min-w-0 flex-1 truncate", path !== null && "font-mono")}>
-            {label}
-          </span>
+          <span className="min-w-0 flex-1 truncate font-mono">{label}</span>
           {outdated ? <span className="shrink-0">Outdated</span> : null}
           <span className="shrink-0">{comments}</span>
           <ChevronDownIcon

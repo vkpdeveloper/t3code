@@ -3,13 +3,10 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  closeLayoutTab,
-  closedLayoutTabIds,
   createLayoutState,
   ghostLoneLayoutChats,
   layoutChatSwaps,
   moveLayoutTab,
-  moveLayoutTabToNewWorkspace,
   moveLayoutTabToWorkspace,
   openLayoutGhostChat,
   openLayoutKeptTab,
@@ -21,10 +18,7 @@ import {
   selectFocusedTab,
   selectFocusedWorkspace,
   selectLayoutPaneSlots,
-  selectLayoutStripSize,
-  shareLayoutBeside,
   showLayoutContent,
-  THREAD_TERMINAL_SURFACE_ID,
   type LayoutState,
   type LayoutTab,
   type LayoutTabContent,
@@ -37,7 +31,6 @@ import type { LayoutWhenNoRoom } from "./layoutBehavior";
 const environmentId = EnvironmentId.make("local");
 const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
 const chat: LayoutTabContent = { kind: "chat", target: { kind: "server", threadRef } };
-const otherRef = scopeThreadRef(environmentId, ThreadId.make("other"));
 const diff: LayoutTabContent = { kind: "surface", threadRef, surfaceId: "diff" };
 const next: LayoutTabContent = {
   kind: "chat",
@@ -534,38 +527,6 @@ describe("resizeLayoutColumnEdge", () => {
   });
 });
 
-describe("selectLayoutStripSize", () => {
-  it("gives the strip width the slots are drawn at, for any viewport width", () => {
-    const workspaces = [
-      { cameraWidth: null, widths: [1] },
-      { cameraWidth: null, widths: [0.66, 0.34] },
-      { cameraWidth: null, widths: [0.5, 0.5, 0.5] },
-      { cameraWidth: 1650, widths: [0.66, 0.34] },
-      { cameraWidth: 1490, widths: [0.4, 0.3, 0.3] },
-      { cameraWidth: 1200, widths: [0.5, 0.55] },
-      { cameraWidth: 1400, widths: [0.4, 0.4] },
-      { cameraWidth: 900, widths: [1] },
-    ];
-    const modes: LayoutWhenNoRoom[] = ["shrink-then-scroll", "always-scroll", "always-shrink"];
-    for (const { cameraWidth, widths } of workspaces) {
-      const workspace = {
-        id: "workspace",
-        name: null,
-        focusedPaneId: null,
-        cameraWidth,
-        columns: widths.map((width, index) => column(`c${index}`, width)),
-      };
-      for (const whenNoRoom of modes) {
-        const { share, minPx } = selectLayoutStripSize(workspace, whenNoRoom);
-        for (let width = 700; width <= 2200; width += 25) {
-          const { stripWidth } = selectLayoutPaneSlots(workspace, { width, whenNoRoom });
-          expect(Math.max(share * width, minPx)).toBeCloseTo(stripWidth * width, 6);
-        }
-      }
-    }
-  });
-});
-
 describe("moveLayoutTabToWorkspace", () => {
   it("moves the top workspace's tab into a new workspace above it", () => {
     const first = chatFor("first");
@@ -581,96 +542,5 @@ describe("moveLayoutTabToWorkspace", () => {
     expect(tabContents(moved)).toEqual([[second], [first], []]);
     expect(selectFocusedWorkspace(moved)).toBe(moved.workspaces[0]);
     expect(selectFocusedTab(moved)?.content).toBe(second);
-  });
-});
-
-describe("moveLayoutTab", () => {
-  it("gives a pane's height back to the pane in its column it moves into", () => {
-    const base: LayoutState = {
-      focusedWorkspaceId: "workspace",
-      workspaces: [
-        {
-          id: "workspace",
-          name: null,
-          focusedPaneId: "chat-pane",
-          cameraWidth: 1200,
-          columns: [
-            {
-              id: "column",
-              width: 1,
-              panes: [
-                {
-                  id: "chat-pane",
-                  size: 0.55,
-                  activeTabId: "chat",
-                  tabs: [
-                    {
-                      id: "chat",
-                      content: { kind: "chat", target: { kind: "server", threadRef } },
-                    },
-                    {
-                      id: "terminal",
-                      content: {
-                        kind: "surface",
-                        threadRef,
-                        surfaceId: THREAD_TERMINAL_SURFACE_ID,
-                      },
-                    },
-                  ],
-                },
-                {
-                  id: "other-pane",
-                  size: 0.45,
-                  activeTabId: "other-terminal",
-                  tabs: [
-                    {
-                      id: "other-terminal",
-                      content: {
-                        kind: "surface",
-                        threadRef: otherRef,
-                        surfaceId: THREAD_TERMINAL_SURFACE_ID,
-                      },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    };
-    const shown = shareLayoutBeside(
-      moveLayoutTab(base, "terminal", { kind: "split", paneId: "chat-pane", side: "down" }),
-      "terminal",
-      "chat",
-      "terminal",
-      1 / 3,
-      "shrink-then-scroll",
-      0,
-    );
-    const hidden = moveLayoutTab(shown, "terminal", {
-      kind: "pane",
-      paneId: "chat-pane",
-      index: 1,
-    });
-    const sizes = hidden.workspaces[0]!.columns[0]!.panes.map((pane) => [pane.id, pane.size]);
-    expect(sizes).toEqual([
-      ["chat-pane", expect.closeTo(0.55)],
-      ["other-pane", expect.closeTo(0.45)],
-    ]);
-  });
-});
-
-describe("closedLayoutTabIds", () => {
-  it("lists a tab that left the layout, not one that moved to another workspace", () => {
-    const layout = openLayoutTab(openLayoutTab(createLayoutState(), chat), diff, {
-      placement: "new-column",
-    });
-    const diffTabId = selectFocusedTab(layout)!.id;
-
-    expect(closedLayoutTabIds(layout, closeLayoutTab(layout, diffTabId))).toEqual([diffTabId]);
-    expect(closedLayoutTabIds(layout, moveLayoutTabToNewWorkspace(layout, diffTabId, 1))).toEqual(
-      [],
-    );
   });
 });

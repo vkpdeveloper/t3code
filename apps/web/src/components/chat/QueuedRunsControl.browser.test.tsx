@@ -19,8 +19,17 @@ vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importO
 vi.mock(import("../../state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
   useThreadProjection: (() => state.projection) as never,
-  useQuietThreadShell: ((target: unknown) =>
-    target === null ? null : { title: "Release lead" }) as never,
+  // The linked environment is connected, but its thread is not in the loaded shell.
+  useQuietThreadShell: ((target: { readonly environmentId: string } | null) =>
+    target === null || target.environmentId === "environment:linked"
+      ? null
+      : { title: "Release lead" }) as never,
+}));
+
+vi.mock(import("../../state/environments"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  useEnvironment: ((environmentId: string | null) =>
+    environmentId === "environment:linked" ? { environmentId } : null) as never,
 }));
 
 vi.mock(import("../../state/query"), async (importOriginal) => ({
@@ -61,6 +70,7 @@ const baseProps = {
   onCancelEdit: () => undefined,
   timestampFormat: "locale",
   onOpenThread: () => undefined,
+  onRemovePending: () => undefined,
 } satisfies ComponentProps<typeof QueuedRunsControl>;
 
 async function renderQueue(props: Partial<ComponentProps<typeof QueuedRunsControl>> = {}) {
@@ -144,6 +154,19 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
         },
       ],
       [
+        "run:linked",
+        "Linked review finished.",
+        {
+          createdBy: "agent",
+          creationSource: "mcp",
+          linkedSender: {
+            environmentId: "environment:linked",
+            threadId: "thread:linked-lead",
+            title: "Title when sent",
+          },
+        },
+      ],
+      [
         "run:server",
         "Continue where you left off.",
         {
@@ -160,6 +183,8 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   };
   const onOpenThread = vi.fn();
   await using _screen = await renderQueue({ onOpenThread });
+  // Four rows collapse the queue.
+  await page.getByRole("button", { name: "Show all 4 queued" }).click();
 
   const automation = page.getByRole("button", { name: /PR dispatcher/ });
   await expect.element(automation).toHaveAttribute("aria-expanded", "false");
@@ -169,8 +194,12 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   await expect.element(page.getByRole("link", { name: "Open automation" })).toBeInTheDocument();
 
   await expect.element(page.getByRole("button", { name: /Release lead/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).click({ force: true });
-  expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead");
+  await page.getByRole("button", { name: "Open thread" }).nth(0).click({ force: true });
+  expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
+  // A sender in a connected linked environment keeps the title it sent and opens there.
+  await expect.element(page.getByRole("button", { name: /Title when sent/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open thread" }).nth(1).click({ force: true });
+  expect(onOpenThread).toHaveBeenLastCalledWith("thread:linked-lead", "environment:linked");
 
   await expect.element(page.getByText("Sent by T3 Code")).toBeVisible();
   await expect.element(page.getByText("Continue where you left off.")).toBeVisible();
@@ -240,4 +269,34 @@ it("stays inside the timeline scroller instead of growing the chat column", asyn
   await expect.element(page.getByText("Later", { exact: true })).toBeInTheDocument();
   const column = screen.getByTestId("column").element();
   expect(column.scrollHeight).toBe(column.clientHeight);
+});
+
+it("lets a message that is still saving be removed, on the same fill as a saved one", async () => {
+  setup();
+  state.projection = { projection: { messages: [] } };
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:saved", userMessageId: "message:saved" },
+        text: "Saved",
+        attachments: [],
+      },
+    ],
+  };
+  const onRemovePending = vi.fn();
+  await using screen = await renderQueue({
+    optimisticMessages: [
+      { id: MessageId.make("message:saving"), inputIntent: "queued_turn", text: "Saving one" },
+    ],
+    onRemovePending,
+  });
+
+  const [saved, saving] = screen.getByRole("listitem").elements();
+  expect(getComputedStyle(saving!).backgroundColor).toBe(getComputedStyle(saved!).backgroundColor);
+  const remove = screen.getByRole("button", { name: "Remove queued message" }).nth(1);
+  await expect.element(remove).toBeEnabled();
+  await remove.click();
+  expect(onRemovePending).toHaveBeenCalledExactlyOnceWith("message:saving");
 });

@@ -9,7 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useLocation, useRouter, type AnyRouter } from "@tanstack/react-router";
+import { useLocation, useParams, useRouter, type AnyRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react";
 
 import { moveWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
@@ -55,6 +55,7 @@ import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import BotsSidebar from "./bots/BotsSidebar";
 import ThreadSidebar from "./Sidebar";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
+import { resolveThreadRouteTarget } from "../threadRoutes";
 import { selectFocusedTab } from "../layout/layoutModel";
 import { useLayoutStore } from "../layout/layoutStore";
 import { isLayoutDragActive } from "../layout/layoutDrag";
@@ -78,6 +79,7 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useMobileSidebarSheetMounted,
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
@@ -347,7 +349,8 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
   const router = useRouter();
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar, isMobile, mobileSheetMounted } = useSidebar();
+  const { toggleSidebar } = useSidebar();
+  const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
@@ -421,7 +424,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       ref={appShellCommandsRef}
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
-        isMobile && mobileSheetMounted && "hidden",
+        mobileSidebarSheetMounted && "hidden",
       )}
       // Sits on the window chrome, so it takes the black chrome tokens too.
       data-chrome-scope=""
@@ -537,6 +540,15 @@ export function AppSidebarLayout({
     usePanelAnimationSettings();
   const pathname = useLocation({ select: (location) => location.pathname });
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
+  // Each chat suppresses its own panels (SurfaceHost). React propagates a context change past
+  // nested providers, so a flip here on a chat switch would re-render every mounted chat twice.
+  const onChatRoute = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params) !== null,
+  });
+  const pagePanelAnimationsSuppressed = usePanelNavigationSuppression(
+    onChatRoute ? "chat" : pathname,
+  );
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
   const isOnDesignSystem =
     DesignSystemSidebarNav !== null &&
@@ -617,7 +629,7 @@ export function AppSidebarLayout({
   }, [isMacosDesktop, windowControlsHidden]);
 
   return (
-    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
+    <PanelAnimationSuppressionProvider value={pagePanelAnimationsSuppressed}>
       <div
         className={cn(
           "contents",

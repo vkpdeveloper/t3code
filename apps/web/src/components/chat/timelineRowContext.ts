@@ -1,6 +1,7 @@
 import type { ToolCallDiffTarget } from "../../diffPanelStore";
 import {
   type ProviderApprovalDecision,
+  type ResponseContextRecord,
   type RuntimeRequestId,
   type WorktreeSetupSnapshot,
   type EnvironmentId,
@@ -48,6 +49,8 @@ export interface TimelineRowSharedState {
     | ((requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => Promise<unknown>)
     | undefined;
   citationRequest: AssistantCitationTarget | null;
+  /** Absent hides "Reply", as in the guest view. */
+  onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
@@ -76,7 +79,10 @@ export interface TimelineRowSharedState {
   renderHtmlRender: ((row: Extract<TimelineRow, { kind: "html-render" }>) => ReactNode) | undefined;
   /** Unset, expanded rows read detail and command output from the environment. */
   turnItemSource: TurnItemSource | undefined;
-  onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
+  onOpenThread: (
+    threadId: OrchestrationV2TurnItem["threadId"],
+    environmentId?: EnvironmentId,
+  ) => void;
   workflowOpening: WorkflowOpening | null;
   /** Absent hides "Fork from this response", as in the guest view. */
   onForkFromRun:
@@ -96,8 +102,7 @@ export interface TimelineRowSharedState {
   onWorktreeSetupWorkLocally: (() => void) | null;
   onOpenWorktreeSetupTerminal: ((terminalId: string) => void) | null;
   onToggleWorkingHistory: (key: string) => void;
-  onWorkingHistoryMoving: (moving: boolean) => void;
-  onWorkingHistorySettled: () => void;
+  onWorkingHistoryCollapsing: (collapsing: boolean) => void;
   onFocusComposer: (() => void) | null;
   workGroupViewState: WorkGroupViewState;
 }
@@ -110,6 +115,7 @@ export interface TimelineRowActivityState {
   activeTurnStartedAt: string | null;
   awaitingUser: boolean;
   isPreparingWorktree: boolean;
+  providerStartingLabel: string | null;
   /** The setup card is on screen with its own header, so the working row steps aside. */
   worktreeSetupCardOwnsHeader: boolean;
   latestRunId: RunId | null;
@@ -148,6 +154,17 @@ export type TimelineWorkEntry = Extract<
 
 export type TimelineRow = MessagesTimelineRow;
 
+export function useInitialOutputReady(pending: boolean, onReady: (() => void) | undefined) {
+  const notified = useRef(false);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reveals a disclosure after its first async output commits
+  useEffect(() => {
+    if (!pending && !notified.current) {
+      notified.current = true;
+      onReady?.();
+    }
+  }, [pending, onReady]);
+}
+
 /** The latest run stopped at a usage limit; its fold offers to snooze until the reset. */
 export interface TimelineUsageLimit {
   readonly runId: RunId;
@@ -161,15 +178,4 @@ export interface TimelinePendingRequest {
   readonly label: string;
   readonly createdAt: string;
   readonly blocking?: boolean;
-}
-
-export function useInitialOutputReady(pending: boolean, onReady: (() => void) | undefined) {
-  const notified = useRef(false);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reveals a disclosure after its first async output commits
-  useEffect(() => {
-    if (!pending && !notified.current) {
-      notified.current = true;
-      onReady?.();
-    }
-  }, [pending, onReady]);
 }

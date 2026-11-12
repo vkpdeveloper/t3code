@@ -111,14 +111,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-control-gap: 0.5rem;
   --sidebar-icon-color: var(--contrast-sidebar-muted-foreground);
   --sidebar-row-content-inset: 0.625rem;
-  /* Align inset sidebar controls with the row's leading icon. The window
-     navigation uses its own edge inset (pen Pk2BE). */
-  --sidebar-icon-control-inset: calc(
-    var(--sidebar-row-content-inset) + 0.5rem - var(--workspace-titlebar-control-size) / 2
-  );
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
-  --floating-content-inset: 0.75rem;
   /* App layer order: the bottom terminal drawer (45, above the timeline minimap),
      docked sheets, then the floating preview player (47–49, see
      previewMiniPlayerLayout.ts), then dialogs and popovers (50 and up). */
@@ -248,7 +242,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    The block runs from the pane's edge to 16px past its children, with a
    concave 16px corner at its foot and the pane's convex 16px corner on its
    rising edge. Static paint only; below md the pane is full-bleed and there
-   is no notch. */
+   is no notch. Only light, black chrome and the modal pane draw it; elsewhere
+   the pane's tabs sit on a bar (the connected tabs, further down). */
 @media (width >= 48rem) {
   [data-app-modal-pane] {
     --workspace-topbar-height: var(--workspace-pane-header-height);
@@ -256,7 +251,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --pane-header-overlap: var(--pane-notch-height);
   }
 
-  [data-slot="sidebar"][data-variant="inset"] ~ [data-slot="sidebar-inset"],
+  .black-chrome [data-slot="sidebar"][data-variant="inset"] ~ [data-slot="sidebar-inset"],
   [data-app-modal-pane] {
     /* The strip and both curves share the chrome's color and texture. */
     & [data-pane-notch]::before,
@@ -389,7 +384,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 /* Over the channel art the notch shapes repaint the art, fixed to the
    viewport so they line up with ChromeChannelArt. The same curve masks apply. */
 @media (width >= 48rem) {
-  [data-chrome-art] [data-slot="sidebar"][data-variant="inset"] ~ [data-slot="sidebar-inset"] {
+  .black-chrome
+    [data-chrome-art]
+    [data-slot="sidebar"][data-variant="inset"]
+    ~ [data-slot="sidebar-inset"] {
     & [data-pane-notch]::before,
     & [data-pane-notches-merged]::before,
     & [data-pane-notch]::after,
@@ -534,8 +532,15 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       & [data-layout-pane-id][data-pane-notched] > [data-pane-cut$="notch"] {
         display: flex;
         top: calc(anchor(--pane-notch top) + var(--pane-notch-height));
-        right: calc(anchor(--pane-notch right) + 1rem);
       }
+    }
+
+    .black-chrome
+      [data-slot="sidebar"][data-variant="inset"]
+      ~ [data-slot="sidebar-inset"]
+      [data-layout-pane-id][data-pane-notched]
+      > [data-pane-cut="end-notch"] {
+      right: calc(anchor(--pane-notch right) + 1rem);
     }
   }
 }
@@ -592,6 +597,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     ~ [data-slot="sidebar-inset"]
     [data-floating-pane-header] {
     background-color: var(--background);
+    background-image: var(--surface-grain);
+    background-size: var(--surface-grain-size);
   }
 
   /* A split layout's panes square the corner under their notch too. */
@@ -1033,11 +1040,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   inherits: false;
 }
 
-/* Pads content clear of an optional floating pane header. */
-@utility pt-under-header {
-  padding-top: var(--surface-top-inset, 0px);
-}
-
 /* The overview pins its stage to the strip's box (pinOverviewFrame in
    Overview.tsx). Not inherited, so pinning restyles the stage alone and not
    every pane on it. */
@@ -1169,6 +1171,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     var(--surface-fill) border-box;
   box-shadow: var(--surface-shadow);
 }
+
+:root:is(:not([data-surface-style]), [data-surface-style="gradient-rim"])
+  :where([data-slot="select-trigger"], [data-slot="combobox-trigger"]).surface-well:not(
+    [data-surface-preview] *
+  ),
+[data-surface-preview="gradient-rim"]
+  :where([data-slot="select-trigger"], [data-slot="combobox-trigger"]).surface-well {
+  --well-fill: var(--raised-fill);
+  --well-rim: var(--raised-rim);
+  --well-shadow: var(--raised-shadow);
+
+  &:is(:hover, [data-pressed]):not([data-popup-open]) {
+    --well-fill: var(--raised-hover-fill);
+    --well-rim: var(--raised-hover-rim);
+    --well-shadow: var(--raised-hover-shadow);
+  }
+}
+
 :where([data-slot="checkbox"], [data-slot="radio"])[data-unchecked]:not([aria-invalid="true"]) {
   --surface-rim: linear-gradient(var(--muted-foreground), var(--muted-foreground));
 }
@@ -1888,6 +1908,39 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   transition: translate var(--panel-animation-duration) ease-out;
 }
 
+[data-slot="sidebar-slide-frame"] {
+  --sidebar-slide-corner: 14px;
+
+  & > [data-corner] {
+    position: absolute;
+    right: 100%;
+    width: var(--sidebar-slide-corner);
+    height: var(--sidebar-slide-corner);
+    background: inherit;
+    mask: radial-gradient(
+      circle var(--sidebar-slide-corner) at var(--sidebar-slide-corner-center),
+      transparent var(--sidebar-slide-corner),
+      #000 calc(var(--sidebar-slide-corner) + 0.5px)
+    );
+  }
+
+  & > [data-corner="top"] {
+    --sidebar-slide-corner-center: 0 100%;
+  }
+
+  & > [data-corner="bottom"] {
+    --sidebar-slide-corner-center: 0 0;
+    translate: 0 -100%;
+  }
+}
+
+[data-chrome-art] [data-slot="sidebar-slide-frame"],
+[data-chrome-art] [data-slot="sidebar-slide-frame"] > [data-corner] {
+  background: var(--chrome-art-paint);
+  background-attachment: fixed;
+  background-blend-mode: var(--chrome-art-blend, normal);
+}
+
 /* Over the art the sidebar goes transparent and its secondary text takes the
    art's tint, as alpha over the image instead of fixed grays. */
 @media (width >= 48rem) {
@@ -2459,66 +2512,6 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
       all: revert;
     }
   }
-
-  /* Pinned thread tiles: up to three a row by sidebar width, and a short last
-     row stretches to fill. Six tracks let 1, 2 or 3 tiles share any row evenly.
-     Sidebar.drag.ts reads the row height, gap, padding and
-     --sidebar-pinned-columns to project drags, so keep layout here. */
-  .sidebar-pinned-grid {
-    container: sidebar-pinned / inline-size;
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    grid-auto-rows: 2.875rem;
-    gap: 0.25rem;
-    margin-inline: 0.125rem;
-    padding-bottom: 0.5rem;
-  }
-  .sidebar-pinned-grid:empty {
-    display: none;
-  }
-  /* Inline-size containers isolate stacking; raise the group as well as its travelling tile. */
-  .sidebar-pinned-grid:has(> [data-sidebar-motion-moving], > [data-sidebar-drag-source]) {
-    z-index: 20;
-  }
-  [data-sidebar-motion-lead] {
-    position: relative;
-    z-index: 20;
-  }
-  [data-sidebar-motion-moving] [data-sidebar-row] {
-    background-color: var(--sidebar);
-    opacity: 1;
-  }
-  .sidebar-pinned-grid:has(> [data-sidebar-drag-source])
-    > :not([data-sidebar-drag-source])
-    [data-sidebar-row] {
-    background-color: var(--sidebar);
-  }
-  .sidebar-pinned-grid > * {
-    --sidebar-pinned-columns: 1;
-    grid-column: span 6;
-  }
-  @container sidebar-pinned (10rem <= width < 14rem) {
-    .sidebar-pinned-grid > * {
-      --sidebar-pinned-columns: 2;
-      grid-column: span 3;
-    }
-    .sidebar-pinned-grid > :nth-child(2n + 1):last-child {
-      grid-column: span 6;
-    }
-  }
-  @container sidebar-pinned (width >= 14rem) {
-    .sidebar-pinned-grid > * {
-      --sidebar-pinned-columns: 3;
-      grid-column: span 2;
-    }
-    .sidebar-pinned-grid > :nth-child(3n + 1):last-child {
-      grid-column: span 6;
-    }
-    .sidebar-pinned-grid > :nth-child(3n + 1):nth-last-child(2),
-    .sidebar-pinned-grid > :nth-child(3n + 1):nth-last-child(2) + * {
-      grid-column: span 3;
-    }
-  }
 }
 
 /* Safe-area inset utilities for surfaces that opt into edge-to-edge rendering.
@@ -2621,7 +2614,6 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   --message-surface: #fdfdfd;
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
-  --message-action-foreground: var(--primary-foreground);
   --message-action-hover: #090909;
   --accent: rgb(0 0 0 / 3.5%);
   --accent-foreground: var(--strong-foreground);
@@ -2641,7 +2633,6 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   --error: #f85149;
   --error-foreground: #c41008;
   --tool-error-icon: var(--error);
-  --error-surface: color-mix(in srgb, var(--error) 12%, transparent);
   --destructive: var(--error);
   --destructive-foreground: var(--error-foreground);
   /* Text and icons on a solid destructive fill. */
@@ -2742,7 +2733,6 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   --inline-code-fill: #0000000a;
   --code-header-fill: #00000003;
   --table-header-fill: #00000004;
-  --table-row-rule: #00000005;
   --composer-icon: #525252;
   --pill-icon: var(--composer-icon);
   --selection-neutral: #00000006;
@@ -2879,7 +2869,6 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   --inline-code-fill: #ffffff10;
   --code-header-fill: #ffffff05;
   --table-header-fill: #ffffff06;
-  --table-row-rule: #ffffff08;
   --composer-icon: #9e9e9e;
   --pill-icon: var(--composer-icon);
   --selection-neutral: #ffffff0a;
@@ -2928,10 +2917,7 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
 [data-app-sidebar] {
   --sidebar-thread-title-foreground: var(--app-theme-text, #18181b);
   --sidebar-shelf-foreground: var(--app-theme-sidebar-muted-foreground, #71717a);
-  --sidebar-status-done: #047857;
   --sidebar-status-input: #4f46e5;
-  --sidebar-status-approval: #b45309;
-  --sidebar-status-working: #0284c7;
   --background: var(--app-chrome-background);
   --foreground: #1c1c1c;
   --muted-foreground: #5f5f5f;
@@ -2943,37 +2929,11 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   @variant dark {
     --sidebar-thread-title-foreground: var(--app-theme-text, #f1f3f7);
     --sidebar-shelf-foreground: var(--app-theme-sidebar-muted-foreground, #a3a3a3);
-    --sidebar-status-done: #6ee7b7;
     --sidebar-status-input: #a5b4fc;
-    --sidebar-status-approval: #fcd34d;
-    --sidebar-status-working: #38bdf8;
     --foreground: #d4d4d4;
     --muted-foreground: #8a8a8a;
     --dim-foreground: #666666;
     --strong-foreground: #f0f0f0;
-  }
-}
-
-/* Modified files get a muted blue so added and deleted files lead. Built from the info token,
-   which themes do not override, so it stays blue in every theme. */
-:root {
-  --diff-modified-icon: color-mix(in srgb, var(--info-foreground) 50%, var(--muted-foreground));
-
-  @variant dark {
-    /* On black a gray mix stays as bright as the blue, so dim with transparency instead. */
-    --diff-modified-icon: color-mix(in srgb, var(--info-foreground) 65%, transparent);
-    --diff-added-icon: var(--success-foreground);
-  }
-}
-
-/* Blue-orange already spends blue on additions. Same specificity as the dark block above and
-   later, so it wins there too. */
-:root[data-diff-color-scheme="blue-orange"] {
-  --diff-modified-icon: var(--muted-foreground);
-  --diff-added-icon: initial;
-
-  @variant dark {
-    --diff-modified-icon: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 }
 
@@ -3027,12 +2987,10 @@ html[data-theme-id]:not([data-theme-id=""]) {
   --message-surface: var(--app-theme-message-surface);
   --message-foreground: var(--app-theme-message-foreground);
   --message-action: var(--app-theme-message-action);
-  --message-action-foreground: var(--app-theme-message-action-foreground);
   --message-action-hover: var(--app-theme-message-action-hover);
   --error: var(--app-theme-error);
   --error-foreground: var(--app-theme-error-foreground);
   --tool-error-icon: var(--error-foreground);
-  --error-surface: var(--app-theme-error-surface);
   --destructive: var(--error);
   --destructive-foreground: var(--error-foreground);
   --warning: var(--app-theme-warning);
@@ -3289,7 +3247,9 @@ html[data-theme-token-probe] *::after {
    roles explicit prevents the thread toolbar from falling back to the default
    dark-mode whites while preserving the same theme file across clients. */
 html[data-theme-id] [data-chat-header] {
-  background-color: var(--toolbar-background);
+  @media (width >= 48rem) {
+    background-color: var(--toolbar-background);
+  }
   color: var(--contrast-toolbar-foreground);
 }
 
@@ -3454,7 +3414,6 @@ html:root[data-theme-id="t3-code-classic"] {
      default style still reads as lit edges over lifted surfaces. */
   --hairline: var(--border);
   --divider: var(--border);
-  --table-row-rule: var(--border);
   --sidebar-row-selected-fill: linear-gradient(
     var(--sidebar-row-selected),
     var(--sidebar-row-selected)
@@ -3622,6 +3581,13 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
   --ss-none: linear-gradient(transparent, transparent);
   --ss-hover: color-mix(in srgb, var(--appearance-contrast-target) 6%, transparent);
   --ss-hover-layer: linear-gradient(var(--ss-hover), var(--ss-hover)) padding-box;
+  --ss-aqua-hue: 0;
+}
+
+/* The jelly stops lean about 16 degrees blue-ward so the default ring lands on the pen's blue.
+   A theme's own accent is turned back by that much, so the jelly keeps the accent's hue. */
+:root[data-theme-id]:not([data-theme-id=""]) {
+  --ss-aqua-hue: 16;
 }
 
 /* Style previews (Settings > Appearance > Style) paint one style inside
@@ -3846,6 +3812,12 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
   --pill-icon: #525252;
   --pill-rim: var(--composer-pill-rim, linear-gradient(180deg, #00000022, #00000003));
   --pill-shadow: var(--composer-pill-shadow, 0 1px 3px #00000011);
+}
+
+:root[data-surface-style="flat"] [data-chat-composer-compact-send] [data-variant="pill"] {
+  --button-pill-fill: var(--composer-pill-fill);
+  --button-pill-rim: var(--composer-pill-rim);
+  --button-pill-shadow: var(--composer-pill-shadow);
 }
 
 /* Flat sliders use solid tracks and thumbs; only keyboard focus adds a ring. */
@@ -4140,7 +4112,7 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
 :root[data-surface-style="aqua-blue"] > body,
 [data-surface-preview="aqua-blue"] {
   --ss-background: var(--background);
-  --ss-aqua-ring: oklch(from var(--ring) min(l, 0.55) c h) !important;
+  --ss-aqua-ring: oklch(from var(--ring) min(l, 0.55) c calc(h + var(--ss-aqua-hue))) !important;
   --lit-fill: linear-gradient(
     180deg in srgb,
     oklch(from var(--ss-aqua-ring) calc(l + 0.01) calc(c * 0.562) calc(h - 20.792)) 0%,
@@ -4204,7 +4176,7 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
 :root.dark [data-surface-preview="aqua-blue"],
 :root.black-chrome[data-surface-style="aqua-blue"] [data-chrome-scope] {
   --ss-background: oklch(from var(--background) max(l, 0.195734) c h);
-  --ss-aqua-ring: oklch(from var(--ring) min(l, 0.55) c h) !important;
+  --ss-aqua-ring: oklch(from var(--ring) min(l, 0.55) c calc(h + var(--ss-aqua-hue))) !important;
   --lit-fill: linear-gradient(
     180deg in srgb,
     oklch(from var(--ss-aqua-ring) calc(l + 0.01) calc(c * 0.562) calc(h - 20.792)) 0%,
@@ -4550,7 +4522,6 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
   --button-pill-icon: var(--pill-icon);
   --style-code-fill: var(--well-fill);
   --style-panel-fill: var(--popover-fill);
-  --style-settings-background: var(--card-settings-fill) padding-box, var(--raised-rim) border-box;
   --style-overlay-background: var(--popover-fill) padding-box, var(--popover-rim) border-box;
   --style-border: transparent;
   --style-backdrop: none;
@@ -5056,9 +5027,7 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
   --icon-muted: var(--muted-foreground);
   --accent-foreground: var(--strong-foreground);
   --destructive-foreground: var(--error-foreground);
-  --error-surface: color-mix(in srgb, var(--error) 12%, transparent);
   --warning-surface: color-mix(in srgb, var(--warning) 12%, transparent);
-  --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
   --sidebar: var(--app-chrome-background);
   --sidebar-foreground: var(--foreground);
@@ -5156,11 +5125,6 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
     color-mix(in oklab, var(--icon-muted) var(--appearance-contrast-base), var(--background)),
     var(--appearance-contrast-target) var(--appearance-contrast-boost)
   );
-  --contrast-card-foreground: color-mix(
-    in oklab,
-    color-mix(in oklab, var(--card-foreground) var(--appearance-contrast-base), var(--card)),
-    var(--appearance-contrast-target) var(--appearance-contrast-boost)
-  );
   --contrast-popover-foreground: color-mix(
     in oklab,
     color-mix(in oklab, var(--popover-foreground) var(--appearance-contrast-base), var(--popover)),
@@ -5169,15 +5133,6 @@ html:root[data-theme-id="t3-code-classic"].black-chrome [data-app-sidebar] {
   --contrast-accent-foreground: color-mix(
     in oklab,
     color-mix(in oklab, var(--accent-foreground) var(--appearance-contrast-base), var(--accent)),
-    var(--appearance-contrast-target) var(--appearance-contrast-boost)
-  );
-  --contrast-secondary-foreground: color-mix(
-    in oklab,
-    color-mix(
-      in oklab,
-      var(--secondary-foreground) var(--appearance-contrast-base),
-      var(--secondary)
-    ),
     var(--appearance-contrast-target) var(--appearance-contrast-boost)
   );
   --contrast-message-foreground: color-mix(
@@ -5367,13 +5322,10 @@ body {
   margin-bottom: var(--chat-composer-inset, 0px);
 }
 
-/* Only the scroller itself uses these changing insets. Stop them at the list content
-   so composer and lane resizes do not restyle every virtualized row and nested scroller. */
+/* Only the native track uses this changing inset. Stop it at the list content
+   so composer resizes do not restyle every virtualized row and nested scroller. */
 .messages-timeline-scroll > * {
   --chat-composer-inset: initial;
-  --chat-lane-inset-start: initial;
-  --chat-lane-inset-end: initial;
-  --chat-timeline-gutter: initial;
 }
 
 /* Keep parent scrollbar styles off iframe owners to avoid WebKit resize loops: https://webkit.org/b/324485 */
@@ -5462,13 +5414,11 @@ body {
   list-style-type: disc;
 }
 
-/* --list-gutter defaults to the same 1.25rem as .chat-markdown ul, but
-   ChatMarkdown's `ol` renderer widens it (via inline style) for lists whose
-   widest marker has multiple characters so it isn't clipped by list-style-position:
-   outside painting the marker past the padding box. Reset it here too so a
-   nested ol without its own widened marker doesn't inherit the outer one. */
+/* Outside markers paint past the padding box, so the gutter must fit `0. `,
+   measured per font in appearanceFonts. ChatMarkdown widens it inline for
+   multi-digit markers; setting it here stops a nested ol inheriting that. */
 :is(.chat-markdown, .composer-tiptap) ol {
-  --list-gutter: 1.25rem;
+  --list-gutter: max(1.25rem, var(--list-marker-sans, 0px));
   padding-inline-start: var(--list-gutter, 1.25rem);
   list-style-type: decimal;
 }
@@ -5828,6 +5778,141 @@ body {
   }
 }
 
+.surface-bubble .user-message-markdown {
+  --bubble-well-top: color-mix(in srgb, var(--message-surface) 94%, var(--background));
+  --bubble-well-bottom: var(--message-surface);
+  --bubble-well-fill: linear-gradient(
+    180deg in srgb,
+    var(--bubble-well-top),
+    var(--bubble-well-bottom)
+  );
+  --bubble-table-header: var(--table-header-fill);
+  --bubble-inline-code: var(--inline-code-fill);
+  --bubble-well-rim: var(--well-rim);
+  --bubble-markdown-foreground: light-dark(
+    var(--foreground),
+    color-mix(in srgb, var(--foreground) 35%, var(--appearance-contrast-target))
+  );
+  --bubble-markdown-muted: light-dark(
+    var(--contrast-muted-foreground),
+    color-mix(in srgb, var(--contrast-muted-foreground) 90%, var(--appearance-contrast-target))
+  );
+}
+
+:root:is(:not([data-surface-style]), [data-surface-style="gradient-rim"])
+  .surface-bubble
+  .user-message-markdown {
+  --bubble-well-rim: light-dark(
+    var(--well-rim),
+    linear-gradient(
+      180deg,
+      oklch(from var(--bubble-well-top) max(calc(l - 0.052), 0) c h),
+      oklch(from var(--bubble-well-bottom) min(calc(l + 0.155), 1) c h)
+    )
+  );
+}
+
+:root[data-surface-style="flat"] .surface-bubble .user-message-markdown {
+  --bubble-well-rim: var(--flat-edge);
+  --bubble-well-top: light-dark(
+    oklch(from var(--flat-high) calc(l + 0.015) c h),
+    oklch(from var(--flat-high) calc(l + 0.026) c h)
+  );
+  --bubble-well-bottom: var(--bubble-well-top);
+  --bubble-table-header: light-dark(
+    oklch(from var(--flat-high) calc(l + 0.03) c h),
+    oklch(from var(--flat-high) calc(l + 0.073) c h)
+  );
+}
+
+:root[data-surface-style="soft-gradient"] .surface-bubble .user-message-markdown {
+  --bubble-markdown-foreground: light-dark(
+    var(--foreground),
+    color-mix(in srgb, var(--foreground) 10%, var(--appearance-contrast-target))
+  );
+  --bubble-well-top: light-dark(
+    oklch(from var(--ss-background) calc(l + 0.045) c h),
+    oklch(from var(--ss-background) calc(l + 0.1835) c h)
+  );
+  --bubble-well-bottom: light-dark(
+    oklch(from var(--ss-background) calc(l + 0.015) c h),
+    oklch(from var(--ss-background) calc(l + 0.1305) c h)
+  );
+  --bubble-table-header: var(--bubble-well-fill);
+  --bubble-inline-code: var(--bubble-well-fill);
+}
+
+:root:is([data-surface-style="aqua-gloss-full"], [data-surface-style="aqua-blue"])
+  .surface-bubble
+  .user-message-markdown {
+  --bubble-well-top: light-dark(
+    oklch(from var(--ss-background) min(calc(l + 0.045), 1) c h),
+    oklch(from var(--ss-background) calc(l + 0.1175) c h)
+  );
+  --bubble-well-bottom: light-dark(
+    oklch(from var(--ss-background) calc(l + 0.015) c h),
+    oklch(from var(--ss-background) calc(l + 0.0925) c h)
+  );
+  --bubble-table-header: var(--bubble-well-fill);
+  --bubble-inline-code: linear-gradient(
+    180deg in srgb,
+    light-dark(
+        oklch(from var(--ss-background) calc(l + 0.045) c h),
+        oklch(from var(--ss-background) calc(l + 0.2055) calc(c * 0.35) h)
+      )
+      0%,
+    light-dark(
+        oklch(from var(--ss-background) calc(l + 0.015) c h),
+        oklch(from var(--ss-background) calc(l + 0.1575) c h)
+      )
+      min(50%, 24px),
+    light-dark(
+        oklch(from var(--ss-background) calc(l - 0.027) c h),
+        oklch(from var(--ss-background) calc(l + 0.0835) c h)
+      )
+      min(50%, 24px),
+    light-dark(
+        oklch(from var(--ss-background) calc(l - 0.003) c h),
+        oklch(from var(--ss-background) calc(l + 0.1255) c h)
+      )
+      100%
+  );
+}
+
+:root[data-surface-style="gradient-rim-everywhere"] .surface-bubble .user-message-markdown {
+  --bubble-markdown-foreground: light-dark(
+    var(--foreground),
+    color-mix(in srgb, var(--foreground) 20%, var(--appearance-contrast-target))
+  );
+  --bubble-well-top: color-mix(in srgb, var(--popover) 88%, oklch(from var(--popover) 1 0 h));
+  --bubble-well-bottom: var(--bubble-well-top);
+  --bubble-table-header: var(--bubble-well-fill);
+  --bubble-inline-code: var(--bubble-well-fill);
+}
+
+:root
+  .surface-bubble
+  .user-message-markdown
+  :is(.chat-markdown-table-container, .chat-markdown-codeblock, pre) {
+  --well-fill: var(--bubble-well-fill);
+  --well-rim: var(--bubble-well-rim);
+  --style-code-fill: var(--bubble-well-fill);
+  --table-header-fill: var(--bubble-table-header);
+  --foreground: var(--bubble-markdown-foreground);
+  --contrast-foreground: var(--bubble-markdown-foreground);
+  --contrast-muted-foreground: var(--bubble-markdown-muted);
+}
+
+:root[data-surface-style="flat"] .surface-bubble .user-message-markdown .chat-markdown-codeblock {
+  --well-fill: linear-gradient(var(--bubble-table-header), var(--bubble-table-header));
+  --style-code-fill: var(--well-fill);
+}
+
+.surface-bubble .user-message-markdown :not(pre) > code {
+  --inline-code-fill: var(--bubble-inline-code);
+  --contrast-foreground: var(--bubble-markdown-foreground);
+}
+
 /* Formula cells keep their natural width and scroll with the table. */
 .chat-markdown-table-container :is(th, td):has([data-markdown-math]) {
   max-width: none;
@@ -6008,6 +6093,12 @@ body {
    widgets while the caret is on styled text. */
 .composer-tiptap {
   position: relative;
+}
+
+/* Tiptap's injected base CSS disables ligatures; match sent messages. */
+.composer-tiptap.ProseMirror {
+  font-variant-ligatures: normal;
+  font-feature-settings: normal;
 }
 
 .composer-prompt-body {
@@ -6229,15 +6320,12 @@ body {
 :root {
   --badge-quiet: #00000006;
   --sidebar-settled-pr: #9e9e9e;
-  /* Open PR numbers on sidebar rows (the pen darkens them further than --success-foreground). */
-  --sidebar-pr-open: #1a7f37;
 }
 
 :root.dark,
 :root.black-chrome [data-chrome-scope] {
   --badge-quiet: #ffffff0a;
   --sidebar-settled-pr: #ffffff40;
-  --sidebar-pr-open: #3fb950;
 }
 
 /* redesign: timeline */
@@ -6302,5 +6390,359 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .chat-scroll-to-bottom {
     transition: none;
+  }
+}
+
+/* ── Connected pane tabs ──
+   Each pane's top is a bar in the chrome's color; the focused pane's active
+   tab is a piece of the pane rising into it, joined by concave ears, with
+   one lit rim from its top round the ears and out along the pane's edge,
+   where it fades. An unfocused pane's active tab is a soft pill on the bar.
+   [data-pane-join] (PaneTabs.tsx) is that tab: one shape per pane strip that
+   slides to the active tab. Light, black chrome keeps the notch instead. */
+[data-slot="sidebar-inset"] {
+  /* Pane tokens resolved outside the chrome scope of the bar. */
+  --pane-join-fill: var(--background);
+  --pane-join-fg: var(--strong-foreground, var(--foreground));
+  --pane-join-muted: var(--muted-foreground);
+  --pane-join-rim: var(--raised-rim);
+}
+
+[data-pane-join],
+[data-pane-bar-corner] {
+  display: none;
+}
+
+@media (width >= 48rem) {
+  :root:not(.black-chrome)
+    [data-slot="sidebar"][data-variant="inset"]
+    ~ [data-slot="sidebar-inset"] {
+    --pane-join-ear: 10px;
+    --pane-join-radius: 10px;
+    /* The tabs and the bar's controls sit this much lower, centred in the joined tab. */
+    --pane-join-shift: 5px;
+    /* From the pane edge to the first tab: the pane's 14px corner, the ear, 2px. */
+    --pane-join-lead: calc(14px + var(--pane-join-ear) + 2px);
+    /* How far down the rim's gradient runs past the shape's height, so it
+       still lights the sides and the ears. */
+    --pane-join-rim-k: 1.6;
+    /* The rim's run along the pane's top edge, out from each ear. */
+    --pane-join-tail: 36px;
+    --workspace-chrome-controls-top: var(--pane-join-shift);
+
+    & [data-pane-header] {
+      padding-block: var(--pane-join-shift)
+        calc(var(--pane-notch-height) - var(--workspace-topbar-height) - var(--pane-join-shift));
+      /* From a tab's foot to the pane's top edge. */
+      --pane-join-drop: calc(
+        var(--pane-notch-height) - var(--pane-join-shift) -
+          (var(--workspace-topbar-height) + 1.75rem) / 2
+      );
+      /* Above a tab, up to 2px under the header's top. */
+      --pane-join-rise: calc(
+        var(--pane-join-shift) + (var(--workspace-topbar-height) - 1.75rem) / 2 - 2px
+      );
+      --pane-join-h: calc(var(--pane-join-rise) + 1.75rem + var(--pane-join-drop));
+      --pane-join-rim-size: 100% calc(var(--pane-join-h) * var(--pane-join-rim-k));
+    }
+
+    /* The bar: the leading row's block runs the pane's whole width. */
+    & [data-pane-notch=""] {
+      --pane-bar-fg: var(--foreground);
+      --pane-bar-muted: var(--muted-foreground);
+      padding-inline-start: var(--pane-join-lead);
+
+      &::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        inset-block-start: calc(var(--pane-join-shift) * -1);
+        inset-inline: -100vw;
+        height: var(--pane-notch-height);
+        background-color: var(--app-chrome-background);
+        background-image: var(--surface-grain);
+        background-size: var(--surface-grain-size);
+        pointer-events: none;
+      }
+    }
+
+    /* The pane's two top corners at the bar's foot. */
+    & [data-pane-bar-corner] {
+      display: block;
+      position: absolute;
+      z-index: 1;
+      inset-block-start: var(--pane-notch-height);
+      width: 14px;
+      height: 14px;
+      background-color: var(--app-chrome-background);
+      background-image: var(--surface-grain);
+      background-size: var(--surface-grain-size);
+      pointer-events: none;
+    }
+    & [data-pane-bar-corner="start"] {
+      inset-inline-start: 0;
+      mask: radial-gradient(circle 14px at 100% 100%, transparent 13.5px, #000 14.5px);
+    }
+    & [data-pane-bar-corner="end"] {
+      inset-inline-end: 0;
+      mask: radial-gradient(circle 14px at 0 100%, transparent 13.5px, #000 14.5px);
+    }
+
+    /* Room for the joined tab's body, ears and edge rim inside the strip's
+       scroll clip. At the end the rim's tail runs on under the next control,
+       which overlaps it by as much, so the last tab stays where it was. */
+    & [data-pane-notch=""] [data-layout-tab-strip] {
+      isolation: isolate;
+      padding: var(--pane-join-rise) calc(var(--pane-join-ear) + var(--pane-join-tail))
+        calc(var(--pane-join-drop) + 1px) var(--pane-join-ear);
+      margin: calc(var(--pane-join-rise) * -1) calc(var(--pane-join-tail) * -1)
+        calc(var(--pane-join-drop) * -1 - 1px) calc(var(--pane-join-ear) * -1);
+      /* Its padding passes presses on to the controls it runs under. */
+      pointer-events: none;
+      scroll-padding-inline: var(--pane-join-ear);
+      /* Every title gets the active one's room, so activating a tab moves no
+         other tab under the sliding shape. */
+      --pane-inactive-tab-title-max: 17rem;
+      /* Where tabs are scrolled out, the strip fades as scroll areas do
+         (ScrollArea's scrollFade); its end fades before the control that
+         overlaps the rim's tail. PaneTabs sets the overflow. */
+      --strip-fade-start: min(1.5rem, var(--strip-overflow-start, 0px));
+      --strip-fade-end: min(1.5rem, var(--strip-overflow-end, 0px));
+      --strip-fade-end-at: calc(100% - var(--pane-join-tail) * var(--strip-overflowing-end, 0));
+      mask-image: linear-gradient(
+        to right,
+        transparent,
+        #000 var(--strip-fade-start),
+        #000 calc(var(--strip-fade-end-at) - var(--strip-fade-end)),
+        transparent var(--strip-fade-end-at)
+      );
+    }
+    & [data-pane-notch=""] [data-strip-layer] > * {
+      pointer-events: auto;
+    }
+
+    /* The shape draws the active tab. Its label reads as active once the
+       shape has landed under it ([data-joined], PaneTabs.tsx), and the tab
+       it left reads as a plain one from then on. */
+    &
+      [data-pane-notch=""]
+      [data-layout-tab-strip]
+      :is(.surface-pane-tab:not([data-hidden-terminal-chip]), [data-active-tab="true"]) {
+      background: none;
+      box-shadow: none;
+    }
+    &
+      [data-pane-notch=""]
+      [data-layout-tab-strip]
+      :is(.surface-pane-tab, [data-active-tab="true"]):not([data-joined]) {
+      color: var(--pane-bar-muted);
+    }
+    & [data-pane-notch=""] [data-layout-tab-strip] [data-joined] {
+      color: var(--pane-join-fg);
+      --contrast-strong-foreground: var(--pane-join-fg);
+      --strong-foreground: var(--pane-join-fg);
+      --muted-foreground: var(--pane-join-muted);
+      --foreground: var(--pane-join-fg);
+    }
+
+    /* An unfocused pane's tab sits on the bar, in the bar's colors. */
+    & [data-pane-notch-unfocused] [data-layout-tab-strip] [data-joined] {
+      color: var(--pane-bar-fg);
+      --contrast-strong-foreground: var(--pane-bar-fg);
+      --strong-foreground: var(--pane-bar-fg);
+      --foreground: var(--pane-bar-fg);
+    }
+
+    /* The bar's own controls follow the tabs down. */
+    & [data-workspace-titlebar-controls] {
+      translate: 0 var(--pane-join-shift);
+    }
+
+    /* The pane's corner cuts sit at the bar's foot; the end one at the pane's
+       end, where the bar ends. It still paints only while the strip's edge
+       holds it; the bar's own corner rounds the pane at rest. */
+    & [data-layout-pane-id][data-pane-notched] > [data-pane-cut$="notch"] {
+      top: calc(anchor(--pane-notch top) + var(--pane-notch-height) - var(--pane-join-shift));
+    }
+    & [data-layout-pane-id][data-pane-notched] > [data-pane-cut="end-notch"] {
+      right: 0;
+    }
+
+    & [data-pane-notch=""] [data-pane-join] {
+      display: block;
+      position: absolute;
+      z-index: -1;
+      inset-block-start: 0;
+      inset-inline-start: 0;
+      width: 0;
+      height: var(--pane-join-h);
+      pointer-events: none;
+      color: var(--pane-bar-fg);
+      --jx: 0px;
+      --jw: 0px;
+      --jm: 0;
+      --e: var(--pane-join-ear);
+      --r: var(--pane-join-radius);
+
+      &[hidden] {
+        display: none;
+      }
+
+      & i {
+        position: absolute;
+        inset-block-start: 0;
+        inset-inline-start: 0;
+        display: block;
+      }
+
+      & [data-jb] {
+        width: 0;
+        height: 100%;
+      }
+
+      /* A cap: corner, side and ear. The end cap is the start one mirrored. */
+      /* Their own layers: a slide begun on a press keeps moving while the
+         switch's render holds the main thread. */
+      & :is([data-jc], [data-jm]) {
+        will-change: translate, scale;
+      }
+
+      & [data-jc] {
+        width: calc(var(--e) + var(--r) + 1px);
+        height: 100%;
+        translate: calc(var(--jx) - var(--e)) 0;
+      }
+      & [data-jc="r"] {
+        translate: calc(var(--jx) + var(--jw) - var(--r) - 1px) 0;
+        scale: -1 1;
+      }
+
+      /* Body fill, 1px past the cap into the middle and 1px below the edge.
+         The overlap column skips the top row, where the middle's rim is. */
+      & [data-jf] {
+        inset-inline-start: var(--e);
+        width: calc(var(--r) + 1px);
+        height: calc(100% + 1px);
+        border-start-start-radius: var(--r);
+        background:
+          linear-gradient(var(--pane-join-fill), var(--pane-join-fill)) 0 0 / calc(100% - 1px) 100%
+            no-repeat,
+          linear-gradient(var(--pane-join-fill), var(--pane-join-fill)) 0 1px / 100% 100% no-repeat;
+      }
+
+      /* Corner ring and side line, inside the shape's outermost pixel. */
+      & [data-jr] {
+        width: 100%;
+        height: 100%;
+        background: var(--pane-join-rim) 0 0 / var(--pane-join-rim-size) no-repeat;
+        mask:
+          radial-gradient(
+              circle var(--r) at 100% 100%,
+              transparent calc(var(--r) - 1.25px),
+              #000 calc(var(--r) - 0.75px),
+              #000 calc(var(--r) - 0.25px),
+              transparent calc(var(--r) + 0.25px)
+            )
+            var(--e) 0 / var(--r) var(--r) no-repeat,
+          linear-gradient(#000, #000) var(--e) var(--r) / 1px calc(100% - var(--r) - var(--e))
+            no-repeat;
+      }
+
+      /* The ear: pane fill outside the circle, and the rim turning out along it. */
+      & [data-je],
+      & [data-jer] {
+        inset-block-start: calc(100% - var(--e));
+        width: calc(var(--e) + 1px);
+        height: calc(var(--e) + 1px);
+      }
+      & [data-je] {
+        background: radial-gradient(
+          circle var(--e) at 0 0,
+          transparent calc(var(--e) - 0.5px),
+          var(--pane-join-fill) calc(var(--e) + 0.5px)
+        );
+      }
+      & [data-jer] {
+        background: var(--pane-join-rim) 0 calc((var(--pane-join-h) - var(--e)) * -1) /
+          var(--pane-join-rim-size) no-repeat;
+        mask: radial-gradient(
+          circle var(--e) at 0 0,
+          transparent calc(var(--e) - 0.25px),
+          #000 calc(var(--e) + 0.25px),
+          #000 calc(var(--e) + 0.75px),
+          transparent calc(var(--e) + 1.25px)
+        );
+      }
+
+      /* Along the pane's top edge, out from the ear, fading. */
+      & [data-jt] {
+        inset-block-start: 100%;
+        inset-inline-start: calc(var(--pane-join-tail) * -1);
+        width: var(--pane-join-tail);
+        height: 1px;
+        background: var(--pane-join-rim) 0 calc(var(--pane-join-h) * -1) / var(--pane-join-rim-size)
+          no-repeat;
+        mask: linear-gradient(to right, transparent, #000);
+      }
+
+      & [data-jm] {
+        width: 1px;
+        height: calc(100% + 1px);
+        transform-origin: 0 0;
+        translate: calc(var(--jx) + var(--r)) 0;
+        scale: var(--jm) 1;
+        background: var(--pane-join-fill);
+      }
+      & [data-jm]::after {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 1px;
+        background: var(--pane-join-rim) 0 0 / var(--pane-join-rim-size) no-repeat;
+      }
+
+      /* An unfocused pane's active tab: a soft pill on the bar. */
+      & [data-jp] {
+        inset-block-start: var(--pane-join-rise);
+        height: 1.75rem;
+        width: var(--jw);
+        translate: var(--jx) 0;
+        border-radius: var(--radius-control);
+        background: color-mix(in srgb, currentColor 10%, transparent);
+        opacity: 0;
+      }
+
+      /* Focus moving between panes cross-fades the joined tab and the pill. */
+      & :is([data-jb], [data-jp]) {
+        transition: opacity var(--panel-animation-duration, 150ms) ease-out;
+      }
+    }
+
+    & [data-pane-notch-unfocused] [data-pane-join] {
+      & [data-jb] {
+        opacity: 0;
+      }
+      & [data-jp] {
+        opacity: 1;
+      }
+    }
+  }
+
+  :root:not(.black-chrome)
+    [data-chrome-art]
+    [data-slot="sidebar"][data-variant="inset"]
+    ~ [data-slot="sidebar-inset"] {
+    & [data-pane-notch=""]::before,
+    & [data-pane-bar-corner] {
+      background: var(--chrome-art-paint);
+      background-attachment: fixed;
+      background-blend-mode: var(--chrome-art-blend, normal);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root:not(.black-chrome) [data-pane-notch=""] [data-pane-join] * {
+      transition: none;
+    }
   }
 }

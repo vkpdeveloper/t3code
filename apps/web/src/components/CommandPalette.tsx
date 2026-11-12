@@ -10,6 +10,7 @@ import {
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
+  getCloneDestinationForPickedFolder,
   getCloneDestinationPath,
   getCloneDirectoryLeafName,
   getCloneDirectoryPath,
@@ -277,15 +278,6 @@ import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 
-// Root actions listed under Settings, after Actions.
-const SETTINGS_ACTION_VALUES: ReadonlySet<string> = new Set([
-  "action:change-theme",
-  "action:change-appearance",
-  "action:theme-editor",
-  "action:settings",
-  "action:project-settings",
-]);
-
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 const ADD_PROJECT_ENTRY_GROUP = "add-project";
 const NEW_THREAD_IN_GROUP = "projects";
@@ -450,6 +442,7 @@ function OpenCommandPaletteDialog(props: {
   ) => void;
   readonly initialContext: CommandPaletteReturnContext | undefined;
 }) {
+  const composerHandleRef = useComposerHandleContext();
   const navigate = useNavigate();
   const openLayoutPage = useOpenLayoutPage();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -1099,6 +1092,10 @@ function OpenCommandPaletteDialog(props: {
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
       ?.newProjectsRoot ?? null;
 
+  const offeredProvidersFor = (environmentId: EnvironmentId | null) =>
+    environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
+      ?.settings.offeredSourceControlProviders;
+
   const startNewProject = (
     environmentId: EnvironmentId,
     sourcesEnvironmentId: EnvironmentId | null,
@@ -1155,7 +1152,7 @@ function OpenCommandPaletteDialog(props: {
 
     const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
       "url",
-      ...sortAddProjectProviderSources(readinessBySource),
+      ...sortAddProjectProviderSources(readinessBySource, offeredProvidersFor(environmentId)),
     ];
 
     for (const source of orderedSources) {
@@ -1359,7 +1356,22 @@ function OpenCommandPaletteDialog(props: {
     if (firstOption) startNewProject(firstOption.environmentId, null);
   };
 
+  const chooseWorkspace = useStableCallback(async () => {
+    composerHandleRef?.current?.openControl("composer.workspace");
+  });
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
+
+  if (activeThread || activeDraftThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:choose-workspace",
+      title: "Choose workspace",
+      searchTerms: ["branch", "worktree", "checkout", "workspace"],
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "composer.workspace",
+      run: chooseWorkspace,
+    });
+  }
 
   if (projects.length > 0) {
     const activeProjectTitle =
@@ -1873,11 +1885,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const rootGroups = buildRootGroups({
-    actionItems: actionItems.filter((item) => !SETTINGS_ACTION_VALUES.has(item.value)),
-    recentThreadItems,
-    settingsItems: actionItems.filter((item) => SETTINGS_ACTION_VALUES.has(item.value)),
-  });
+  const rootGroups = buildRootGroups({ actionItems, recentThreadItems });
   // Settings use the same matcher as threads, including word starts and typo tolerance.
   const settingsSearchItems: CommandPaletteActionItem[] = settingsForThisPlatform(
     availableSettingsSearchItems,
@@ -2120,7 +2128,12 @@ function OpenCommandPaletteDialog(props: {
   };
 
   const newProjectPublishTargets =
-    newProjectFlow === null ? [] : getNewProjectPublishTargets(sourceControlDiscovery.data ?? null);
+    newProjectFlow === null
+      ? []
+      : getNewProjectPublishTargets(
+          sourceControlDiscovery.data ?? null,
+          offeredProvidersFor(newProjectFlow.environmentId),
+        );
   const newProjectPublishTarget = getNewProjectPublishTarget(
     newProjectPublishTargets,
     newProjectPublishKind,
@@ -2926,12 +2939,42 @@ function OpenCommandPaletteDialog(props: {
         );
         return;
       }
+      if (addProjectCloneFlow?.step === "confirm") {
+        if (selection.environmentId !== addProjectCloneFlow.environmentId) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Clone failed",
+              description: "Choose a folder in the environment the repository is cloned into.",
+            }),
+          );
+          return;
+        }
+        await submitAddProjectCloneFlow(
+          getCloneDestinationForPickedFolder({
+            pickedPath: selection.linuxPath,
+            cloneDirectoryName: pinnedCloneDirectoryName,
+            caseSensitive: true,
+          }),
+        );
+        return;
+      }
       await handleAddProjectForEnvironment({
         environmentId: selection.environmentId,
         rawCwd: selection.linuxPath,
         platform: "Linux",
         currentProjectCwd: null,
       });
+      return;
+    }
+    if (addProjectCloneFlow?.step === "confirm") {
+      await submitAddProjectCloneFlow(
+        getCloneDestinationForPickedFolder({
+          pickedPath,
+          cloneDirectoryName: pinnedCloneDirectoryName,
+          caseSensitive: !isWindowsPlatform(browseEnvironmentPlatform),
+        }),
+      );
       return;
     }
     await handleAddProject(pickedPath);
@@ -3047,14 +3090,9 @@ function OpenCommandPaletteDialog(props: {
         ...(isSubmenu
           ? {
               startAddon: (
-                <button
-                  type="button"
-                  className="flex cursor-pointer items-center"
-                  aria-label="Back"
-                  onClick={popView}
-                >
+                <Button variant="ghost" size="icon-micro" aria-label="Back" onClick={popView}>
                   <ArrowLeftIcon />
-                </button>
+                </Button>
               ),
             }
           : isBrowsing

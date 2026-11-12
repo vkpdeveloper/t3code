@@ -23,19 +23,15 @@ export function ChatPaneHeader({
   reserveNativeControlsInset: boolean;
   children: ReactNode;
 }) {
-  const { leadingEdge, trailingEdge, visible } = useLayoutPane();
+  const { leadingEdge, trailingEdge } = useLayoutPane();
   return (
     <header
       ref={ref}
       {...workspaceAreaProps("tabs", 0.5, "Thread tabs")}
       data-chat-header
+      data-sidebar-slide-children=""
       data-pane-header
-      className={chatPaneHeaderClassName({
-        leadingEdge,
-        trailingEdge,
-        reserveNativeControlsInset,
-        windowDrag: visible,
-      })}
+      className={chatPaneHeaderClassName({ leadingEdge, trailingEdge, reserveNativeControlsInset })}
     >
       {children}
     </header>
@@ -50,26 +46,18 @@ export function chatPaneHeaderClassName({
   leadingEdge,
   trailingEdge,
   reserveNativeControlsInset,
-  windowDrag,
 }: {
   leadingEdge: boolean;
   trailingEdge: boolean;
   reserveNativeControlsInset: boolean;
-  /**
-   * In Electron, dragging the header moves the window. Off only for headers
-   * kept laid out off screen: Electron still counts their drag area, over the
-   * visible panes' tabs.
-   */
-  windowDrag: boolean;
 }): string {
   return cn(
     // Keep tab menus above the timeline. Ease the collapsed-sidebar inset with the sidebar so the
     // tab moves with its pane.
-    "relative z-10 bg-background md:pl-0 [[data-panel-animations=true]_&]:motion-safe:transition-[padding-left] [[data-panel-animations=true]_&]:motion-safe:duration-(--panel-animation-duration) [[data-panel-animations=true]_&]:motion-safe:ease-out",
+    "relative z-10 bg-background md:pl-0",
     isElectron
       ? cn(
-          "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
-          windowDrag && "drag-region",
+          "drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 sm:px-5",
           reserveNativeControlsInset &&
             trailingEdge &&
             "wco:pr-(--workspace-native-controls-inset)",
@@ -109,6 +97,7 @@ export function ChatPaneHeaderControls({
           : "fixed top-[var(--workspace-controls-top)] right-[var(--workspace-controls-right)] mr-px md:right-(--workspace-pane-inset) md:mr-0",
       )}
       data-workspace-titlebar-controls
+      data-sidebar-slide-hold={split || local ? undefined : ""}
     >
       <PaneNotch side="right" marksHost={marksHost}>
         <div className="pointer-events-auto flex h-full items-center gap-1.5">{children}</div>

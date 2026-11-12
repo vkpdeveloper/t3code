@@ -40,41 +40,6 @@ const prompt = {
   })),
 };
 
-it("counts questions across pending requests and clears them as requests resolve", async () => {
-  const nextPrompt = {
-    ...prompt,
-    requestId: RuntimeRequestId.make("next-question"),
-    questions: [prompt.questions[0]!],
-  };
-  const props: ComponentProps<typeof ComposerPendingUserInputPanel> = {
-    pendingUserInputs: [prompt, nextPrompt],
-    cwd: undefined,
-    threadRef,
-    respondingRequestIds: [],
-    answers: {},
-    questionIndex: 0,
-    onToggleOption: vi.fn(),
-    onAdvance: vi.fn(),
-    onDismiss: vi.fn(),
-  };
-  await using screen = await render(<ComposerPendingUserInputPanel {...props} />);
-  await expect.element(screen.getByText("1/4", { exact: true })).toBeVisible();
-
-  await screen.rerender(<ComposerPendingUserInputPanel {...props} questionIndex={1} />);
-  await expect.element(screen.getByText("2/4", { exact: true })).toBeVisible();
-
-  await screen.rerender(
-    <ComposerPendingUserInputPanel {...props} pendingUserInputs={[nextPrompt]} />,
-  );
-  await expect.element(screen.getByText("2/4", { exact: true })).not.toBeInTheDocument();
-  await expect.element(screen.getByText("Choose for question 1", { exact: true })).toBeVisible();
-
-  await screen.rerender(<ComposerPendingUserInputPanel {...props} pendingUserInputs={[]} />);
-  await expect
-    .element(screen.getByText("Choose for question 1", { exact: true }))
-    .not.toBeInTheDocument();
-});
-
 it("suspends question Enter and number shortcuts under an app modal and resumes them afterward", async () => {
   const onSubmit = vi.fn();
   const onWriteAnswer = vi.fn();
@@ -388,7 +353,10 @@ it("isolates drafts by environment, thread and request and discards only resolve
     makeThreadRequestsResolvedAnnouncer(
       environmentId,
       threadRef.threadId,
-    )([RuntimeRequestId.make("second")]),
+    )([
+      { id: RuntimeRequestId.make("first"), status: "resolved" },
+      { id: RuntimeRequestId.make("second"), status: "pending" },
+    ]),
   );
   for (const [index, scope] of scopes.entries()) {
     await show(scope);

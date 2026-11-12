@@ -56,19 +56,9 @@ function Dialog<Payload>(props: DialogPrimitive.Root.Props<Payload>) {
   );
 }
 
-type PopupInitialFocus = DialogPrimitive.Popup.Props["initialFocus"];
-type OpenInteractionType = Parameters<Extract<PopupInitialFocus, (openType: never) => unknown>>[0];
-
-function useDialogActionInitialFocus(requested?: PopupInitialFocus) {
+function useDialogActionInitialFocus() {
   const popupRef = useRef<HTMLDivElement>(null);
-  const initialFocus = (openType: OpenInteractionType) => {
-    // The caller's explicit target wins; `true` or no answer means the default target.
-    const target = typeof requested === "function" ? requested(openType) : requested;
-    if (target !== undefined && target !== true) {
-      return typeof target === "object" && target !== null && "current" in target
-        ? target.current
-        : target;
-    }
+  const initialFocus = (openType: string) => {
     // Match Base UI: touch opens focus the popup to avoid opening the virtual keyboard.
     if (openType === "touch") return popupRef.current;
     return (
@@ -141,7 +131,6 @@ function DialogPopup({
   viewportProps,
   placement = "center",
   contentInset = 0,
-  initialFocus: requestedInitialFocus,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
@@ -154,7 +143,7 @@ function DialogPopup({
   const [parts, registerPart] = useParts();
   const defaultId = useId();
   const popupId = props.id ?? defaultId;
-  const { popupRef, initialFocus } = useDialogActionInitialFocus(requestedInitialFocus);
+  const { popupRef, initialFocus } = useDialogActionInitialFocus();
   const popup = useRender({
     ref: popupRef,
     render: (

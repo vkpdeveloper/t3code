@@ -13,13 +13,13 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import {
   type EnvironmentId,
   type PullRequestComment,
-  type PullRequestConversationThread,
   type PullRequestDetailView,
   type PullRequestRef,
+  type PullRequestConversationThread,
   type PullRequestReviewThread,
-  type PullRequestThreadCommentsResult,
   type ScopedThreadRef,
   pullRequestConversationThreads,
+  type PullRequestThreadCommentsResult,
 } from "@t3tools/contracts";
 import {
   ArrowDownUpIcon,
@@ -387,7 +387,11 @@ export function PullRequestSummaryTab({
   }
   const linkedAnchor =
     linked?.url === detail.url
-      ? resolvePullRequestReviewAnchor(linked.anchor, detail.comments, detail.reviewThreads)
+      ? resolvePullRequestReviewAnchor(
+          linked.anchor,
+          detail.comments,
+          pullRequestConversationThreads(detail),
+        )
       : null;
   const matchesLink = (url: string | null) =>
     linkedAnchor !== null && pullRequestAnchorMatchesUrl(linkedAnchor, url);
@@ -576,6 +580,7 @@ export function PullRequestSummaryTab({
     linked,
     detail.comments,
     detail.reviewThreads,
+    detail.overviewThreads,
     activityPending,
   ]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the hold observes DOM outside React and must end with the tab
@@ -917,7 +922,6 @@ export function PullRequestSummaryTab({
             ) : null
           }
         >
-          {/* An overview thread has no line card, so it reads as its conversation. */}
           {item.thread.path === null ? (
             <div className="space-y-2">
               {renderCommentCard(comment, item.thread)}

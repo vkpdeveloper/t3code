@@ -366,19 +366,6 @@ describe("ClientSettings notifications", () => {
 });
 
 describe("ClientSettings surface style", () => {
-  it("keeps the gradient rim for existing settings without a saved style", () => {
-    expect(decodeClientSettings({}).surfaceStyle).toBe("gradient-rim");
-  });
-
-  it.each(["gradient-rim", "flat", "aqua-blue", "gradient-rim-everywhere"])(
-    "round-trips the %s style",
-    (surfaceStyle) => {
-      const settings = decodeClientSettings({ surfaceStyle });
-      expect(encodeClientSettings(settings).surfaceStyle).toBe(surfaceStyle);
-      expect(decodeClientSettingsPatch({ surfaceStyle }).surfaceStyle).toBe(surfaceStyle);
-    },
-  );
-
   it("falls back to the gradient rim for a saved style that no longer exists", () => {
     expect(decodeClientSettings({ surfaceStyle: "brutal" }).surfaceStyle).toBe("gradient-rim");
     expect(decodeClientSettings({ surfaceStyle: "brushed-metal" }).surfaceStyle).toBe(
@@ -595,14 +582,6 @@ describe("voice settings", () => {
     expect(() => decodeClientSettingsPatch({ speechCorrectionWord: "x".repeat(51) })).toThrow();
     expect(DEFAULT_SERVER_SETTINGS.speechProjectCustomWords).toEqual([]);
     expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("speechProjectCustomWords");
-  });
-
-  it("stores the transcription model and resources on the environment", () => {
-    expect(DEFAULT_SERVER_SETTINGS).toMatchObject({
-      speechModelId: "handy-computer/parakeet-unified-en-0.6b-gguf",
-      speechAcceleration: "auto",
-      speechModelUnloadTimeout: "min_15",
-    });
   });
 });
 
