@@ -210,7 +210,11 @@ import * as RunFinalizationService from "./orchestration-v2/RunFinalizationServi
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { makePersistedServerRuntimeState } from "./serverRuntimeState.ts";
-import { acceptsPrivateNetworkConnection, loopbackUrlHostForAddress } from "./startupAccess.ts";
+import {
+  acceptsPrivateNetworkConnection,
+  boundUrlHostForAddress,
+  loopbackUrlHostForAddress,
+} from "./startupAccess.ts";
 import * as OrchestrationHttp from "./orchestration-v2/http.ts";
 import * as ProjectHttp from "./project/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -935,7 +939,7 @@ const layerMakeServer = Layer.unwrap(
               }
 
               const localPort = address.port;
-              const localHost = loopbackUrlHostForAddress(address);
+              const localHost = boundUrlHostForAddress(address);
               const route = {
                 localPort,
                 urlHost: localHost,
