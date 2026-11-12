@@ -225,6 +225,7 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
   const branchShortcut = branch ? shortcutLabelForCommand(keybindings, "composer.branch") : null;
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
+  const openedWithoutPointerRef = useRef(false);
   const open = branch?.open ?? workspaceOpen;
   const setOpen = branch?.onOpenChange ?? setWorkspaceOpen;
   const inWorktree = forceNewWorktree || effectiveEnvMode === "worktree" || activeWorktreePath;
@@ -260,12 +261,17 @@ const WorkspaceMenu = memo(function WorkspaceMenu({
   return (
     <Menu
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(nextOpen, details) => {
+        // A shortcut or Enter on the trigger clicks with no pointer (detail 0): typing filters refs.
+        openedWithoutPointerRef.current =
+          nextOpen && details.event instanceof MouseEvent && details.event.detail === 0;
+        setOpen(nextOpen);
+      }}
       onOpenChangeComplete={(nextOpen) => {
         if (nextOpen) {
           popupRef.current
             ?.querySelector<HTMLElement>(
-              branch?.focusSearch
+              branch?.focusSearch || (branch && openedWithoutPointerRef.current)
                 ? 'input[role="combobox"]'
                 : '[data-composer-workspace] [aria-checked="true"]',
             )
