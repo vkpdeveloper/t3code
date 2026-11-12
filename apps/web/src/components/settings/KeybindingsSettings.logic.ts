@@ -391,6 +391,7 @@ const COMMAND_LABELS: Partial<Record<string, string>> = {
   "composer.effort": "Choose effort",
   "composer.mode": "Choose access mode",
   "composer.workspace": "Choose workspace",
+  "composer.toggleWorktree": "Toggle new worktree",
   "composer.previousWorktree": "Use previous worktree",
   "composer.branch": "Choose branch",
   "chat.new": "New thread",

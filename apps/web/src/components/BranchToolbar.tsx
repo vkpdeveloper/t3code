@@ -97,6 +97,7 @@ import { observeResize } from "~/lib/observeResize";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
+  toggleWorktreeMode: () => void;
   usePreviousWorktree: () => void;
 }
 
@@ -1228,6 +1229,11 @@ export const BranchToolbar = memo(function BranchToolbar({
     ref,
     () => ({
       openBranchPicker: () => branchSelectorRef.current?.open(),
+      // Same gates as the Workspace menu's radios: a started worktree or a forced one is fixed.
+      toggleWorktreeMode: () => {
+        if (!showGitControls || envModeLocked || forceNewWorktree) return;
+        onEnvModeChange(effectiveEnvMode === "worktree" ? "local" : "worktree");
+      },
       usePreviousWorktree: () => {
         if (!showGitControls || !canUsePreviousWorktree || !previousWorktreeSeed) return;
         onUsePreviousWorktree();
@@ -1236,6 +1242,10 @@ export const BranchToolbar = memo(function BranchToolbar({
     }),
     [
       canUsePreviousWorktree,
+      effectiveEnvMode,
+      envModeLocked,
+      forceNewWorktree,
+      onEnvModeChange,
       onComposerFocusRequest,
       onUsePreviousWorktree,
       previousWorktreeSeed,
