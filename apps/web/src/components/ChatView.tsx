@@ -2032,6 +2032,11 @@ export default function ChatView(props: ChatViewProps) {
   const openWorkspaceDetailsStable = useStableCallback(() => {
     threadDetailsPanelRef.current?.openBranch(threadPanelPresentation);
   });
+  const openDetailsControlStable = useStableCallback(
+    (control: "composer.host" | "composer.workspace") => {
+      threadDetailsPanelRef.current?.openControl(control, threadPanelPresentation);
+    },
+  );
   const openStartedWorkspaceStable = useStableCallback(() => {
     if (workspaceInDetails) openWorkspaceDetailsStable();
     else branchToolbarRef.current?.openBranchPicker();
@@ -3800,6 +3805,9 @@ export default function ChatView(props: ChatViewProps) {
                             <ChatComposer
                               onWorkspaceRequest={
                                 isServerThread ? openStartedWorkspaceStable : undefined
+                              }
+                              onDetailsControlRequest={
+                                workspaceInDetails ? openDetailsControlStable : undefined
                               }
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}

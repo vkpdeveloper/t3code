@@ -45,8 +45,15 @@ import { BotDetails } from "../bots/BotDetails";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
+type DetailsControl = "branch" | "composer.host" | "composer.workspace";
+
 export interface ThreadDetailsPanelHandle {
   openBranch: (presentation: "inline" | "popover") => void;
+  /** Opens the card and the machine or workspace menu inside it, as the composer chips used to. */
+  openControl: (
+    control: "composer.host" | "composer.workspace",
+    presentation: "inline" | "popover",
+  ) => void;
 }
 
 interface ThreadDetailsPanelProps extends Pick<
@@ -101,31 +108,48 @@ interface ThreadDetailsPanelProps extends Pick<
 export function ThreadDetailsPanel({ ref, ...props }: ThreadDetailsPanelProps) {
   const visible = useClientSettings(resolveThreadDetailsVisibility);
   const branchToolbarRef = useRef<BranchToolbarHandle>(null);
-  const focusBranchOnOpen = useRef(false);
+  const workspaceSectionRef = useRef<HTMLElement>(null);
+  // A popover card mounts its content after opening, so the control waits for its focus request.
+  const pendingControl = useRef<DetailsControl | null>(null);
   const focusBranch = () => {
     if (props.isGitRepo) branchToolbarRef.current?.focusBranchPicker();
     else requestWorkspaceFocus({ area: "details" });
   };
-  useImperativeHandle(ref, () => ({
-    openBranch: (presentation) => {
-      focusBranchOnOpen.current =
-        presentation === "popover" &&
-        !selectThreadPanelOpen(
-          useRightPanelStore.getState().threadPanelVisibilityByThreadKey,
-          { environmentId: props.environmentId, threadId: props.threadId },
-          presentation,
-        );
-      flushSync(() => {
-        useRightPanelStore
-          .getState()
-          .setThreadPanelOpen(
-            { environmentId: props.environmentId, threadId: props.threadId },
-            presentation,
-            true,
-          );
-      });
+  const runControl = (control: DetailsControl) => {
+    if (control === "branch") {
       focusBranch();
-    },
+      return;
+    }
+    const trigger = workspaceSectionRef.current?.querySelector<HTMLButtonElement>(
+      `button[data-composer-shortcut~="${control}"]:not(:disabled)`,
+    );
+    if (trigger) {
+      trigger.focus({ preventScroll: true });
+      trigger.click();
+    } else if (control === "composer.workspace") {
+      // A started worktree is fixed, so the shortcut lands on its branch instead.
+      focusBranch();
+    }
+  };
+  const openCard = (control: DetailsControl, presentation: "inline" | "popover") => {
+    const threadRef = { environmentId: props.environmentId, threadId: props.threadId };
+    const waitsForMount =
+      presentation === "popover" &&
+      !selectThreadPanelOpen(
+        useRightPanelStore.getState().threadPanelVisibilityByThreadKey,
+        threadRef,
+        presentation,
+      );
+    pendingControl.current = waitsForMount ? control : null;
+    flushSync(() => {
+      useRightPanelStore.getState().setThreadPanelOpen(threadRef, presentation, true);
+    });
+    // Focusing the branch twice is harmless; clicking a menu trigger twice would close it.
+    if (control === "branch" || !waitsForMount) runControl(control);
+  };
+  useImperativeHandle(ref, () => ({
+    openBranch: (presentation) => openCard("branch", presentation),
+    openControl: (control, presentation) => openCard(control, presentation),
   }));
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const fileScripts = useT3ProjectFileScripts(
@@ -177,9 +201,10 @@ export function ThreadDetailsPanel({ ref, ...props }: ThreadDetailsPanelProps) {
       anchor={props.anchor}
       handle={props.handle}
       onFocusRequest={() => {
-        if (!focusBranchOnOpen.current) return false;
-        focusBranchOnOpen.current = false;
-        focusBranch();
+        const control = pendingControl.current;
+        if (control === null) return false;
+        pendingControl.current = null;
+        runControl(control);
         return true;
       }}
       onContextMenu={(event) => {
@@ -221,7 +246,11 @@ export function ThreadDetailsPanel({ ref, ...props }: ThreadDetailsPanelProps) {
           <>
             <div className="group/details-items thread-details-stack flex flex-col gap-1">
               {Object.values(show).some(Boolean) || visible.usage || visible.context ? (
-                <section aria-label="Workspace" className="surface-tray rounded-pane p-1">
+                <section
+                  ref={workspaceSectionRef}
+                  aria-label="Workspace"
+                  className="surface-tray rounded-pane p-1"
+                >
                   <div className="surface-composer rounded-lg p-0.5">
                     {show.environment ? (
                       <div className="flex min-w-0 items-center">

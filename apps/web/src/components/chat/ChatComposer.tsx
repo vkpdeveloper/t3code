@@ -359,6 +359,8 @@ export interface ChatComposerHandle {
 
 export interface ChatComposerProps {
   onWorkspaceRequest?: (() => void) | undefined;
+  /** Opens a machine or workspace control that lives in the thread details card. */
+  onDetailsControlRequest?: ((control: "composer.host" | "composer.workspace") => void) | undefined;
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
@@ -3113,7 +3115,8 @@ export function ChatComposer(props: ChatComposerProps) {
       },
       openControl: (command) => {
         if (command === "composer.workspace" && props.onWorkspaceRequest) {
-          props.onWorkspaceRequest();
+          if (props.onDetailsControlRequest) props.onDetailsControlRequest(command);
+          else props.onWorkspaceRequest();
           return;
         }
         if (composerBlurFrameRef.current !== null) {
@@ -3130,7 +3133,12 @@ export function ChatComposer(props: ChatComposerProps) {
           (element) =>
             !element.closest("[inert]") && element.checkVisibility({ visibilityProperty: true }),
         );
-        if (!trigger) return;
+        if (!trigger) {
+          if (command === "composer.host" || command === "composer.workspace") {
+            props.onDetailsControlRequest?.(command);
+          }
+          return;
+        }
         trigger.focus({ preventScroll: true });
         if (command === "composer.mode") markOpenToPermissions(trigger);
         if (command === "composer.effort") markOpenToEffort(trigger);

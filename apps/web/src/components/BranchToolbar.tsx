@@ -843,8 +843,8 @@ const RunContextSelector = memo(function RunContextSelector({
         aria-label={isPanel ? runContextLabel : undefined}
         data-composer-context-control
         data-composer-shortcut={[
-          showEnvironmentPicker && !envLocked ? "composer.host" : "",
-          !envModeLocked ? "composer.workspace" : "",
+          showEnvironmentPicker && !envLocked && section !== "workspace" ? "composer.host" : "",
+          !envModeLocked && section !== "machine" ? "composer.workspace" : "",
         ].join(" ")}
       >
         {triggerContent}
