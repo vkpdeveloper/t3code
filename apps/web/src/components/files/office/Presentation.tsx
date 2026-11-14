@@ -8,12 +8,8 @@ import {
 } from "../fileSurfaceChrome";
 import { OfficePages, type PaintPage } from "./OfficePages";
 import { createWorkerClient } from "./worker-rpc";
-import {
-  maxImageSide,
-  type SlideMethods,
-  type SlideSummary,
-  type VectorRequest,
-} from "./slide-protocol";
+import type { SlideMethods, SlideSummary } from "./slide-protocol";
+import { rasterize } from "./vector-pictures";
 
 type Opened = { slides: readonly SlideSummary[]; paint: PaintPage };
 export default function Presentation(props: {
@@ -83,7 +79,7 @@ export default function Presentation(props: {
         if (slides.length === 0 || slides.length > 500)
           throw new Error("Preview limited to presentations with 1 to 500 slides.");
         setOpened({ slides, paint });
-        onDetails(`${slides.length} slides`);
+        onDetails(`${slides.length} slide${slides.length === 1 ? "" : "s"}`);
       })
       .catch(fail);
     return () => {
@@ -106,7 +102,7 @@ export default function Presentation(props: {
         >
           <ChevronLeftIcon className="size-3.5" />
         </FileSurfaceAction>
-        <span className="flex-1 text-center text-xs tabular-nums" aria-live="polite">
+        <span className="flex-1 text-center text-meta tabular-nums" aria-live="polite">
           Slide {page + 1} of {opened.slides.length}
         </span>
         <FileSurfaceAction
@@ -132,7 +128,7 @@ export default function Presentation(props: {
             {failed[index] ? (
               <p
                 role="status"
-                className="absolute inset-0 flex items-center justify-center bg-background/80 p-4 text-xs text-foreground"
+                className="absolute inset-0 flex items-center justify-center bg-background/80 p-4 text-meta text-foreground"
               >
                 This slide could not be drawn.
               </p>
@@ -142,7 +138,7 @@ export default function Presentation(props: {
         footer={(index) => {
           const slide = opened.slides[index];
           return slide?.notes || slide?.hidden ? (
-            <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="space-y-1 text-meta text-muted-foreground">
               {slide.hidden ? <p>Hidden slide</p> : null}
               {slide.notes ? (
                 <p
@@ -159,29 +155,4 @@ export default function Presentation(props: {
       />
     </div>
   );
-}
-async function rasterize(request: VectorRequest) {
-  const url = URL.createObjectURL(request.blob);
-  const image = new Image();
-  image.src = url;
-  try {
-    await image.decode();
-    const shrink = Math.min(1, maxImageSide / Math.max(image.naturalWidth, image.naturalHeight));
-    const size = request.size ?? {
-      width: Math.max(1, Math.round(image.naturalWidth * shrink)),
-      height: Math.max(1, Math.round(image.naturalHeight * shrink)),
-    };
-    return {
-      asset: request.asset,
-      bitmap: await createImageBitmap(image, {
-        resizeWidth: size.width,
-        resizeHeight: size.height,
-        resizeQuality: "high",
-      }),
-    };
-  } catch {
-    return { asset: request.asset, bitmap: undefined };
-  } finally {
-    URL.revokeObjectURL(url);
-  }
 }

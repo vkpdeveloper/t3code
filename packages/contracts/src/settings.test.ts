@@ -10,10 +10,15 @@ import {
 import {
   ClientSettingsSchema,
   ClientSettingsPatch,
+  ClientServerSettingsPatch,
   ClaudeSettings,
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
+  DEFAULT_LAYOUT_SETTINGS,
+  DEFAULT_LAYOUT_TEMPLATE,
+  ProjectSettingsOverrides,
+  PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
@@ -36,9 +41,72 @@ const decodeStringOnlyEnvironment = Schema.decodeUnknownSync(
   ),
 );
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+const decodeClientServerSettingsPatch = Schema.decodeUnknownSync(ClientServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const encodeServerSettingsPatch = Schema.encodeSync(ServerSettingsPatch);
+const decodeProjectSettingsOverrides = Schema.decodeUnknownSync(ProjectSettingsOverrides);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+
+describe("client layout settings", () => {
+  it("preserves absence so old clients can migrate their primary environment's layout", () => {
+    expect(decodeClientSettings({}).layout).toBeUndefined();
+    expect(encodeClientSettings(decodeClientSettings({}))).not.toHaveProperty("layout");
+  });
+
+  it("defaults the remaining fields and round-trips a saved layout", () => {
+    const settings = decodeClientSettings({
+      layout: { terminalPlacement: "new-column" },
+      pinnedProjectKeys: ["project"],
+    });
+    expect(settings).not.toHaveProperty("pinnedProjectKeys");
+    expect(settings.layout).toEqual({
+      ...DEFAULT_LAYOUT_SETTINGS,
+      terminalPlacement: "new-column",
+    });
+    expect(decodeClientSettings(encodeClientSettings(settings))).toEqual(settings);
+    expect(
+      decodeClientSettingsPatch({
+        layout: { template: DEFAULT_LAYOUT_TEMPLATE },
+        pinnedProjectKeys: ["project"],
+      }),
+    ).toEqual({
+      layout: { template: DEFAULT_LAYOUT_TEMPLATE },
+    });
+  });
+
+  it.each([{ terminalPlacement: "new-tab" }, { template: "retired-shape" }])(
+    "strips server layout while retaining unknown project override keys: %j",
+    (layout) => {
+      const input = {
+        layout,
+        projectSettingsOverrides: { project: { layout, defaultAutoPull: true } },
+      };
+      const settings = decodeServerSettings(input);
+      expect(settings).not.toHaveProperty("layout");
+      expect(settings.projectSettingsOverrides).toEqual({
+        project: { layout, defaultAutoPull: true },
+      });
+      expect(decodeServerSettingsPatch(input)).toEqual({
+        projectSettingsOverrides: { project: { layout, defaultAutoPull: true } },
+      });
+      expect(decodeProjectSettingsOverrides({ layout, defaultAutoPull: true })).toEqual({
+        defaultAutoPull: true,
+      });
+    },
+  );
+});
+
+it("drops theme defaults from a client's settings patch", () => {
+  expect(
+    decodeClientServerSettingsPatch({
+      newWorktreesStartFromOrigin: false,
+      defaultTheme: "grove",
+      defaultThemeSetAt: "2026-11-13T00:00:00.000Z",
+      defaultAppearance: "dark",
+      defaultAppearanceSetAt: "2026-11-13T00:00:00.000Z",
+    }),
+  ).toEqual({ newWorktreesStartFromOrigin: false });
+});
 
 describe("storage cleanup settings", () => {
   it("keeps cleanup disabled for existing installations", () => {
@@ -311,6 +379,19 @@ describe("ClientSettings notifications", () => {
   });
 });
 
+describe("ClientSettings surface style", () => {
+  it("falls back to the gradient rim for a saved style that no longer exists", () => {
+    expect(decodeClientSettings({ surfaceStyle: "brutal" }).surfaceStyle).toBe("gradient-rim");
+    expect(decodeClientSettings({ surfaceStyle: "brushed-metal" }).surfaceStyle).toBe(
+      "gradient-rim",
+    );
+  });
+
+  it("rejects unsupported styles in a patch", () => {
+    expect(() => decodeClientSettingsPatch({ surfaceStyle: "brutal" })).toThrow();
+  });
+});
+
 describe("ClientSettings quit confirmation", () => {
   it.each([
     [true, "hold"],
@@ -490,6 +571,31 @@ describe("requiredScopesForProjectMutation", () => {
         scripts: [],
       }),
     ).toEqual(["orchestration:operate", "settings:write"]);
+  });
+});
+
+describe("voice settings", () => {
+  it("does not import voice consent from ordinary device preferences", () => {
+    const imported = {
+      voiceTranscriptionEnvironmentId: "env-1",
+      voiceTranscriptionDestination: { kind: "environment", environmentId: "env-1" },
+      speechPostProcessingEnabled: true,
+    };
+    expect(decodeClientSettings({}).speechSilenceFiltering).toBe(true);
+    expect(decodeClientSettingsPatch({ speechSilenceFiltering: false })).toEqual({
+      speechSilenceFiltering: false,
+    });
+    for (const key of Object.keys(imported)) {
+      expect(decodeClientSettings(imported)).not.toHaveProperty(key);
+      expect(decodeClientSettingsPatch(imported)).not.toHaveProperty(key);
+    }
+  });
+
+  it("keeps the correction cue personal and project vocabulary on the environment", () => {
+    expect(decodeClientSettings({}).speechCorrectionWord).toBe("");
+    expect(() => decodeClientSettingsPatch({ speechCorrectionWord: "x".repeat(51) })).toThrow();
+    expect(DEFAULT_SERVER_SETTINGS.speechProjectCustomWords).toEqual([]);
+    expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("speechProjectCustomWords");
   });
 });
 

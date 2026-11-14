@@ -1,7 +1,9 @@
+import { fileBasename } from "@t3tools/shared/path";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import type { EnvironmentPresentation } from "../../state/environments";
 import type { ResolvedSettingsScope, SettingsScopeSearch } from "./settingsScope";
 
+type ScopeCheckout = SidebarProjectSnapshot["memberProjects"][number];
 type ScopeEnvironment = Pick<EnvironmentPresentation, "environmentId" | "label" | "displayUrl">;
 
 export function settingsScopeEnvironmentAddress(environment: ScopeEnvironment) {
@@ -35,8 +37,7 @@ export function settingsScopeEnvironmentLabel(
   environment: ScopeEnvironment,
   environments: readonly ScopeEnvironment[],
 ) {
-  const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
-  return secondary ? `${primary} · ${secondary}` : primary;
+  return settingsScopeEnvironmentLabels(environment, environments).primary;
 }
 
 export function settingsScopeProjectMachines(
@@ -46,13 +47,19 @@ export function settingsScopeProjectMachines(
 ) {
   const machines = group.memberProjects.map((member) => {
     const environment = environments.find((entry) => entry.environmentId === member.environmentId);
-    if (!environment) return member.environmentLabel ?? member.environmentId;
+    if (!environment)
+      return { primary: member.environmentLabel ?? member.environmentId, secondary: "" };
     const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
     const address =
       secondary || (includeAddresses ? settingsScopeEnvironmentAddress(environment) : "");
-    return includeAddresses || address ? `${primary} · ${address}` : primary;
+    return { primary, secondary: address };
   });
-  return Array.from(new Set(machines));
+  return machines.filter(
+    (machine, index) =>
+      machines.findIndex(
+        (other) => other.primary === machine.primary && other.secondary === machine.secondary,
+      ) === index,
+  );
 }
 
 export const ALL_ENVIRONMENTS_VALUE = "all";
@@ -97,6 +104,46 @@ export function selectProjectAxis(search: SettingsScopeSearch, value: string): S
   return next;
 }
 
+/** Empty unless the selection spans several checkouts of one environment, which only this axis can split. */
+export function settingsScopeCheckoutChoices(
+  group: SidebarProjectSnapshot,
+  search: Pick<SettingsScopeSearch, "machine" | "checkout">,
+): readonly ScopeCheckout[] {
+  const selected = group.memberProjects.find(
+    (member) => member.physicalProjectKey === search.checkout,
+  );
+  const environmentId = search.machine ?? selected?.environmentId;
+  const members =
+    environmentId === undefined
+      ? group.memberProjects
+      : group.memberProjects.filter((member) => member.environmentId === environmentId);
+  return members.length > 1 &&
+    members.every((member) => member.environmentId === members[0]!.environmentId)
+    ? members
+    : [];
+}
+
+export function selectCheckoutAxis(
+  search: SettingsScopeSearch,
+  checkout: ScopeCheckout | null,
+): SettingsScopeSearch {
+  const { checkout: _previous, ...rest } = search;
+  return checkout
+    ? { ...rest, machine: checkout.environmentId, checkout: checkout.physicalProjectKey }
+    : rest;
+}
+
+/** Repeated folder names fall back to the full path so the closed menu still identifies the checkout. */
+export function settingsScopeCheckoutLabel(
+  checkout: ScopeCheckout,
+  checkouts: readonly ScopeCheckout[],
+) {
+  const name = fileBasename(checkout.workspaceRoot);
+  return checkouts.filter((other) => fileBasename(other.workspaceRoot) === name).length > 1
+    ? checkout.workspaceRoot
+    : name;
+}
+
 export function selectSingleEnvironmentScope(
   search: SettingsScopeSearch,
   scope: ResolvedSettingsScope,
@@ -117,3 +164,17 @@ export function selectSingleEnvironmentScope(
     candidates[0];
   return selected ? { ...search, machine: selected.environmentId } : search;
 }
+
+/** Pages whose settings belong to this device and do not offer scope selection. */
+export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
+  "/settings/general",
+  "/settings/appearance",
+  "/settings/chat",
+  "/settings/diffs",
+  "/settings/layout",
+  "/settings/snap-shot",
+  "/settings/connections",
+  // Network access and authorized clients belong to the environment serving this app.
+  "/settings/access",
+  "/settings/about",
+]);

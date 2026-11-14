@@ -20,6 +20,7 @@ import {
 import { AsyncResult } from "effect/reactivity";
 import { useState, type MouseEvent as ReactMouseEvent } from "react";
 
+import type { ComposerThreadTarget } from "~/composerDraftStore";
 import { useLiveRefresh } from "~/hooks/useLiveRefresh";
 import { usePullRequestChecksRefresh } from "~/hooks/usePullRequestChecksRefresh";
 import { cn } from "~/lib/utils";
@@ -53,6 +54,8 @@ import {
   usePullRequestActionRunner,
   usePullRequestDefaultMergeMethodResolver,
   usePullRequestHandoffs,
+  writeHandoffToComposer,
+  type PullRequestThreadTask,
 } from "../pullRequest/usePullRequestActions";
 import {
   ChangeRequestStatusIcon,
@@ -69,12 +72,13 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LABEL_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+  THREAD_DETAILS_PANEL_ACTION_GROUP_CLASS,
 } from "./threadDetailsPanelStyles";
 
 // A null checks response is settled; polling cannot find checks.
@@ -93,6 +97,7 @@ export function ThreadDetailsPrRow({
   onOpen,
   onActed,
   onStopWatching,
+  composerTarget,
 }: {
   environmentId: EnvironmentId;
   pr: ThreadPr;
@@ -105,6 +110,8 @@ export function ThreadDetailsPrRow({
   onOpen: (event: ReactMouseEvent<HTMLElement>) => void;
   onActed?: () => void;
   onStopWatching?: (() => void) | undefined;
+  /** Fix and Resolve write here instead of checking the pull request out in a new thread. */
+  composerTarget?: ComposerThreadTarget | undefined;
 }) {
   const serverConfigs = useServerConfigs();
   const supportsPullRequests = serverConfigs.get(environmentId) !== undefined;
@@ -163,7 +170,6 @@ export function ThreadDetailsPrRow({
     reference,
     terminology,
     onSuccess: () => {
-      detailQuery.refresh();
       checksQuery.refresh();
       onActed?.();
     },
@@ -190,21 +196,35 @@ export function ThreadDetailsPrRow({
     lastSelectedMergeMethod,
   );
 
+  const handOff = (kind: "conflicts" | "findings", task: PullRequestThreadTask) => {
+    if (composerTarget === undefined) {
+      void startHandoff(kind, task);
+      return;
+    }
+    writeHandoffToComposer(composerTarget, task);
+    toastManager.add({
+      type: "success",
+      title: "Added to the composer",
+      description: "The task is in the composer. Read it over, then send.",
+    });
+  };
+
   const startResolveConflicts = () => {
     if (detail === null) return;
-    void startHandoff("conflicts", {
+    handOff("conflicts", {
       prompt: buildResolveConflictsPrompt({
         number: detail.number,
         url: detail.url,
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
+        inThisThread: composerTarget !== undefined,
       }),
     });
   };
 
   const startFixChecks = () => {
     if (detail === null) return;
-    void startHandoff(
+    handOff(
       "findings",
       buildFixFindingsHandoff({
         number: detail.number,
@@ -212,10 +232,13 @@ export function ThreadDetailsPrRow({
         url: detail.url,
         headBranch: detail.headBranch,
         baseBranch: detail.baseBranch,
+        state: detail.state,
+        isDraft: detail.isDraft,
         reviewThreads: [],
         comments: [],
         checks: detail.checks,
         commentsTruncated: false,
+        inThisThread: composerTarget !== undefined,
       }),
     );
   };
@@ -251,7 +274,7 @@ export function ThreadDetailsPrRow({
         side="top"
         align="start"
         sideOffset={4}
-        variant="glass"
+        variant="popover"
         className="max-w-80 text-left whitespace-normal"
       >
         <div className="flex min-w-0 max-w-80 flex-col gap-2 px-1 py-2">
@@ -285,7 +308,11 @@ export function ThreadDetailsPrRow({
                   }
                 />
                 <div className="min-w-0 truncate text-foreground/75">
-                  {describePullRequestChecks(detail.checks)}
+                  {describePullRequestChecks(detail.checks).map((fact) => (
+                    <span className="block" key={fact}>
+                      {fact}
+                    </span>
+                  ))}
                 </div>
               </div>
             ) : null}
@@ -317,6 +344,10 @@ export function ThreadDetailsPrRow({
       </TooltipPopup>
     );
 
+  const newThreadSuffix =
+    composerTarget === undefined ? (
+      <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />
+    ) : null;
   const trailingAction =
     rowAction === "resolve"
       ? {
@@ -324,8 +355,11 @@ export function ThreadDetailsPrRow({
           pendingLabel: "Preparing...",
           pending: handoff === "conflicts",
           destructive: true,
-          suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
-          tooltip: "Check the branch out and resolve the conflicts in a new thread",
+          suffix: newThreadSuffix,
+          tooltip:
+            composerTarget === undefined
+              ? "Check the branch out and resolve the conflicts in a new thread"
+              : "Resolve the conflicts in this thread",
           onClick: startResolveConflicts,
         }
       : rowAction === "ready"
@@ -341,11 +375,19 @@ export function ThreadDetailsPrRow({
         : rowAction === "fix"
           ? {
               label: "Fix",
-              pendingLabel: "Preparing...",
+              pendingLabel: "Fix",
               pending: handoff === "findings",
               destructive: true,
-              suffix: <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />,
-              tooltip: "Fix the failing checks in a new thread",
+              suffix:
+                handoff === "findings" ? (
+                  <Spinner size="xs" aria-label="Preparing fix" />
+                ) : (
+                  newThreadSuffix
+                ),
+              tooltip:
+                composerTarget === undefined
+                  ? "Fix the failing checks in a new thread"
+                  : "Fix the failing checks in this thread",
               onClick: startFixChecks,
             }
           : rowAction === "merge"
@@ -362,7 +404,7 @@ export function ThreadDetailsPrRow({
 
   const watching =
     onStopWatching !== undefined && (detail?.state ?? pr?.state ?? "open") === "open";
-  const watchControl = (part: "secondary" | "icon") =>
+  const watchControl = (compact: boolean) =>
     watching ? (
       <Tooltip>
         <TooltipTrigger
@@ -371,7 +413,7 @@ export function ThreadDetailsPrRow({
               type="button"
               variant="ghost"
               size="sm"
-              part={part}
+              part="icon"
               className="group/watch"
               aria-label={`Stop watching #${number}`}
               onClick={onStopWatching}
@@ -380,14 +422,11 @@ export function ThreadDetailsPrRow({
         >
           <EyeIcon
             aria-hidden
-            className={cn(part === "icon" ? "size-3.5" : "size-4", "group-hover/watch:hidden")}
+            className={cn(compact ? "size-3.5" : "size-4", "group-hover/watch:hidden")}
           />
           <EyeOffIcon
             aria-hidden
-            className={cn(
-              part === "icon" ? "size-3.5" : "size-4",
-              "hidden group-hover/watch:block",
-            )}
+            className={cn(compact ? "size-3.5" : "size-4", "hidden group-hover/watch:block")}
           />
         </TooltipTrigger>
         <TooltipPopup side="top">
@@ -397,8 +436,7 @@ export function ThreadDetailsPrRow({
       </Tooltip>
     ) : null;
 
-  // The title row wraps to two lines; a conventional-commit prefix eats most of one line.
-  const openRow = (text: string, part: "row" | "primary", wrap = false) => (
+  const openRow = (text: string, grow = false) => (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -406,9 +444,7 @@ export function ThreadDetailsPrRow({
             type="button"
             variant="ghost"
             size="sm"
-            part={part}
-            multiline={wrap}
-            className={wrap ? "items-start [&>svg]:mt-0.5" : undefined}
+            className={grow ? "flex-1" : undefined}
             aria-label={openAriaLabel}
             onClick={onOpen}
             onAuxClick={onOpen}
@@ -416,14 +452,7 @@ export function ThreadDetailsPrRow({
         }
       >
         {icon}
-        <span
-          className={cn(
-            "min-w-0 flex-1 text-left",
-            wrap
-              ? "line-clamp-2 whitespace-normal leading-4.5"
-              : cn("truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
-          )}
-        >
+        <span className={cn("min-w-0 flex-1 truncate text-left", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
           {text}
         </span>
       </TooltipTrigger>
@@ -436,51 +465,72 @@ export function ThreadDetailsPrRow({
   return (
     <>
       {detail !== null && (showChecks || trailingAction !== null || watching) ? (
-        <div className="pb-1.5">
-          {openRow(detail.title, "row", true)}
-          <div className="mt-1.5 flex h-5 min-w-0 items-center gap-0.5 ps-9 pe-2.5 text-xs text-muted-foreground">
-            <span className="me-1 shrink-0 tabular-nums">#{number}</span>
+        <div className="flex min-h-9 min-w-0 items-center gap-2.5 ps-2.5 pe-1">
+          {icon}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ThreadDetailsControl
+                    part="heading"
+                    aria-label={openAriaLabel}
+                    onClick={onOpen}
+                    onAuxClick={onOpen}
+                  />
+                }
+              >
+                <span className="truncate text-meta text-foreground">
+                  #{number} {detail.title}
+                </span>
+              </TooltipTrigger>
+              {rowTooltip}
+            </Tooltip>
             {showChecks && checksRollup !== null ? (
               <PullRequestChecksPopover
                 checksState={checksRollup}
                 checks={detail.checks}
-                variant="count"
-                render={<ThreadDetailsControl part="meta" />}
+                label={
+                  <span
+                    className={cn(
+                      "truncate text-caption",
+                      checksRollup === "failing"
+                        ? "text-error-foreground"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {describePullRequestChecks(detail.checks)[0]}
+                  </span>
+                }
               />
             ) : null}
-            {watchControl("icon")}
-            <span className="flex-1" />
-            {trailingAction ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ThreadDetailsControl
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      part="meta"
-                      tone={trailingAction.destructive ? "destructive" : "primary"}
-                      disabled={actionPending || handoff !== null}
-                      onClick={trailingAction.onClick}
-                    />
-                  }
-                >
-                  {trailingAction.pending ? trailingAction.pendingLabel : trailingAction.label}
-                  {trailingAction.suffix}
-                </TooltipTrigger>
-                <TooltipPopup side="top">{trailingAction.tooltip}</TooltipPopup>
-              </Tooltip>
-            ) : null}
           </div>
+          {watchControl(true)}
+          {trailingAction ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ThreadDetailsControl
+                    part="meta"
+                    tone={trailingAction.destructive ? "destructive" : "primary"}
+                    disabled={actionPending || handoff !== null}
+                    onClick={trailingAction.onClick}
+                  />
+                }
+              >
+                {trailingAction.pending ? trailingAction.pendingLabel : trailingAction.label}
+                {trailingAction.suffix}
+              </TooltipTrigger>
+              <TooltipPopup side="top">{trailingAction.tooltip}</TooltipPopup>
+            </Tooltip>
+          ) : null}
         </div>
       ) : watching ? (
-        <div className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}>
-          {openRow(label, "primary")}
-          <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
-          {watchControl("secondary")}
+        <div className={THREAD_DETAILS_PANEL_ACTION_GROUP_CLASS}>
+          {openRow(label, true)}
+          {watchControl(false)}
         </div>
       ) : (
-        openRow(label, "row")
+        openRow(label)
       )}
       {rowAction === "merge" ? (
         <AlertDialog open={confirmingMerge} onOpenChange={(open) => setConfirmingMerge(open)}>
@@ -492,7 +542,7 @@ export function ThreadDetailsPrRow({
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogClose render={<Button variant="outline" size="sm" />}>
+              <AlertDialogClose render={<Button variant="secondary" size="sm" />}>
                 Cancel
               </AlertDialogClose>
               <Button

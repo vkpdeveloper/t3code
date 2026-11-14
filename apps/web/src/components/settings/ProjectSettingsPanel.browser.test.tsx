@@ -39,7 +39,7 @@ const state = vi.hoisted(() => ({
       (request: {
         environmentId: EnvironmentId;
         input: UpdateProjectInput;
-      }) => Promise<AsyncResult.Success<void>>
+      }) => Promise<AsyncResult.Success<void> | AsyncResult.Failure<void, Error>>
     >(),
   delete:
     vi.fn<
@@ -132,12 +132,15 @@ vi.mock(import("../files/projectFilesQueryState"), async (original) => ({
   getProjectFileQueryAtom: () => missingProjectFile,
 }));
 
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { assetEnvironment } from "../../state/assets";
 import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import { ProjectSettingsPanel } from "./ProjectSettingsPanel";
 import { ProjectsSettings } from "./ProjectsSettings";
 import { SettingsScopeProvider } from "./SettingsScopeContext";
+import { SettingsBreadcrumb } from "./SettingsBreadcrumb";
 import { SettingsScopeNotice } from "./SettingsScopeNotice";
 import { validateSettingsScopeSearch, type SettingsScopeSearch } from "./settingsScope";
 import { retainSettingsScope, validateSettingsRouteSearch } from "./settingsScopeNavigation";
@@ -280,6 +283,7 @@ async function mountSettings(search: SettingsScopeSearch) {
         search={route.useSearch()}
         onChange={(next) => void router.navigate({ to: "/settings/projects", search: () => next })}
       >
+        <SettingsBreadcrumb pathname="/settings/projects" />
         <ProjectsSettings />
       </SettingsScopeProvider>
     ),
@@ -307,7 +311,7 @@ const removeCheckout = (screen: Screen, root: string) =>
   screen.container.querySelector<HTMLButtonElement>(`[aria-label="Remove checkout ${root}"]`)!;
 const removeAll = (screen: Screen) =>
   [...screen.container.querySelectorAll("button")].find((button) =>
-    button.textContent?.includes("Remove all entries"),
+    button.textContent?.includes("Remove project"),
   )!;
 
 async function grant(id: EnvironmentId, result: SessionResult) {
@@ -415,6 +419,37 @@ describe("project settings permissions", () => {
     await vi.waitFor(() => expect(state.releaseUploads).toHaveBeenCalledOnce());
     expect(state.clearDraft).toHaveBeenCalledOnce();
     expect(screen.router.state.location.href).toBe(initialHref);
+  });
+
+  it("moves a draft on the removed checkout to a remaining checkout of the group", async () => {
+    setup();
+    const draftId = DraftId.make("draft-handed-off");
+    const [primaryProject, remoteProject] = state.projects;
+    const drafts = useComposerDraftStore.getState();
+    drafts.setLogicalProjectDraftThreadId(
+      "github.com/example/shared-repo",
+      scopeProjectRef(primaryId, primaryProject!.id),
+      draftId,
+    );
+    // "Add to another machine" hands the open draft to the new checkout this way.
+    drafts.setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(remoteId, remoteProject!.id),
+      environmentSelection: "manual",
+      loadBalancedEnvironmentId: null,
+    });
+    drafts.setPrompt(draftId, "keep this prompt");
+    await using screen = await mountPanel();
+
+    await userEvent.click(removeCheckout(screen, "/work/remote"));
+    await vi.waitFor(() => expect(state.releaseUploads).toHaveBeenCalledOnce());
+
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
+      environmentId: primaryId,
+      projectId: primaryProject!.id,
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+      "keep this prompt",
+    );
   });
 
   it("rechecks every removal target after confirmation before deleting or clearing drafts", async () => {
@@ -532,6 +567,40 @@ describe("project identity reset", () => {
       },
     ]);
   });
+
+  it("refreshes a saved checkout's icon when a later checkout update fails", async () => {
+    setup();
+    state.projects = state.projects.map((project) => ({ ...project, faviconPath: "logo.png" }));
+    let iconExists = false;
+    const iconUrl = Atom.make(() =>
+      AsyncResult.success({
+        expiresAt: 4_000_000_000_000,
+        relativeUrl: iconExists ? "/restored-icon.svg" : "/project-favicon-missing",
+      }),
+    );
+    using _mount = { [Symbol.dispose]: appAtomRegistry.mount(iconUrl) };
+    const createUrl = assetEnvironment.createUrl;
+    using _createUrl = vi
+      .spyOn(assetEnvironment, "createUrl")
+      .mockImplementation((target) =>
+        target.environmentId === primaryId ? iconUrl : createUrl(target),
+      );
+    state.update
+      .mockResolvedValueOnce(AsyncResult.success(undefined))
+      .mockResolvedValueOnce(AsyncResult.failure(Cause.fail(new Error("Save failed"))));
+    await using screen = await mountPanel();
+    expect(appAtomRegistry.get(iconUrl).value.relativeUrl).toBe("/project-favicon-missing");
+
+    iconExists = true;
+    await userEvent.click(resetButton(screen, "project icon")!);
+
+    await vi.waitFor(() =>
+      expect(appAtomRegistry.get(iconUrl).value.relativeUrl).toBe("/restored-icon.svg"),
+    );
+    expect(state.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Failed to update project icon on remote" }),
+    );
+  });
 });
 
 it("opens the fallback search target across all environments from a checkout", async () => {
@@ -577,16 +646,16 @@ it("opens the fallback search target across all environments from a checkout", a
 });
 
 describe("project settings scope", () => {
-  const environmentMenu = () => page.getByRole("button", { name: /^Environment scope:/ });
-  const primaryOption = () => page.getByRole("menuitemradio", { name: /^primary/ });
-  const remoteOption = () => page.getByRole("menuitemradio", { name: /^remote/ });
+  const scopeMenu = () => page.getByRole("button", { name: /^Settings scope:/ });
+  const primaryOption = () => page.getByRole("button", { name: /^primary/ });
+  const remoteOption = () => page.getByRole("button", { name: /^remote/ });
 
   it("offers every environment while no project is selected", async () => {
     setup();
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     await using _screen = await mountSettings({});
 
-    await userEvent.click(environmentMenu());
+    await userEvent.click(scopeMenu());
     await expect.element(primaryOption()).toBeVisible();
     await expect.element(remoteOption()).toBeVisible();
   });
@@ -597,9 +666,39 @@ describe("project settings scope", () => {
     await using _screen = await mountSettings({ project: projectKey() });
 
     await expect.element(page.getByRole("textbox", { name: "Project name" })).toBeVisible();
-    await userEvent.click(environmentMenu());
+    await userEvent.click(scopeMenu());
     await expect.element(primaryOption()).toBeVisible();
     await expect.element(remoteOption()).not.toBeInTheDocument();
+  });
+
+  it("reaches each checkout on one environment and returns to all of them", async () => {
+    setup();
+    const [first] = state.projects;
+    state.projects = [
+      { ...first!, id: ProjectId.make("clone-a"), workspaceRoot: "/work/clone-a" },
+      { ...first!, id: ProjectId.make("clone-b"), workspaceRoot: "/work/clone-b" },
+    ];
+    const key = projectKey();
+    await using screen = await mountSettings({ project: key, machine: primaryId });
+
+    await userEvent.click(scopeMenu());
+    await userEvent.click(page.getByRole("button", { name: /^clone-b/ }));
+
+    await expect
+      .element(page.getByRole("button", { name: /^Settings scope: .* in clone-b$/ }))
+      .toBeVisible();
+    expect(screen.router.state.location.search).toMatchObject({
+      project: key,
+      machine: primaryId,
+      checkout: expect.stringContaining("clone-b"),
+    });
+
+    await userEvent.click(scopeMenu());
+    await userEvent.click(page.getByRole("button", { name: /^All checkouts/ }));
+
+    await vi.waitFor(() =>
+      expect(screen.router.state.location.search).toEqual({ project: key, machine: primaryId }),
+    );
   });
 
   it("keeps an unknown project recoverable from any environment", async () => {
@@ -607,7 +706,7 @@ describe("project settings scope", () => {
     state.projects = state.projects.filter((project) => project.environmentId === primaryId);
     await using screen = await mountSettings({ project: "removed-project" });
 
-    await userEvent.click(environmentMenu());
+    await userEvent.click(scopeMenu());
     await expect.element(primaryOption()).toBeVisible();
     await expect.element(remoteOption()).toBeVisible();
     await userEvent.click(remoteOption());
@@ -636,9 +735,8 @@ describe("project settings scope", () => {
     });
 
     await expect.element(page.getByText(message, { exact: true })).toBeVisible();
-    await expect.element(page.getByRole("button", { name: /^Project scope:/ })).toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "Environment scope: remote" }))
+      .element(page.getByRole("button", { name: "Settings scope: Shared repo on remote" }))
       .toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "Show all environments" }));
 
@@ -647,7 +745,7 @@ describe("project settings scope", () => {
       .toHaveValue("Shared repo");
     expect(screen.router.state.location.search).toEqual({ project: key });
     await expect
-      .element(page.getByRole("button", { name: "Environment scope: All environments" }))
+      .element(page.getByRole("button", { name: "Settings scope: Shared repo", exact: true }))
       .toBeVisible();
     await expect.element(page.getByText(message, { exact: true })).not.toBeInTheDocument();
     await expect

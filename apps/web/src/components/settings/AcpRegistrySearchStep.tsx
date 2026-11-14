@@ -1,5 +1,9 @@
 import { pipe } from "effect/Function";
-import { ACP_REGISTRY_MAX_AGENTS, AuthProvidersManageScope } from "@t3tools/contracts";
+import {
+  ACP_REGISTRY_MAX_AGENTS,
+  ACP_REGISTRY_SEARCH_QUERY_MAX_LENGTH,
+  AuthProvidersManageScope,
+} from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import {
   isAtomCommandInterrupted,
@@ -90,7 +94,11 @@ export function useAcpRegistrySearch(environmentId: EnvironmentId, enabled: bool
     prepareError,
     type: (text: string) => {
       setPrepareError(null);
-      setInput({ text, submitted: submittedQuery, typedAt: Date.now() });
+      setInput({
+        text: text.slice(0, ACP_REGISTRY_SEARCH_QUERY_MAX_LENGTH),
+        submitted: submittedQuery,
+        typedAt: Date.now(),
+      });
     },
     submit: () => {
       const trimmed = input.text.trim();
@@ -168,6 +176,7 @@ export function AcpRegistrySearchStep({
           </InputGroupAddon>
           <InputGroupInput
             aria-label="Search ACP Registry"
+            maxLength={ACP_REGISTRY_SEARCH_QUERY_MAX_LENGTH}
             disabled={preparingId !== null}
             onChange={(event) => registry.type(event.currentTarget.value)}
             placeholder="Search agents…"
@@ -181,7 +190,7 @@ export function AcpRegistrySearchStep({
           onClick={onManualConfiguration}
           size="sm"
           type="button"
-          variant="ghost-muted"
+          variant="secondary"
         >
           Enter manually
         </Button>
@@ -191,7 +200,7 @@ export function AcpRegistrySearchStep({
             onClick={onLocalConfiguration}
             size="sm"
             type="button"
-            variant="outline"
+            variant="secondary"
           >
             Local ACP command
           </Button>
@@ -222,7 +231,7 @@ export function AcpRegistrySearchStep({
 
       {results ? (
         results.length === 0 ? (
-          <div className="flex min-h-28 flex-col items-center justify-center rounded-2xl border border-dashed px-4 text-center">
+          <div className="flex min-h-28 flex-col items-center justify-center rounded-card border border-dashed border-border surface-card-settings px-4 text-center">
             <p className="text-sm font-medium">No compatible agents found</p>
             <p className="mt-1 text-xs text-muted-foreground">Try a broader search.</p>
           </div>
@@ -275,7 +284,9 @@ function AcpRegistryAgentRow({
           />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-baseline gap-2">
-              <h4 className="min-w-0 truncate text-sm font-medium text-foreground">{agent.name}</h4>
+              <h4 className="min-w-0 truncate text-sm font-medium text-strong-foreground">
+                {agent.name}
+              </h4>
             </div>
             {agent.description ? (
               <p className="mt-0.5 truncate text-xs text-muted-foreground">{agent.description}</p>
@@ -289,7 +300,7 @@ function AcpRegistryAgentRow({
                 render={
                   <Button
                     size="icon-xs"
-                    variant="ghost-muted"
+                    variant="secondary"
                     aria-label={`About ${agent.name}`}
                     render={<a href={aboutUrl} target="_blank" rel="noreferrer" />}
                   >
@@ -305,7 +316,7 @@ function AcpRegistryAgentRow({
             disabled={!canAdd || alreadyAdded}
             onClick={() => onAdd(agent)}
             size="xs"
-            variant={isPreparing ? "secondary" : "outline"}
+            variant={isPreparing ? "secondary" : "secondary"}
           >
             {alreadyAdded ? "Added" : isPreparing ? progressLabel : "Add"}
           </Button>

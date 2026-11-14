@@ -4,6 +4,7 @@ import {
   CheckpointScopeId,
   MessageId,
   ContextHandoffId,
+  ProviderSessionId,
   ProviderThreadId,
   NodeId,
   EventId,
@@ -13,6 +14,7 @@ import {
   ThreadId,
   TurnItemId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
   OrchestrationV2TurnItem,
@@ -28,7 +30,8 @@ import {
   projectTurnItemForWire,
   projectTurnItemForDetail,
   projectDomainEventForWire,
-} from "./WireProjection.ts";
+  projectStoredEventForWire,
+} from "@t3tools/shared/wireProjection";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
 import { MAX_TOOL_OUTPUT_IMAGES, toolOutputImages } from "@t3tools/shared/toolOutput";
 
@@ -172,6 +175,15 @@ describe("orchestration V2 wire projection", () => {
       summary: '"'.repeat(159) + "…",
       truncated: true,
     });
+
+    const boundary = projectTurnItemForWire({
+      ...base,
+      input: { text: "a".repeat(149) + "😀" + "b".repeat(17_000) },
+    });
+    expect(boundary.type === "dynamic_tool" ? boundary.input : null).toEqual({
+      summary: '{"text":"' + "a".repeat(149) + "…",
+      truncated: true,
+    });
   });
 
   it("truncates detail at a UTF-8 boundary without changing the source", () => {
@@ -216,6 +228,45 @@ describe("orchestration V2 wire projection", () => {
       output: { content: [{ type: "image", mimeType: "image/png" }] },
     });
     expect(item.output.content[0]?.source.data).toBe(data);
+
+    const t3McpApp = {
+      attachmentId: "app-html",
+      server: "repro",
+      tool: "chart",
+      resourceUri: "ui://repro/chart",
+    };
+    const text = { type: "text", text: "Rendered chart" };
+    const appItem = {
+      ...item,
+      toolName: "repro.chart",
+      output: {
+        t3McpApp,
+        result: { content: [text, { type: "image", mimeType: "image/png", data }] },
+      },
+    };
+    expect(projectTurnItemForDetail(appItem)).toMatchObject({
+      output: { t3McpApp, result: { content: [text, { type: "image", mimeType: "image/png" }] } },
+    });
+    const largeOutput = projectTurnItemForDetail(appItem);
+    expect(
+      JSON.stringify(largeOutput.type === "dynamic_tool" ? largeOutput.output : null),
+    ).not.toContain(data);
+
+    const smallApp = {
+      t3McpApp,
+      result: { content: [text, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }] },
+    };
+    expect(projectTurnItemForDetail({ ...appItem, output: smallApp })).toMatchObject({
+      output: smallApp,
+    });
+
+    const forged = projectTurnItemForDetail({
+      ...appItem,
+      output: { t3McpApp: { ...t3McpApp, resourceUri: data }, result: { content: [text] } },
+    });
+    expect(
+      JSON.stringify(forged.type === "dynamic_tool" ? forged.output : null).length,
+    ).toBeLessThan(270_000);
   });
 
   it("keeps image markers when the rest of a tool output is too large to send", () => {
@@ -282,6 +333,89 @@ describe("orchestration V2 wire projection", () => {
     expect(projected).toMatchObject({ exitCode: 0, outputOmitted: true });
   });
 
+  it("keeps the failed test count from a test runner summary", () => {
+    const item = {
+      ...base,
+      type: "command_execution" as const,
+      input: "pnpm vitest run ChatComposer",
+      output: `${"x".repeat(40_000)}\n      Tests  2 failed | 12 passed (14)`,
+      exitCode: 1,
+    };
+    const projected = projectTurnItemForWire(item);
+    expect(projected).not.toHaveProperty("output");
+    expect(projected).toMatchObject({ outputIndicatesFailure: true, failedTestCount: 2 });
+    expect(
+      projectTurnItemForWire({ ...item, input: "bun typecheck", output: "Tests  2 failed" }),
+    ).not.toHaveProperty("failedTestCount");
+  });
+
+  it("counts header-like changed lines inside each file's hunks", () => {
+    const diffStr = [
+      "diff --git a/a.sql b/a.sql",
+      "--- a/a.sql",
+      "+++ b/a.sql",
+      "@@ -1,2 +1 @@",
+      "--- comment",
+      "----",
+      "+++counter",
+      "diff --git a/b.txt b/b.txt",
+      "--- a/b.txt",
+      "+++ b/b.txt",
+      "@@ -1 +1 @@",
+      "--- old",
+      "+++new",
+    ].join("\n");
+    expect(
+      projectTurnItemForWire({ ...base, type: "file_change", fileName: "a.sql", diffStr }),
+    ).toMatchObject({ additions: 2, deletions: 3 });
+  });
+
+  it("derives change counts from the diffs providers report", () => {
+    const fileChange = { ...base, type: "file_change" as const, fileName: "src/main.ts" };
+    expect(
+      projectTurnItemForWire({
+        ...fileChange,
+        diffStr: "@@ -1,3 +1,3 @@\n a\n-b\n+c\n+d\n@@ -9 +10 @@\n-e",
+      }),
+    ).toMatchObject({ additions: 2, deletions: 2 });
+    const claudeEdit = JSON.stringify({
+      filePath: "src/main.ts",
+      oldString: '-"not counted"',
+      originalFile: '+ "[\\"-x\\"]"',
+      structuredPatch: [{ oldStart: 1, lines: [" keep", "-old", "+new", '+"quoted"'] }],
+    });
+    const projected = projectTurnItemForWire({ ...fileChange, diffStr: claudeEdit });
+    expect(projected).toMatchObject({ additions: 2, deletions: 1 });
+    expect(projected).not.toHaveProperty("diffStr");
+    expect(
+      projectTurnItemForWire({
+        ...fileChange,
+        diffStr: JSON.stringify({ type: "create", content: "a\nb\nc\n", structuredPatch: [] }),
+      }),
+    ).toMatchObject({ additions: 3, deletions: 0 });
+    expect(
+      projectTurnItemForWire({ ...fileChange, oldStr: "a\nb\nc", newStr: "a\nx\ny\nc" }),
+    ).toMatchObject({ additions: 2, deletions: 1 });
+    expect(projectTurnItemForWire({ ...fileChange, diffStr: "not a diff" })).not.toHaveProperty(
+      "additions",
+    );
+    for (const operation of ["add", "delete"] as const) {
+      for (const content of ["hi\n", "\nhi\n\n", '{"hello": true}\n', ""]) {
+        const lines = content === "" ? 0 : content.split("\n").length - 1;
+        expect(
+          projectTurnItemForWire({
+            ...fileChange,
+            diffStr: content,
+            changes: [{ operation, path: fileChange.fileName }],
+          }),
+        ).toMatchObject({
+          additions: operation === "add" ? lines : 0,
+          deletions: operation === "delete" ? lines : 0,
+        });
+      }
+    }
+  });
+
   it("omits inline file bodies but preserves file identity and change counts", () => {
     const item = {
       ...base,
@@ -337,6 +471,38 @@ describe("orchestration V2 wire projection", () => {
     expect(JSON.stringify(projected)).not.toContain("PRIVATE_BODY");
     expect(event.payload.output).toBe(output);
     expect(projectDomainEventForWire(projected)).toEqual(projected);
+  });
+
+  it("shares one wire projection per stored event", () => {
+    const tool: OrchestrationV2StoredEvent = {
+      sequence: 1,
+      commandId: null,
+      event: {
+        id: EventId.make("shared-tool-event"),
+        type: "turn-item.updated",
+        threadId: base.threadId,
+        occurredAt: base.updatedAt,
+        payload: { ...base, output: { content: [{ type: "text", text: "PRIVATE_BODY" }] } },
+      },
+    };
+    const projected = projectStoredEventForWire(tool);
+    expect(projected).toEqual({ ...tool, event: projectDomainEventForWire(tool.event) });
+    expect(projectStoredEventForWire(tool)).toBe(projected);
+    const detached: OrchestrationV2StoredEvent = {
+      sequence: 2,
+      commandId: null,
+      event: {
+        id: EventId.make("detached-event"),
+        type: "provider-session.detached",
+        threadId: base.threadId,
+        occurredAt: base.updatedAt,
+        payload: {
+          providerSessionId: ProviderSessionId.make("session"),
+          detachedAt: base.updatedAt,
+        },
+      },
+    };
+    expect(projectStoredEventForWire(detached)).toBe(detached);
   });
 });
 

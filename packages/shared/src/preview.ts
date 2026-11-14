@@ -38,6 +38,20 @@ export function newPreviewTabId(): string {
   return `${TAB_ID_PREFIX}${nextPreviewTabSequence.toString(36)}`;
 }
 
+/**
+ * The server run a server tab was opened in: the preview manager suffixes
+ * server tabs with its run's epoch. Null for a desktop tab.
+ */
+export function previewTabServerRun(tabId: string): string | null {
+  return new RegExp(`^${TAB_ID_PREFIX}[0-9a-z]+_(.+)$`).exec(tabId)?.[1] ?? null;
+}
+
+/** Whether a server tab belongs to an earlier run of its server than `serverEpoch`. */
+export function isPreviewTabFromEarlierRun(tabId: string, serverEpoch: string): boolean {
+  const run = previewTabServerRun(tabId);
+  return run !== null && run !== serverEpoch;
+}
+
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
 export const LSOF_LOCAL_HOST_TOKENS: ReadonlySet<string> = new Set([
@@ -66,7 +80,7 @@ export class PreviewUrlNormalizationError extends Schema.TaggedError<PreviewUrlN
 ) {
   override get message(): string {
     const protocol = this.protocol === undefined ? "" : `: ${this.protocol}`;
-    return `Invalid preview URL (${this.reason}${protocol}; input length ${this.inputLength}).`;
+    return `Invalid preview URL (${this.reason}${protocol}; input length ${this.inputLength}). Use an http(s) URL or a schemeless host such as localhost:5173. With preview_open, omit url when creating a new tab to open a blank tab.`;
   }
 }
 
@@ -184,6 +198,14 @@ export function normalizePreviewUrl(rawUrl: string): string {
   const trimmed = rawUrl.trim();
   if (trimmed.length === 0) {
     throw new PreviewUrlNormalizationError({ inputLength: rawUrl.length, reason: "empty" });
+  }
+  const explicitProtocol = previewUrlProtocol(trimmed);
+  if (explicitProtocol !== undefined && KNOWN_NON_WEB_SCHEMES.has(explicitProtocol)) {
+    throw new PreviewUrlNormalizationError({
+      inputLength: rawUrl.length,
+      reason: "unsupported-protocol",
+      protocol: explicitProtocol,
+    });
   }
   const useHttp = LOOPBACK_PREFIX_PATTERN.test(trimmed);
   const candidate = URL_SCHEME_WITH_AUTHORITY_PATTERN.test(trimmed)

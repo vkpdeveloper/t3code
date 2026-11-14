@@ -1,4 +1,6 @@
+import type { RelayClientInstallProgressEvent } from "@t3tools/contracts";
 import { sha256 } from "@noble/hashes/sha2";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
@@ -88,7 +90,9 @@ const writeExecutable = (filePath: string, contents = "cloudflared") =>
   });
 
 type RelayClientTestServices =
-  | Layer.Success<ReturnType<typeof layerHostRuntime> | typeof NodeServices.layer>
+  | Layer.Success<
+      ReturnType<typeof layerHostRuntime> | typeof NodeServices.layer | typeof NodeCrypto.layer
+    >
   | HttpClient.HttpClient
   | ChildProcessSpawner.ChildProcessSpawner;
 
@@ -141,6 +145,7 @@ const testReleaseAsset = {
 const layerInstallRuntime = (platform: NodeJS.Platform) =>
   Layer.mergeAll(
     NodeServices.layer,
+    NodeCrypto.layer,
     layerHttpClient(testBinary),
     layerSpawner([]),
     layerHostRuntime({ PATH: "" }, platform),
@@ -178,6 +183,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(new Uint8Array()),
           layerSpawner([]),
           layerHostRuntime({ PATH: "" }),
@@ -338,6 +344,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(new Uint8Array()),
           layerSpawner([]),
           layerHostRuntime({ PATH: "" }),
@@ -396,6 +403,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(new TextEncoder().encode("test-binary")),
           layerSpawner([]),
           layerHostRuntime({ PATH: "" }),
@@ -422,11 +430,11 @@ describe("RelayClient", () => {
           },
         });
 
-        const progress: Array<string> = [];
+        const progress: Array<RelayClientInstallProgressEvent> = [];
         const installed = yield* manager.installWithProgress((event) =>
           Effect.sync(() => {
             if (event.type === "progress") {
-              progress.push(event.stage);
+              progress.push(event);
             }
           }),
         );
@@ -441,13 +449,13 @@ describe("RelayClient", () => {
           "test-cloudflared-binary",
         );
         expect(progress).toEqual([
-          "checking",
-          "waiting_for_lock",
-          "downloading",
-          "verifying",
-          "installing",
-          "validating",
-          "activating",
+          { type: "progress", stage: "checking" },
+          { type: "progress", stage: "waiting_for_lock" },
+          { type: "progress", stage: "downloading" },
+          { type: "progress", stage: "verifying", downloadedBytes: bytes.byteLength },
+          { type: "progress", stage: "installing", checksumVerified: true },
+          { type: "progress", stage: "validating" },
+          { type: "progress", stage: "activating" },
         ]);
         expect(yield* manager.resolve).toEqual(installed);
       }).pipe(
@@ -455,12 +463,54 @@ describe("RelayClient", () => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             layerHttpClient(new TextEncoder().encode("test-cloudflared-binary")),
             layerSpawner([]),
             layerHostRuntime(),
           ),
         ),
       ),
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "installs when the downloaded binary's first launch is held by an antivirus scan",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-cloudflared-test-",
+        });
+        const scanning = yield* Deferred.make<void>();
+        const manager = yield* RelayClient.makeCloudflaredRelayClient({
+          baseDir,
+          releaseAsset: testReleaseAsset,
+        }).pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Deferred.succeed(scanning, undefined).pipe(
+                Effect.andThen(Effect.sleep("25 seconds")),
+                Effect.as(
+                  makeHandle(
+                    0,
+                    `cloudflared version ${RelayClient.CLOUDFLARED_VERSION} (built 2026-01-01-00:00 UTC)\n`,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        const installing = yield* manager.install.pipe(Effect.forkChild);
+        yield* Deferred.await(scanning);
+        yield* TestClock.adjust("25 seconds");
+
+        expect(yield* Fiber.join(installing)).toMatchObject({
+          status: "available",
+          source: "managed",
+          version: RelayClient.CLOUDFLARED_VERSION,
+        });
+      }).pipe(Effect.scoped, Effect.provide(layerInstallRuntime("linux"))),
   );
 
   it.effect("rejects downloads whose checksum does not match the pinned manifest", () =>
@@ -478,9 +528,24 @@ describe("RelayClient", () => {
         },
       });
 
-      const error = yield* manager.install.pipe(Effect.flip);
+      const progress: Array<RelayClientInstallProgressEvent> = [];
+      const error = yield* manager
+        .installWithProgress((event) =>
+          Effect.sync(() => {
+            progress.push(event);
+          }),
+        )
+        .pipe(Effect.flip);
       expect(error).toBeInstanceOf(RelayClient.RelayClientInstallError);
       expect(error.reason).toBe("invalid_checksum");
+      expect(progress).toContainEqual({
+        type: "progress",
+        stage: "verifying",
+        downloadedBytes: new TextEncoder().encode("tampered").byteLength,
+      });
+      expect(
+        progress.some((event) => event.type === "progress" && event.checksumVerified === true),
+      ).toBe(false);
       expect(
         yield* fileSystem.exists(
           `${baseDir}/tools/cloudflared/${RelayClient.CLOUDFLARED_VERSION}/linux-x64/cloudflared.lock`,
@@ -491,6 +556,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(new TextEncoder().encode("tampered")),
           layerSpawner([]),
           layerHostRuntime(),
@@ -526,6 +592,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(bytes),
           layerSpawner(commands),
           layerHostRuntime(),
@@ -598,6 +665,7 @@ describe("RelayClient", () => {
       Effect.provide(
         Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           layerHttpClient(new Uint8Array()),
           layerSpawner([]),
           layerHostRuntime(configEnv, platform),
@@ -622,6 +690,7 @@ describe("RelayClient", () => {
         Effect.provide(
           Layer.mergeAll(
             NodeServices.layer,
+            NodeCrypto.layer,
             layerHttpClient(new Uint8Array()),
             layerSpawner([], options.versions),
             layerHostRuntime({ PATH: "" }),

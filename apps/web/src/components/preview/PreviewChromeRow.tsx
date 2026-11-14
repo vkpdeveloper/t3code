@@ -32,6 +32,7 @@ interface Props {
   onBack: () => void;
   onForward: () => void;
   onRefresh: () => void;
+  onStopLoading: () => void;
   onSubmit: (url: string) => void;
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
@@ -61,6 +62,7 @@ export function PreviewChromeRow({
   onBack,
   onForward,
   onRefresh,
+  onStopLoading,
   onSubmit,
   onOpenInBrowser,
   onCapture,
@@ -91,8 +93,8 @@ export function PreviewChromeRow({
     <div className="relative">
       <form
         onSubmit={submit}
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
-        data-surface-subheader
+        className="flex min-h-12.5 shrink-0 items-center gap-1.5 px-3 py-2.5"
+        data-preview-chrome
       >
         <div className="flex items-center gap-0.5" role="group" aria-label="Navigation">
           <Tooltip>
@@ -135,7 +137,7 @@ export function PreviewChromeRow({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={refreshDisabled ? NOOP : onRefresh}
+                  onClick={refreshDisabled ? NOOP : loading ? onStopLoading : onRefresh}
                   disabled={refreshDisabled}
                   aria-label={loading ? "Stop" : "Refresh"}
                   type="button"
@@ -144,13 +146,13 @@ export function PreviewChromeRow({
             >
               <RefreshIcon refreshing={loading} />
             </TooltipTrigger>
-            <TooltipPopup>{loading ? "Loading…" : "Refresh"}</TooltipPopup>
+            <TooltipPopup>{loading ? "Stop" : "Refresh"}</TooltipPopup>
           </Tooltip>
         </div>
 
         {leadingActions}
 
-        <InputGroup variant="ghost" className="group/address h-7 flex-1">
+        <InputGroup variant="default" className="group/address h-7.5 flex-1">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -167,6 +169,11 @@ export function PreviewChromeRow({
                     setInputFocused(false);
                   }}
                   onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                      // A trusted Enter would still submit the form implicitly.
+                      if (event.key === "Enter") event.preventDefault();
+                      return;
+                    }
                     if (event.key === "Enter") submit(event);
                     if (event.key === "Escape") {
                       event.preventDefault();
@@ -178,7 +185,7 @@ export function PreviewChromeRow({
                   aria-label="Search or enter URL"
                   data-workspace-focus-default
                   spellCheck={false}
-                  disabled={inputDisabled}
+                  readOnly={inputDisabled}
                   data-preview-url-input
                   size="sm"
                 />
@@ -257,7 +264,10 @@ export function PreviewChromeRow({
               ) : null}
             </TooltipTrigger>
             <TooltipPopup>
-              {recording ? "Stop recording" : "Screenshot · Shift-click to record"}
+              <span className="flex flex-col gap-0.5">
+                <span>{recording ? "Stop recording" : "Screenshot"}</span>
+                {!recording ? <span>Shift-click to record</span> : null}
+              </span>
             </TooltipPopup>
           </Tooltip>
         ) : null}

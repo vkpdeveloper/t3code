@@ -34,6 +34,23 @@ export function useEnvironmentScope(
   );
 }
 
+/** Where the environment's grant stands: still loading, failed to load, or loaded. */
+export function useEnvironmentSessionStatus(
+  environmentId: EnvironmentId | null,
+): "Initial" | "Success" | "Failure" {
+  const result = useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+  );
+  return result._tag;
+}
+
+/** Whether the environment's grant has loaded, so a missing scope is real and not pending. */
+export function useEnvironmentSessionLoaded(environmentId: EnvironmentId | null): boolean {
+  return useEnvironmentSessionStatus(environmentId) !== "Initial";
+}
+
 export function sessionHasScope(
   result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
   scope: AuthEnvironmentScope,
@@ -92,8 +109,12 @@ export function readPreparedConnection(environmentId: EnvironmentId) {
 }
 
 /** data survives SWR revalidation; isPending applies only before first resolve. */
-export function useEnvironmentSessionState(environmentId: EnvironmentId) {
-  const result = useAtomValue(environmentSession.sessionStateAtom(environmentId));
+export function useEnvironmentSessionState(environmentId: EnvironmentId | null) {
+  const result = useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+  );
   return {
     data: AsyncResult.getOrElse(result, () => null),
     hasError: result._tag === "Failure",

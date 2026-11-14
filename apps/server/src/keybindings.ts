@@ -8,7 +8,7 @@ import {
   ResolvedKeybindingsConfig,
   type ServerRemoveKeybindingInput,
   type ServerUpsertKeybindingInput,
-  type ServerConfigIssue,
+  ServerConfigIssue,
 } from "@t3tools/contracts";
 import * as Array from "effect/Array";
 import * as Cache from "effect/Cache";
@@ -36,6 +36,7 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   DEFAULT_KEYBINDINGS,
+  RETIRED_DEFAULT_KEYBINDINGS,
   mergeWithDefaultKeybindings,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
@@ -180,6 +181,13 @@ export interface KeybindingsConfigState {
   readonly issues: readonly ServerConfigIssue[];
 }
 
+const isSameKeybindingsConfigState = Schema.toEquivalence(
+  Schema.Struct({
+    keybindings: ResolvedKeybindingsConfig,
+    issues: Schema.Array(ServerConfigIssue),
+  }),
+);
+
 export interface KeybindingsChangeEvent {
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly issues: readonly ServerConfigIssue[];
@@ -220,6 +228,8 @@ export class Keybindings extends Context.Service<
 
     readonly streamChanges: Stream.Stream<KeybindingsChangeEvent>;
 
+    readonly revalidate: Effect.Effect<void, KeybindingsConfigError>;
+
     /** Acquire before reading a snapshot to buffer changes until the stream starts. */
     readonly subscribeChanges: Effect.Effect<
       Stream.Stream<KeybindingsChangeEvent>,
@@ -248,12 +258,17 @@ const make = Effect.gen(function* () {
   const upsertSemaphore = yield* Semaphore.make(1);
   const resolvedConfigCacheKey = "resolved" as const;
   const changesPubSub = yield* PubSub.unbounded<KeybindingsChangeEvent>();
+  const lastEmittedStateRef = yield* Ref.make<KeybindingsConfigState | null>(null);
   const startedRef = yield* Ref.make(false);
   const startedDeferred = yield* Deferred.make<void, KeybindingsConfigError>();
   const watcherScope = yield* Scope.make("sequential");
   yield* Effect.addFinalizer(() => Scope.close(watcherScope, Exit.void));
-  const emitChange = (configState: KeybindingsConfigState) =>
-    PubSub.publish(changesPubSub, configState).pipe(Effect.asVoid);
+  const emitChange = Effect.fn("keybindings.emitChange")(function* (
+    configState: KeybindingsConfigState,
+  ) {
+    yield* Ref.set(lastEmittedStateRef, configState);
+    yield* PubSub.publish(changesPubSub, configState);
+  });
 
   const readConfigExists = fs.exists(keybindingsConfigPath).pipe(
     Effect.mapError(
@@ -432,14 +447,27 @@ const make = Effect.gen(function* () {
 
   const loadConfigStateFromCacheOrDisk = Cache.get(resolvedConfigCache, resolvedConfigCacheKey);
 
-  const reloadAndEmit = Effect.gen(function* () {
+  const reloadConfigState = Effect.gen(function* () {
     yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-    const configState = yield* loadConfigStateFromCacheOrDisk;
+    return yield* loadConfigStateFromCacheOrDisk;
+  });
+
+  const reloadAndEmit = Effect.gen(function* () {
+    const configState = yield* reloadConfigState;
     yield* emitChange(configState);
     return configState;
   });
 
-  const revalidateAndEmit = upsertSemaphore.withPermits(1)(reloadAndEmit);
+  const revalidateAndEmit = upsertSemaphore.withPermits(1)(
+    Effect.gen(function* () {
+      const previousState = yield* Ref.get(lastEmittedStateRef);
+      const configState = yield* reloadConfigState;
+      if (!(previousState && isSameKeybindingsConfigState(previousState, configState))) {
+        yield* emitChange(configState);
+      }
+      return configState;
+    }),
+  );
 
   const syncDefaultKeybindingsOnStartup = upsertSemaphore.withPermits(1)(
     Effect.gen(function* () {
@@ -472,7 +500,18 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      const persistedConfig = runtimeConfig.keybindings;
+      // A retired default left in the file would shadow its replacement.
+      const customConfig = persistedConfig.filter(
+        (entry) =>
+          !RETIRED_DEFAULT_KEYBINDINGS.some(
+            (retired) =>
+              entry.command === retired.command &&
+              entry.key === retired.key &&
+              entry.when === retired.when,
+          ),
+      );
+      const retiredRemoved = customConfig.length !== persistedConfig.length;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -542,7 +581,8 @@ const make = Effect.gen(function* () {
           commands: skippedDefaults.map((rule) => rule.command),
         });
       }
-      if (defaultsToAppend.length > 0) {
+      // Dropping a retired default rewrites the file even with nothing to append.
+      if (defaultsToAppend.length > 0 || retiredRemoved) {
         yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
       }
       const settledLateDefaults = pendingLateDefaults.filter(
@@ -606,7 +646,8 @@ const make = Effect.gen(function* () {
       yield* startWatcher;
       yield* syncDefaultKeybindingsOnStartup;
       yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-      yield* loadConfigStateFromCacheOrDisk;
+      const initialState = yield* loadConfigStateFromCacheOrDisk;
+      yield* Ref.set(lastEmittedStateRef, initialState);
     });
 
     const startupExit = yield* Effect.exit(startup);
@@ -624,6 +665,7 @@ const make = Effect.gen(function* () {
     syncDefaultKeybindingsOnStartup,
     loadConfigState: loadConfigStateFromCacheOrDisk,
     getSnapshot: loadConfigStateFromCacheOrDisk,
+    revalidate: revalidateAndEmit,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },

@@ -1,14 +1,12 @@
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
 import type { DevicePlatform, DeviceServiceState, EnvironmentId } from "@t3tools/contracts";
-import { Check } from "lucide-react";
-import { Check as CheckGlyph, CircleAlert } from "lucide";
+import { Check, CircleAlert } from "lucide-react";
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { useAtomMount } from "@effect/atom-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { DialogClose } from "~/components/ui/dialog";
-import { MorphIcon } from "~/components/MorphIcon";
 import { WizardHeader, WizardPanel, WizardSteps, WizardFooter } from "~/components/ui/wizard";
 import { Spinner } from "~/components/ui/spinner";
 import { Switch } from "~/components/ui/switch";
@@ -24,9 +22,20 @@ const deviceHubDescription =
 const agentDeviceDescription =
   "Allow new agent sessions in this environment to start and control local and remote devices, with required tools set up automatically.";
 
+/** Platforms whose latest listing on a ready host may be missing devices. */
+export const incompleteListings = (
+  status: DeviceServiceState["hostStatuses"][string] | undefined,
+) =>
+  (["ios", "android"] as const).filter(
+    (platform) =>
+      status?.status === "ready" &&
+      (status.incompletePlatforms?.includes(platform) ||
+        (platform === "android" && status.androidDiscoveryIncomplete === true)),
+  );
+
 export const isAndroidDiscoveryUncertain = (state: DeviceServiceState) =>
-  Object.values(state.hostStatuses).some(
-    (status) => status.status === "ready" && status.androidDiscoveryIncomplete,
+  Object.values(state.hostStatuses).some((status) =>
+    incompleteListings(status).includes("android"),
   );
 
 /**
@@ -65,7 +74,7 @@ function DeviceHostDiagnostics(props: {
   const diagnostics = deviceHostDiagnostics(props.hosts, props.hostStatuses);
   if (diagnostics.length === 0) return null;
   return (
-    <div role="status" className={cn("space-y-1 text-xs text-muted-foreground", props.className)}>
+    <div role="status" className={cn("space-y-1 text-meta text-muted-foreground", props.className)}>
       {diagnostics.map(({ hostId, label, detail }) => (
         <p key={hostId} className="whitespace-pre-line break-words">
           {label}: {detail}
@@ -103,6 +112,16 @@ export function platformSetupStatus(state: DeviceServiceState, platform: DeviceP
       (host.kind === "local" && state.hostStatus === "ready"),
   );
   if (readyHosts.length > 0 && !hasDevices) {
+    if (
+      readyHosts.some((host) =>
+        state.hostStatuses[host.id]?.incompletePlatforms?.includes(platform),
+      )
+    ) {
+      return {
+        ready: false,
+        message: `No ${platformName(platform)} devices were listed because device discovery reported a problem.`,
+      };
+    }
     return {
       ready: false,
       message:
@@ -233,7 +252,7 @@ export function DeviceSetup(props: {
           </section>
         ) : null}
         {props.state.hostStatus === "failed" && props.state.hostStatusDetail ? (
-          <p role="alert" className="mt-3 text-xs text-destructive">
+          <p role="alert" className="mt-3 text-xs text-error-foreground">
             {props.state.hostStatusDetail}
           </p>
         ) : null}
@@ -241,10 +260,10 @@ export function DeviceSetup(props: {
 
       <WizardFooter>
         {step === 0 ? (
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <DialogClose render={<Button variant="secondary" />}>Cancel</DialogClose>
         ) : (
           <Button
-            variant="outline"
+            variant="secondary"
             disabled={busy || pending !== null}
             onClick={() => setStep(step - 1)}
           >
@@ -280,7 +299,7 @@ export function DeviceHubSetupStatus({
   if (!pending && !deviceHubReadiness(state).ready) return null;
   return (
     <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-      {pending ? <Spinner size="xs" /> : <Check className="size-3 text-success" />}
+      {pending ? <Spinner size="xs" /> : <Check className="size-3 text-success-foreground" />}
       {pending
         ? state.hostStatus === "installing"
           ? compact
@@ -312,7 +331,7 @@ function DevicePlatformSetup(props: {
       <p className="text-xs text-muted-foreground">
         You can use either platform. Fixing a missing platform does not block the other one.
       </p>
-      <Button size="compact" variant="outline" disabled={props.disabled} onClick={props.onCheck}>
+      <Button size="compact" variant="secondary" disabled={props.disabled} onClick={props.onCheck}>
         {props.checking ? <Spinner size="xs" /> : null}
         {props.checking ? "Checking…" : "Check again"}
       </Button>
@@ -352,7 +371,7 @@ export function AgentDeviceSetupStatus(props: {
   ) {
     return (
       <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Check className="size-3 text-success" />
+        <Check className="size-3 text-success-foreground" />
         Agent tools are ready.
       </p>
     );
@@ -366,16 +385,22 @@ function PlatformStatus(props: {
   readonly compact?: boolean;
 }) {
   return (
-    <div
-      className={cn("flex gap-2", !props.compact && "rounded-md border border-border/60 px-3 py-2")}
-    >
-      <MorphIcon
-        className={cn(
-          "mt-0.5 size-4 shrink-0",
-          props.status.ready ? "text-success" : "text-muted-foreground",
-        )}
-        icon={props.status.ready ? CheckGlyph : CircleAlert}
-      />
+    <div className={cn("flex gap-2", !props.compact && "rounded-card surface-panel px-3 py-2")}>
+      {props.status.ready ? (
+        <Check
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            props.status.ready ? "text-success-foreground" : "text-muted-foreground",
+          )}
+        />
+      ) : (
+        <CircleAlert
+          className={cn(
+            "mt-0.5 size-4 shrink-0",
+            props.status.ready ? "text-success-foreground" : "text-muted-foreground",
+          )}
+        />
+      )}
       <div className={cn(props.compact && props.status.ready && "flex items-center gap-2")}>
         <p className="font-medium">{props.platform}</p>
         <p className="text-xs text-muted-foreground">

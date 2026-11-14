@@ -1,8 +1,10 @@
+import { GENERIC_MIME_TYPES } from "./image.ts";
+
 export function filePreviewDelimiter(file: { name: string; mimeType?: string }): "," | "\t" | null {
   const mime = file.mimeType?.split(";", 1)[0]?.trim().toLowerCase();
   if (mime === "text/csv") return ",";
   if (mime === "text/tab-separated-values") return "\t";
-  if (mime && mime !== "text/plain" && mime !== "application/octet-stream") return null;
+  if (mime && mime !== "text/plain" && !GENERIC_MIME_TYPES.has(mime)) return null;
   if (/\.csv$/i.test(file.name)) return ",";
   if (/\.tsv$/i.test(file.name)) return "\t";
   return null;
@@ -68,4 +70,37 @@ export function parseDelimitedPreview(
     rows.push(row);
   }
   return { rows, truncated: truncated || quoted };
+}
+
+export type DelimitedColumnKind = "number" | "date" | "text";
+
+const NUMERIC_CELL = /^[-+]?[$€£¥]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?%?$/;
+const DATE_CELL =
+  /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+function delimitedCellKind(cell: string): DelimitedColumnKind {
+  if (/\d/.test(cell) && NUMERIC_CELL.test(cell)) return "number";
+  return DATE_CELL.test(cell) ? "date" : "text";
+}
+
+/**
+ * Classifies each column from its body cells (the header row excluded) so the
+ * table can set numbers and dates in mono and right-align numbers. Blank cells
+ * do not count, and a column with no filled cells stays text.
+ */
+export function delimitedColumnKinds(
+  bodyRows: ReadonlyArray<ReadonlyArray<string>>,
+  columnCount: number,
+): DelimitedColumnKind[] {
+  return Array.from({ length: columnCount }, (_, columnIndex) => {
+    let kind: DelimitedColumnKind | null = null;
+    for (const row of bodyRows) {
+      const cell = row[columnIndex]?.trim() ?? "";
+      if (cell === "") continue;
+      const cellKind = delimitedCellKind(cell);
+      if (cellKind === "text" || (kind !== null && kind !== cellKind)) return "text";
+      kind = cellKind;
+    }
+    return kind ?? "text";
+  });
 }

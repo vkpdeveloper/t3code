@@ -54,7 +54,13 @@ export type PullRequestChecksState = typeof PullRequestChecksState.Type;
 export const PullRequestMergeability = Schema.Literals(["mergeable", "conflicting", "unknown"]);
 export type PullRequestMergeability = typeof PullRequestMergeability.Type;
 
-export const PullRequestMergeMethod = Schema.Literals(["merge", "squash", "rebase"]);
+/** `fast-forward` refuses unless the head contains the base, where `rebase` rewrites the branch onto it. */
+export const PullRequestMergeMethod = Schema.Literals([
+  "merge",
+  "squash",
+  "rebase",
+  "fast-forward",
+]);
 export type PullRequestMergeMethod = typeof PullRequestMergeMethod.Type;
 
 export const PullRequestAction = Schema.Literals([
@@ -89,6 +95,7 @@ export type PullRequestActor = typeof PullRequestActor.Type;
 export const PullRequestLabel = Schema.Struct({
   name: TrimmedNonEmptyString,
   color: Schema.NullOr(Schema.String),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type PullRequestLabel = typeof PullRequestLabel.Type;
 
@@ -108,7 +115,18 @@ export const PullRequestCheck = Schema.Struct({
   status: PullRequestCheckStatus,
   description: Schema.NullOr(Schema.String),
   url: Schema.NullOr(Schema.String),
+  /**
+   * When the run started and finished, where the host reports them, so a finished check can say
+   * how long it took. Absent on a commit status, which is a verdict rather than a run.
+   */
+  startedAt: Schema.optional(IsoDateTime),
+  completedAt: Schema.optional(IsoDateTime),
   required: Schema.optional(Schema.Boolean),
+  /**
+   * Not a check: it stands for ones the host could not list, such as workflow runs awaiting
+   * approval when that read fails, so nothing waits on it or counts it as passing.
+   */
+  placeholder: Schema.optional(Schema.Boolean),
 });
 export type PullRequestCheck = typeof PullRequestCheck.Type;
 
@@ -168,10 +186,21 @@ export const PullRequestThreadComment = Schema.Struct({
   createdAt: IsoDateTime,
   editedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   url: Schema.NullOr(Schema.String),
+  /** The review that posted the comment, so a link to a review with no text finds its comments. */
+  reviewUrl: Schema.optional(Schema.NullOr(Schema.String)),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
   canEdit: Schema.optional(Schema.Boolean),
 });
 export type PullRequestThreadComment = typeof PullRequestThreadComment.Type;
+
+/** One numbered line of the code a review thread was written against. */
+export const PullRequestReviewThreadSnippetLine = Schema.Struct({
+  kind: Schema.Literals(["added", "deleted", "context"]),
+  /** The line's number on the side it belongs to: the old side for a deletion, else the new. */
+  line: Schema.NullOr(PositiveInt),
+  text: Schema.String,
+});
+export type PullRequestReviewThreadSnippetLine = typeof PullRequestReviewThreadSnippetLine.Type;
 
 export const PullRequestReviewThread = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -183,10 +212,22 @@ export const PullRequestReviewThread = Schema.Struct({
   comments: Schema.Array(PullRequestThreadComment),
   commentCount: Schema.optional(NonNegativeInt),
   nextCommentsCursor: Schema.optional(TrimmedNonEmptyString),
+  /** Last diff lines ending at the comment; absent when the host omits the hunk. */
+  snippet: Schema.optional(Schema.Array(PullRequestReviewThreadSnippetLine)),
   /** Can only narrow repository-wide resolve permission. Absent when unreported. */
   canResolve: Schema.optional(Schema.Boolean),
 });
 export type PullRequestReviewThread = typeof PullRequestReviewThread.Type;
+
+/** A thread on the change request as a whole, such as a GitLab overview thread. */
+export const PullRequestOverviewThread = Schema.Struct({
+  ...PullRequestReviewThread.fields,
+  path: Schema.Null,
+  line: Schema.Null,
+});
+export type PullRequestOverviewThread = typeof PullRequestOverviewThread.Type;
+
+export type PullRequestConversationThread = PullRequestReviewThread | PullRequestOverviewThread;
 
 export const PullRequestReviewerKind = Schema.Literals(["user", "team"]);
 export type PullRequestReviewerKind = typeof PullRequestReviewerKind.Type;
@@ -196,6 +237,13 @@ export const PullRequestReviewerCandidate = Schema.Struct({
   id: TrimmedNonEmptyString,
   kind: PullRequestReviewerKind,
   isRequested: Schema.Boolean,
+  /**
+   * Why the host suggests this person, such as "wrote some of these lines". Present only on a
+   * suggestion, which is how the menu tells its suggested people from everyone else with access.
+   */
+  suggestion: Schema.optional(TrimmedNonEmptyString),
+  /** When the outstanding request was made, where the host keeps that event. */
+  requestedAt: Schema.optional(IsoDateTime),
 });
 export type PullRequestReviewerCandidate = typeof PullRequestReviewerCandidate.Type;
 
@@ -225,6 +273,14 @@ export const PullRequestCommit = Schema.Struct({
   additions: Schema.optional(NonNegativeInt),
   deletions: Schema.optional(NonNegativeInt),
   authors: Schema.optional(Schema.Array(PullRequestActor)),
+  /** How this commit's own checks came out, where the host rolls them up per commit. */
+  checks: Schema.optional(
+    Schema.Struct({
+      state: PullRequestChecksState,
+      passed: NonNegativeInt,
+      total: PositiveInt,
+    }),
+  ),
 });
 export type PullRequestCommit = typeof PullRequestCommit.Type;
 
@@ -251,11 +307,20 @@ export type PullRequestEditCapabilities = typeof PullRequestEditCapabilities.Typ
 export const PullRequestReviewerCapabilities = Schema.Struct({
   request: Schema.Boolean,
   listCandidates: Schema.Boolean,
+  /**
+   * Reviewer candidates take a `query` the host matches past the first page. Absent, as from a
+   * server that predates it, means the client narrows the loaded page itself.
+   */
+  searchCandidates: Schema.optional(Schema.Boolean),
 });
 export type PullRequestReviewerCapabilities = typeof PullRequestReviewerCapabilities.Type;
 
 export const PullRequestViewedFilesStore = Schema.Literals(["host", "environment"]);
 export type PullRequestViewedFilesStore = typeof PullRequestViewedFilesStore.Type;
+
+/** `#` references issues (and GitHub pull requests); `!` references GitLab merge requests. */
+export const PullRequestReferenceSigil = Schema.Literals(["#", "!"]);
+export type PullRequestReferenceSigil = typeof PullRequestReferenceSigil.Type;
 
 export const PullRequestCapabilities = Schema.Struct({
   diff: Schema.Boolean,
@@ -277,6 +342,10 @@ export const PullRequestCapabilities = Schema.Struct({
   stacks: Schema.optional(Schema.Boolean),
   stackActions: Schema.optional(Schema.Boolean),
   labels: Schema.optional(Schema.Boolean),
+  /** The host searches the repository's users, so composers can complete `@login`. */
+  mentions: Schema.optional(Schema.Boolean),
+  /** The sigils whose issue and change request references composers can complete. */
+  referenceSigils: Schema.optional(ForwardCompatibleArray(PullRequestReferenceSigil)),
   /**
    * Every head gets at least one check, so a head that has gone a while without any means none
    * reported rather than that the repository runs none. Absent means an empty list says nothing.
@@ -304,6 +373,8 @@ export const PullRequestMergeCapabilities = Schema.Struct({
   merge: Schema.Boolean,
   squash: Schema.Boolean,
   rebase: Schema.Boolean,
+  /** Optional so servers that predate it still decode; absent means not allowed. */
+  "fast-forward": Schema.optional(Schema.Boolean),
 });
 export type PullRequestMergeCapabilities = typeof PullRequestMergeCapabilities.Type;
 
@@ -350,12 +421,16 @@ export const PullRequestListCursors = Schema.Record(
 );
 export type PullRequestListCursors = typeof PullRequestListCursors.Type;
 
+export const PULL_REQUEST_LIST_PROJECT_LIMIT = 100;
+
 export const PullRequestListInput = Schema.Struct({
   state: PullRequestListState,
   involvement: Schema.optional(PullRequestInvolvement),
   filters: Schema.optional(PullRequestListFilters),
   projectId: Schema.optional(ProjectId),
-  projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
+  projectIds: Schema.optional(
+    Schema.Array(ProjectId).check(Schema.isMaxLength(PULL_REQUEST_LIST_PROJECT_LIMIT)),
+  ),
   host: Schema.optional(TrimmedNonEmptyString),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))),
   cursors: Schema.optional(PullRequestListCursors),
@@ -369,6 +444,8 @@ export const PullRequestProviderSummary = Schema.Struct({
   searchesOnHost: Schema.Boolean,
   actions: Schema.optional(ForwardCompatibleArray(PullRequestAction)),
   projectCount: PositiveInt,
+  /** SSH checkouts can resolve to an HTTP authority different from their stored identity. */
+  projectIds: Schema.optional(Schema.Array(ProjectId)),
   configured: Schema.Boolean,
   detail: Schema.NullOr(TrimmedNonEmptyString),
 });
@@ -403,6 +480,13 @@ export const PullRequestRef = Schema.Struct({
 });
 export type PullRequestRef = typeof PullRequestRef.Type;
 
+/** `query` asks the host for matches past the first page of candidates. */
+export const PullRequestReviewerCandidatesInput = Schema.Struct({
+  ...PullRequestRef.fields,
+  query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
+});
+export type PullRequestReviewerCandidatesInput = typeof PullRequestReviewerCandidatesInput.Type;
+
 export const PullRequestRoutingIdentityInput = Schema.Struct({
   host: TrimmedNonEmptyString,
 });
@@ -433,6 +517,7 @@ export const PullRequestLinkedThreadsResult = Schema.Struct({
       projectId: ProjectId,
       title: Schema.String,
       archivedAt: Schema.NullOr(IsoDateTime),
+      settled: Schema.optionalKey(Schema.Boolean),
     }),
   ),
 });
@@ -448,6 +533,8 @@ export const PullRequestPreview = Schema.Struct({
   state: PullRequestState,
   isDraft: Schema.Boolean,
   createdAt: IsoDateTime,
+  updatedAt: Schema.optional(IsoDateTime),
+  observedAt: Schema.optional(Schema.Finite),
 });
 export type PullRequestPreview = typeof PullRequestPreview.Type;
 
@@ -475,6 +562,10 @@ export const PullRequestSummary = Schema.Struct({
   mergeability: Schema.optional(PullRequestMergeability),
   /** Null when the host says the pull request is in no stack; absent when the read did not ask. */
   stack: Schema.optional(Schema.NullOr(PullRequestStackMembership)),
+  headSha: Schema.optional(TrimmedNonEmptyString),
+  /** Absent means the read did not report auto-merge state, not that it is off. */
+  autoMergeEnabled: Schema.optional(Schema.Boolean),
+  autoMergeMethod: Schema.optional(PullRequestMergeMethod),
 });
 export type PullRequestSummary = typeof PullRequestSummary.Type;
 
@@ -515,7 +606,7 @@ export const PullRequestListStatsResult = Schema.Struct({
 });
 export type PullRequestListStatsResult = typeof PullRequestListStatsResult.Type;
 
-export const PullRequestFilterOptionKind = Schema.Literals(["labels", "authors"]);
+export const PullRequestFilterOptionKind = Schema.Literals(["labels", "authors", "references"]);
 export type PullRequestFilterOptionKind = typeof PullRequestFilterOptionKind.Type;
 
 /** Scoped like `PullRequestListInput`, so the options come from the repositories it lists. */
@@ -525,12 +616,28 @@ export const PullRequestFilterOptionsInput = Schema.Struct({
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
   host: Schema.optional(TrimmedNonEmptyString),
   query: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
+  /** For `references`, the sigil typed, so a host can search only what it links. */
+  sigil: Schema.optional(PullRequestReferenceSigil),
 });
 export type PullRequestFilterOptionsInput = typeof PullRequestFilterOptionsInput.Type;
+
+/** An issue or change request a composer can reference, with the text the host links. */
+export const PullRequestReferenceCandidate = Schema.Struct({
+  reference: TrimmedNonEmptyString,
+  kind: Schema.Literals(["issue", "change-request"]),
+  number: PositiveInt,
+  title: Schema.String,
+  state: Schema.Literals(["open", "closed", "merged"]),
+});
+export type PullRequestReferenceCandidate = typeof PullRequestReferenceCandidate.Type;
 
 export const PullRequestFilterOptions = Schema.Struct({
   labels: Schema.Array(PullRequestLabel),
   authors: Schema.Array(PullRequestActor),
+  // Servers from before reference completion send no key.
+  references: Schema.Array(PullRequestReferenceCandidate).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   truncated: Schema.Boolean,
 });
 export type PullRequestFilterOptions = typeof PullRequestFilterOptions.Type;
@@ -551,6 +658,14 @@ export const PullRequestReportStateInput = Schema.Struct({
   isDraft: Schema.optional(Schema.Boolean),
 });
 export type PullRequestReportStateInput = typeof PullRequestReportStateInput.Type;
+
+/** The host's merge queue letting go of a pull request without merging it, newest first. */
+export const PullRequestMergeQueueRemoval = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  removedAt: IsoDateTime,
+  reason: Schema.NullOr(Schema.String),
+});
+export type PullRequestMergeQueueRemoval = typeof PullRequestMergeQueueRemoval.Type;
 
 export const PullRequestDetail = Schema.Struct({
   provider: SourceControlProviderKind,
@@ -591,6 +706,8 @@ export const PullRequestDetail = Schema.Struct({
   autoMergeEnabled: Schema.optional(Schema.Boolean),
   autoMergeMethod: Schema.optional(PullRequestMergeMethod),
   workflowApprovalsRequired: Schema.optional(NonNegativeInt),
+  /** Absent where the host has no merge queue or does not report one. */
+  mergeQueueRemoval: Schema.optional(PullRequestMergeQueueRemoval),
   maintainerCanModify: Schema.optional(Schema.Boolean),
 });
 export type PullRequestDetail = typeof PullRequestDetail.Type;
@@ -602,6 +719,15 @@ export const PullRequestChecks = Schema.Struct({
 });
 export type PullRequestChecks = typeof PullRequestChecks.Type;
 
+export const PullRequestReviewRequestEvent = Schema.Struct({
+  /** Who asked, where the host still knows. */
+  actor: Schema.NullOr(PullRequestActor),
+  /** Who was asked. A team wears its slug as the login. */
+  reviewer: PullRequestActor,
+  createdAt: IsoDateTime,
+});
+export type PullRequestReviewRequestEvent = typeof PullRequestReviewRequestEvent.Type;
+
 export const PullRequestActivity = Schema.Struct({
   author: Schema.optional(Schema.NullOr(PullRequestActor)),
   reviewers: Schema.optional(Schema.Array(PullRequestActor)),
@@ -610,10 +736,24 @@ export const PullRequestActivity = Schema.Struct({
   commentsTruncated: Schema.Boolean,
   reviewThreadsTruncated: Schema.optional(Schema.Boolean),
   reviewThreads: Schema.Array(PullRequestReviewThread),
+  // Apart from reviewThreads so clients that require a thread path still decode the activity.
+  overviewThreads: Schema.optional(Schema.Array(PullRequestOverviewThread)),
   commits: Schema.Array(PullRequestCommit),
+  /**
+   * Each time somebody was asked for a review, oldest first, where the host keeps those events.
+   * A request made after that reviewer already reviewed is a re-request.
+   */
+  reviewRequests: Schema.optional(Schema.Array(PullRequestReviewRequestEvent)),
   reactions: Schema.optional(Schema.Array(PullRequestReaction)),
 });
 export type PullRequestActivity = typeof PullRequestActivity.Type;
+
+export const pullRequestConversationThreads = (
+  activity: Pick<PullRequestActivity, "reviewThreads" | "overviewThreads">,
+): ReadonlyArray<PullRequestConversationThread> =>
+  activity.overviewThreads === undefined || activity.overviewThreads.length === 0
+    ? activity.reviewThreads
+    : [...activity.reviewThreads, ...activity.overviewThreads];
 
 export const PullRequestDetailView = Schema.Struct({
   ...PullRequestDetail.fields,
@@ -714,6 +854,8 @@ export const PullRequestSetFilesViewedInput = Schema.Struct({
     Schema.Struct({
       path: FilePath,
       viewed: Schema.Boolean,
+      /** The file's version in the diff the reader was shown; without it the head's is recorded. */
+      revision: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
     }),
   ).check(Schema.isMaxLength(MAX_FILES_VIEWED_PRESSES)),
 });
@@ -733,6 +875,8 @@ export const PullRequestActionInput = Schema.Struct({
   action: PullRequestAction,
   mergeMethod: Schema.optional(PullRequestMergeMethod),
   updateMethod: Schema.optional(PullRequestUpdateMethod),
+  /** Opt-in, because older clients decode the action's success as void and reject a summary. */
+  replyWithSummary: Schema.optional(Schema.Literal(true)),
 });
 export type PullRequestActionInput = typeof PullRequestActionInput.Type;
 
@@ -812,6 +956,8 @@ export type PullRequestThreadCommentsInput = typeof PullRequestThreadCommentsInp
 export const PullRequestThreadCommentsResult = Schema.Struct({
   comments: Schema.Array(PullRequestThreadComment),
   nextCursor: Schema.NullOr(TrimmedNonEmptyString),
+  // Comments the host hid that this page left out; the thread's `commentCount` still counts them.
+  hiddenCount: Schema.optional(NonNegativeInt),
 });
 export type PullRequestThreadCommentsResult = typeof PullRequestThreadCommentsResult.Type;
 
@@ -884,6 +1030,7 @@ export class PullRequestUnavailableError extends Schema.TaggedError<PullRequestU
   {
     reason: PullRequestUnavailableReason,
     provider: Schema.optional(SourceControlProviderKind),
+    listResult: Schema.optional(PullRequestListResult),
     /**
      * What the host needs on the server, in its own words. Absent from older servers, which
      * shipped no such field, and for a host that names nothing.
@@ -915,6 +1062,7 @@ export class PullRequestOperationError extends Schema.TaggedError<PullRequestOpe
     operation: Schema.String,
     detail: TrimmedNonEmptyString,
     reason: Schema.optional(Schema.Literal("not-found")),
+    listResult: Schema.optional(PullRequestListResult),
     cause: Schema.optional(Schema.Defect()),
   },
   { httpApiStatus: 502 },

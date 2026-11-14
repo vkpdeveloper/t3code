@@ -3,6 +3,10 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
+import {
+  deriveAvailableInstanceId,
+  deriveInstanceId,
+} from "@t3tools/client-runtime/provider-instance-ids";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
 import {
@@ -26,6 +30,7 @@ import { normalizeProviderAccentColor } from "../../providerInstances";
 import { managedInstanceLocks, useManagedPolicy } from "../../state/managedPolicy";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { Button } from "../ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ChatGptConnectionButton } from "./ChatGptConnectionButton";
 import { Dialog } from "../ui/dialog";
 import { Badge } from "../ui/badge";
@@ -43,7 +48,6 @@ import {
   ADD_PROVIDER_WIZARD_STEPS,
   ACP_REGISTRY_WIZARD_STEPS,
   LOCAL_ACP_WIZARD_STEPS,
-  deriveAvailableInstanceId,
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
@@ -58,21 +62,6 @@ import { AddManagedCodexAccountDialog } from "./CodexSetupSection";
 import { MultipleAccountsNote } from "./MultipleAccountsNote";
 import { ProviderEnvironmentSection } from "./ProviderInstanceCard";
 import { useSecretSources } from "./SecretSourceInput";
-
-/** Limit the slug to 48 chars so the composed ProviderInstanceId fits its 64-char cap. */
-function slugifyLabel(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 48);
-}
-
-function deriveInstanceId(driver: ProviderDriverKind, label: string): string {
-  const slug = slugifyLabel(label);
-  return slug ? `${driver}_${slug}` : "";
-}
 
 const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -120,16 +109,14 @@ function ProviderOptionGrid({
         <RadioPrimitive.Root
           key={option.driverKind}
           value={option.driverKind}
-          className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
+          className="relative isolate flex cursor-pointer items-center gap-3 rounded-row-card px-3 py-3 text-left text-muted-foreground outline-none before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:surface-raised hover:before:surface-raised-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:text-foreground data-checked:before:[--surface-rim:var(--settings-driver-selected-rim)]"
         >
           <ProviderInstanceIcon
             driverKind={option.driverKind}
             displayName={option.label}
             iconClassName="size-4"
           />
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-            {option.label}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-label">{option.label}</span>
           <RadioPrimitive.Indicator
             className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
             aria-hidden
@@ -152,7 +139,9 @@ interface AddProviderInstanceDialogProps {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onCreated?: (instanceId: ProviderInstanceId) => void;
+  readonly onCreated?: (instanceId: ProviderInstanceId, driver: ProviderDriverKind) => void;
+  /** Opens with "Show more" expanded, so the ACP Registry search is in view. */
+  readonly showMoreProviders?: boolean;
 }
 
 export function AddProviderInstanceDialog({
@@ -161,6 +150,7 @@ export function AddProviderInstanceDialog({
   environmentLabel,
   onOpenChange,
   onCreated,
+  showMoreProviders: initialShowMoreProviders = false,
 }: AddProviderInstanceDialogProps) {
   const settings = useEnvironmentSettings(environmentId);
   const secretSources = useSecretSources(environmentId);
@@ -191,7 +181,7 @@ export function AddProviderInstanceDialog({
     ReadonlyArray<ProviderInstanceEnvironmentVariable>
   >([]);
   const [isManualAcpConfiguration, setIsManualAcpConfiguration] = useState(false);
-  const [showMoreProviders, setShowMoreProviders] = useState(false);
+  const [showMoreProviders, setShowMoreProviders] = useState(initialShowMoreProviders);
   const [configByDriver, setConfigByDriver] = useState<Record<string, Record<string, unknown>>>({});
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -417,7 +407,7 @@ export function AddProviderInstanceDialog({
       });
       return;
     }
-    onCreated?.(brandedId);
+    onCreated?.(brandedId, driver);
     if (isAcpRegistry && !isLocalAcp) {
       setCreatedInstanceId(brandedId);
       setIsSaving(false);
@@ -437,6 +427,7 @@ export function AddProviderInstanceDialog({
       <AddManagedCodexAccountDialog
         environmentId={environmentId}
         onClose={() => onOpenChange(false)}
+        onAccountCreated={(instanceId) => onCreated?.(instanceId, ProviderDriverKind.make("codex"))}
       />
     );
   }
@@ -479,9 +470,19 @@ export function AddProviderInstanceDialog({
           />
         ) : (
           <>
-            <WizardPanel className={cn(isAcpRegistry && wizardStep === identityStep && "min-h-72")}>
+            <WizardPanel
+              surface="bare"
+              // The body scrolls so the footer stays pinned inside a viewport-capped dialog.
+              className={cn(
+                "min-h-0 overflow-y-auto",
+                isAcpRegistry && wizardStep === identityStep && "min-h-72",
+              )}
+            >
               <div className={cn("grid gap-2", wizardStep !== 0 && "hidden")}>
-                <div id="add-instance-driver-label" className="text-sm font-medium text-foreground">
+                <div
+                  id="add-instance-driver-label"
+                  className="text-sm font-medium text-dim-foreground"
+                >
                   Provider
                 </div>
                 <ProviderOptionGrid
@@ -516,17 +517,17 @@ export function AddProviderInstanceDialog({
                         aria-label="More providers"
                       />
                       {!acpRegistryAllowed ? null : (
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                          <div aria-hidden className="flex-1 border-t border-border/70" />
+                        <div className="flex items-center gap-3 text-meta text-muted-foreground">
+                          <div aria-hidden className="flex-1 border-t border-hairline" />
                           <span>Or choose from ACP Registry</span>
-                          <div aria-hidden className="flex-1 border-t border-border/70" />
+                          <div aria-hidden className="flex-1 border-t border-hairline" />
                         </div>
                       )}
                       {!acpRegistryAllowed ? null : isAcpRegistry && isManualAcpConfiguration ? (
                         <div className="grid gap-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <h3 className="text-sm font-medium text-foreground">
+                              <h3 className="text-sm font-medium text-dim-foreground">
                                 {isLocalAcp ? "Local ACP command" : "Enter manually"}
                               </h3>
                               <p className="mt-0.5 text-xs text-muted-foreground">
@@ -560,6 +561,7 @@ export function AddProviderInstanceDialog({
                                 environment={localEnvironment}
                                 onChange={setLocalEnvironment}
                                 secretSources={secretSources}
+                                environmentId={environmentId}
                               />
                             ) : null}
                           </SettingsGroup>
@@ -588,14 +590,19 @@ export function AddProviderInstanceDialog({
               ) : null}
 
               {isAcpRegistry && wizardStep === 1 && selectedAcp ? (
-                <div className="mb-4 flex items-start justify-between gap-3 border-b border-border/70 pb-3">
+                <div className="mb-4 flex items-start justify-between gap-3 border-b border-divider pb-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {selectedAcp.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      v{selectedAcp.version} · {selectedAcp.distribution}
-                    </p>
+                    <p className="truncate text-label text-strong-foreground">{selectedAcp.name}</p>
+                    <div className="mt-0.5">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={<span tabIndex={0} className="text-meta text-muted-foreground" />}
+                        >
+                          v{selectedAcp.version}
+                        </TooltipTrigger>
+                        <TooltipPopup>{selectedAcp.distribution}</TooltipPopup>
+                      </Tooltip>
+                    </div>
                   </div>
                   <div className="flex shrink-0 gap-2 text-2xs">
                     {selectedAcp.website ? (
@@ -637,8 +644,8 @@ export function AddProviderInstanceDialog({
                     <Input
                       id="add-provider-label"
                       aria-describedby="add-provider-label-description"
-                      size="sm"
-                      className="w-full @min-[32rem]/settings-row:w-56"
+                      size="settings"
+                      className="w-full @min-[26rem]/settings-row:w-56"
                       placeholder="e.g. Work"
                       value={label}
                       onChange={(event) => setIdentityDraft({ label: event.target.value })}
@@ -671,8 +678,8 @@ export function AddProviderInstanceDialog({
                           ? "add-provider-instance-id-description add-provider-instance-id-error"
                           : "add-provider-instance-id-description"
                       }
-                      size="sm"
-                      className="w-full @min-[32rem]/settings-row:w-56"
+                      size="settings"
+                      className="w-full @min-[26rem]/settings-row:w-56"
                       placeholder={`${driver}_work`}
                       value={instanceId}
                       onChange={(event) => {
@@ -721,7 +728,7 @@ export function AddProviderInstanceDialog({
 
             <WizardFooter>
               <Button
-                variant={wizardStep === 0 ? "ghost-muted" : "outline"}
+                variant={wizardStep === 0 ? "ghost-muted" : "secondary"}
                 size="sm"
                 disabled={isSaving || isPreparingRegistryAgent}
                 onClick={() => {
@@ -736,7 +743,7 @@ export function AddProviderInstanceDialog({
               </Button>
               {wizardStep === 0 && driver === "codex" ? (
                 <>
-                  <Button variant="outline" size="sm" onClick={() => navigateToStep(1)}>
+                  <Button variant="secondary" size="sm" onClick={() => navigateToStep(1)}>
                     Configure manually
                   </Button>
                   {driverLocks?.configKeys.has("setupMode") ? null : (

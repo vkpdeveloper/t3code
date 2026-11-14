@@ -11,7 +11,7 @@ import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 type Question = {
   header: string;
   question: string;
-  options: { label: string; description: string }[];
+  options: { label: string; description: string; preview?: string }[];
 };
 
 const renderPanel = (questions: Question[], questionIndex = 0) =>
@@ -57,13 +57,13 @@ it("reads a mostly Hebrew question set right to left", async () => {
   ]);
 
   const text = (value: string) => screen.getByText(value, { exact: true });
-  await expect.element(text("גישה")).toHaveStyle({ direction: "rtl" });
+  await expect.element(text("איך לבצע את המיגרציה?")).toHaveStyle({ direction: "rtl" });
   await expect
     .element(text("React Server Components בכל המסכים של האפליקציה"))
     .toHaveStyle({ direction: "rtl" });
   await expect.element(text("מסך אחד בכל פעם")).toHaveStyle({ direction: "rtl" });
   await expect
-    .element(screen.getByRole("button", { name: /React Server/ }))
+    .element(screen.getByRole("radio", { name: /React Server/ }))
     .toHaveStyle({ direction: "rtl" });
   await expect.element(text("Keep it on React 18")).toHaveStyle({ direction: "ltr" });
 
@@ -92,9 +92,31 @@ it("keeps one direction for the whole set when a single question is Hebrew", asy
   );
 
   await expect
-    .element(screen.getByRole("button", { name: /גרסה 3/ }))
+    .element(screen.getByRole("radio", { name: /גרסה 3/ }))
     .toHaveStyle({ direction: "ltr" });
   await expect
     .element(screen.getByText("גרסה 3 (חדשה!)", { exact: true }))
     .toHaveStyle({ direction: "rtl" });
+});
+
+it("shows an option's preview so the user can see what they are approving", async () => {
+  await using screen = await renderPanel([
+    {
+      header: "Issue",
+      question: "Approve this issue title and body?",
+      options: [
+        {
+          label: "Approve",
+          description: "File it as drafted.",
+          preview: "Title: Login fails\n\nBody: A quote in the password breaks login.",
+        },
+        { label: "Cancel", description: "Do not file it." },
+      ],
+    },
+  ]);
+
+  await screen.getByRole("radio", { name: /Approve/ }).hover();
+  await expect
+    .element(screen.getByText("A quote in the password breaks login.", { exact: false }))
+    .toBeVisible();
 });

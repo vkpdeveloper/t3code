@@ -1,3 +1,4 @@
+import { ManagedControl } from "../ManagedPolicy";
 import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
@@ -39,7 +40,8 @@ import {
 import { usePrimaryManagedPolicy } from "~/state/managedPolicy";
 import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
-import { MoreVertical, Plus as PlusIcon } from "lucide-react";
+import { ChevronDownIcon, DownloadIcon, GlobeIcon, MoreVertical, ZoomInIcon } from "lucide-react";
+import * as Schema from "effect/Schema";
 import { useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
@@ -86,15 +88,8 @@ import {
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-field";
-import {
-  Select,
-  SelectGroup,
-  SelectGroupLabel,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Group } from "../ui/group";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -113,7 +108,6 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
-import { AdvancedSettings } from "./AdvancedSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
@@ -174,12 +168,16 @@ const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
 
 /** IPC carries reason tokens inside messages; treat unknown tokens as read failures without exposing raw
  * text. */
-class ProfileLimitReachedError extends Error {
-  constructor() {
-    super("Browser profile limit reached.");
-    this.name = "ProfileLimitReachedError";
+class ProfileLimitReachedError extends Schema.TaggedError<ProfileLimitReachedError>()(
+  "ProfileLimitReachedError",
+  {},
+) {
+  override get message(): string {
+    return "Browser profile limit reached.";
   }
 }
+
+const isProfileLimitReachedError = Schema.is(ProfileLimitReachedError);
 
 export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
   const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
@@ -257,8 +255,9 @@ async function importBrowserCookiesIntoTarget(
           await clearBrowserProfileData(bridge, [environmentId], input.target.profileId).catch(
             () => undefined,
           );
-          const reason =
-            cause instanceof ProfileLimitReachedError ? "profileLimitReached" : "profileNotSaved";
+          const reason = isProfileLimitReachedError(cause)
+            ? "profileLimitReached"
+            : "profileNotSaved";
           throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
         }
       } else {
@@ -316,9 +315,10 @@ const rotateViewport = (
 
 function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   const viewport = useClientSettings((settings) => settings.browserDefaultViewport);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   const sized = viewport._tag === "fill" ? null : viewport;
+  const selectedViewport = viewportSelectValue(viewport);
   const presentedSize = {
     width: sized?.width ?? RESPONSIVE_SEED_SIZE.width,
     height: sized?.height ?? RESPONSIVE_SEED_SIZE.height,
@@ -363,7 +363,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   return (
     <SettingsRow
       {...searchableSetting("browser-default-viewport")}
-      description="Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar."
+      description="Tab size for you and agents."
       resetAction={
         !disabled && viewport._tag !== DEFAULT_BROWSER_VIEWPORT._tag ? (
           <SettingResetButton
@@ -374,38 +374,27 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
       }
       control={
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-          <Select
-            value={viewportSelectValue(viewport)}
-            onValueChange={selectViewport}
-            disabled={disabled}
-          >
-            <SelectTrigger
-              size="sm"
-              className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
-            >
+          <Select value={selectedViewport} onValueChange={selectViewport} disabled={disabled}>
+            <SelectTrigger variant="well" size="compact" aria-label="Default browser viewport">
               <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               <SelectItem value={FILL_VALUE}>Fill panel</SelectItem>
               <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
-              <SelectGroup>
-                <SelectGroupLabel>Standard</SelectGroupLabel>
-                {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    <span className="flex w-full items-center justify-between gap-5">
-                      <span>{preset.label}</span>
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {preset.detail}
-                      </span>
+              {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  <span className="flex w-full items-center justify-between gap-5">
+                    <span>{preset.label}</span>
+                    <span className="text-meta tabular-nums text-muted-foreground">
+                      {preset.detail}
                     </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
+                  </span>
+                </SelectItem>
+              ))}
             </SelectPopup>
           </Select>
 
-          {sized ? (
+          {sized && selectedViewport === RESPONSIVE_VALUE ? (
             <div className="flex min-w-0 items-center gap-1">
               <NumberField
                 value={presentedSize.width}
@@ -413,7 +402,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                 max={PREVIEW_VIEWPORT_MAX_DIMENSION}
                 disabled={disabled}
                 format={NO_GROUPING}
-                size="sm"
+                size="compact"
                 className="w-20"
                 onValueCommitted={(value) => commitDimension("width", value)}
               >
@@ -421,14 +410,14 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                   <NumberFieldInput aria-label="Default viewport width" />
                 </NumberFieldGroup>
               </NumberField>
-              <span className="text-xs text-muted-foreground">×</span>
+              <span className="text-meta text-muted-foreground">×</span>
               <NumberField
                 value={presentedSize.height}
                 min={PREVIEW_VIEWPORT_MIN_DIMENSION}
                 max={PREVIEW_VIEWPORT_MAX_DIMENSION}
                 disabled={disabled}
                 format={NO_GROUPING}
-                size="sm"
+                size="compact"
                 className="w-20"
                 onValueCommitted={(value) => commitDimension("height", value)}
               >
@@ -466,7 +455,7 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
 
 function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
   const zoomFactor = useClientSettings((settings) => settings.browserDefaultZoomFactor);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
@@ -491,12 +480,18 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
             if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
+          <SelectTrigger
+            variant="well"
+            size="compact"
+            className="w-full sm:w-40"
+            aria-label="Default browser zoom"
+            leadingIcon={<ZoomInIcon />}
+          >
             <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {PREVIEW_ZOOM_LEVELS.map((level) => (
-              <SelectItem hideIndicator key={level} value={String(level)}>
+              <SelectItem key={level} value={String(level)}>
                 {zoomLabel(level)}
               </SelectItem>
             ))}
@@ -509,12 +504,12 @@ function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
 
 function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) {
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-default-appearance")}
-      description="The color scheme pages are told to prefer. System follows your OS setting."
+      description="The color scheme pages prefer. System follows your OS."
       resetAction={
         !disabled && appearance !== DEFAULT_PREVIEW_APPEARANCE ? (
           <SettingResetButton
@@ -528,24 +523,21 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
           disabled={disabled}
           value={appearance}
           onValueChange={(value) => {
-            if (value === "system" || value === "light" || value === "dark") {
+            if (value === "system" || value === "light" || value === "dark")
               updateSettings({ browserDefaultAppearance: value });
-            }
           }}
         >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-40"
-            aria-label="Default browser appearance"
-          >
+          <SelectTrigger variant="well" size="compact" aria-label="Default browser appearance">
             <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
-              <SelectItem hideIndicator key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
+            {(Object.keys(APPEARANCE_LABELS) as Array<keyof typeof APPEARANCE_LABELS>).map(
+              (value) => (
+                <SelectItem key={value} value={value}>
+                  {APPEARANCE_LABELS[value]}
+                </SelectItem>
+              ),
+            )}
           </SelectPopup>
         </Select>
       }
@@ -556,12 +548,12 @@ function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) 
 function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolean }) {
   const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
   const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
     <>
       <SettingsRow
         {...searchableSetting("browser-recording-key-presses")}
-        description="Show pressed keys and shortcuts in new recordings. Password fields are excluded."
+        description="Show pressed keys and shortcuts in new recordings."
         control={
           <Switch
             disabled={disabled}
@@ -593,12 +585,12 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
 
 function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boolean }) {
   const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-recording-frame-rate")}
-      description="Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother."
+      description="30 fps saves CPU and storage; 60 fps is smoother."
       resetAction={
         !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
           <SettingResetButton
@@ -615,21 +607,15 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
           value={String(frameRate)}
           onValueChange={(value) => {
             const next = BROWSER_RECORDING_FRAME_RATES.find((rate) => String(rate) === value);
-            if (next !== undefined) {
-              updateSettings({ browserRecordingFrameRate: next });
-            }
+            if (next !== undefined) updateSettings({ browserRecordingFrameRate: next });
           }}
         >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-40"
-            aria-label="Browser recording frame rate"
-          >
+          <SelectTrigger variant="well" size="compact" aria-label="Browser recording frame rate">
             <SelectValue>{frameRate} fps</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
-              <SelectItem hideIndicator key={rate} value={String(rate)}>
+              <SelectItem key={rate} value={String(rate)}>
                 {rate} fps
               </SelectItem>
             ))}
@@ -647,12 +633,12 @@ const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
   const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-link-target")}
-      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
+      description="Where links in the chat and terminal open."
       resetAction={
         !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
           <SettingResetButton
@@ -671,12 +657,17 @@ function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) 
             }
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
+          <SelectTrigger
+            size="sm"
+            className="w-full sm:w-52"
+            aria-label="Open links in"
+            leadingIcon={<GlobeIcon />}
+          >
             <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
             {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map((target) => (
-              <SelectItem hideIndicator key={target} value={target}>
+              <SelectItem key={target} value={target}>
                 {LINK_TARGET_LABELS[target]}
               </SelectItem>
             ))}
@@ -700,7 +691,7 @@ const SEARCH_ENGINE_LABELS: Readonly<Record<BrowserSearchEngine, string>> = {
 function BrowserSearchEngineSetting() {
   const engine = useClientSettings((settings) => settings.browserSearchEngine);
   const customUrl = useClientSettings((settings) => settings.browserCustomSearchUrl);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <>
@@ -730,12 +721,17 @@ function BrowserSearchEngineSetting() {
               }
             }}
           >
-            <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Search engine">
+            <SelectTrigger
+              variant="well"
+              size="compact"
+              className="w-full sm:w-40"
+              aria-label="Search engine"
+            >
               <SelectValue>{SEARCH_ENGINE_LABELS[engine]}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               {BrowserSearchEngine.literals.map((literal) => (
-                <SelectItem hideIndicator key={literal} value={literal}>
+                <SelectItem key={literal} value={literal}>
                   {SEARCH_ENGINE_LABELS[literal]}
                 </SelectItem>
               ))}
@@ -755,7 +751,7 @@ function BrowserSearchEngineSetting() {
           control={
             <DraftInput
               nativeInput
-              size="sm"
+              size="settings"
               className="w-full sm:w-64"
               aria-label="Custom search URL"
               placeholder="https://example.com/search?q=%s"
@@ -911,13 +907,13 @@ function DeviceIntegrationControls({
                   .finally(() => setPending(null));
               }}
             >
-              {pending === `update-${tool}` ? "Updating…" : `Update to v${version.requiredVersion}`}
+              {pending === `update-${tool}` ? "Updating…" : "Update"}
             </Button>
           ) : null}
           {state.supportsToolInspection ? (
             <Button
               size="sm"
-              variant="outline"
+              variant="secondary"
               disabled={!environmentId || pending !== null || busy}
               onClick={() => {
                 if (!environmentId) return;
@@ -932,7 +928,7 @@ function DeviceIntegrationControls({
           ) : null}
         </div>
         {updateError?.tool === tool ? (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-meta text-destructive">
             {updateError.message}
           </p>
         ) : null}
@@ -1069,12 +1065,12 @@ function AgentBrowserAccessSetting() {
 
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
-  const updateSettings = useUpdatePrimarySettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
+      description="Show the floating preview when an agent opens a browser or device."
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
           <SettingResetButton
@@ -1105,7 +1101,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
   const settingsHydrated = useClientSettingsHydrated();
+  // Profile edits pair with profile data on disk, so they save for this device in every scope.
   const updateSettings = useUpdatePrimarySettings();
+  const updateDefaultProfile = useUpdateScopedSettings();
   const { environments, isReady: environmentsReady } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
   // Cookie import runs on this desktop, whose policy the primary environment reports.
@@ -1235,10 +1233,9 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     setProfilePendingRemoval(null);
   };
 
-  const importableSources = (sources ?? []).filter(
-    (source) =>
-      source.unavailable !== "notInstalled" && source.unavailable !== "unsupportedPlatform",
-  );
+  const isImportableSource = (source: BrowserImportSource) =>
+    source.unavailable !== "notInstalled" && source.unavailable !== "unsupportedPlatform";
+  const importableSources = (sources ?? []).filter(isImportableSource);
 
   const loadSources = () => {
     if (!previewBridge) return;
@@ -1288,77 +1285,123 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   };
 
   const atProfileLimit = userProfiles.length >= BROWSER_PROFILE_MAX_COUNT;
+  // The split button's main half imports from the first browser found; the menu has the rest.
+  const quickImportSource = importableSources[0];
+  const startImport = (source: BrowserImportSource) => {
+    if (cookieImportDenial !== undefined || !settingsHydrated || primaryEnvironment == null) return;
+    setImportSession({
+      source,
+      environmentId: primaryEnvironment.environmentId,
+      environmentName: resolveEnvironmentOptionLabel({
+        isPrimary: true,
+        environmentId: primaryEnvironment.environmentId,
+        runtimeLabel: primaryEnvironment.label,
+      }),
+    });
+  };
+  // Detection touches other browsers' files, so the main half lists sources on
+  // click the first time instead of on mount; it names the browser after that.
+  const quickImport = async () => {
+    if (cookieImportDenial !== undefined) return;
+    if (quickImportSource) return startImport(quickImportSource);
+    if (!previewBridge || sources !== null) return;
+    const listed = await previewBridge.listBrowserImportSources().catch(() => []);
+    setSources(listed);
+    const first = listed.find(isImportableSource);
+    if (first) startImport(first);
+  };
 
   return (
     <SettingsRow
       {...searchableSetting("browser-profiles")}
-      description="Profiles separate cookies and logins. Incognito data is cleared when the app closes."
+      title="Browser profiles"
+      description="Separate cookies and logins. Incognito clears on quit."
       control={
-        <Menu onOpenChange={(open) => open && loadSources()}>
-          <MenuTrigger
-            render={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={profileWritesDisabled || importInFlight}
-              />
-            }
-          >
-            <PlusIcon />
-            Add profile
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem
-              disabled={!settingsHydrated || atProfileLimit}
-              onClick={() => createProfile("New profile")}
+        <Group aria-label="Import cookies and logins">
+          <ManagedControl reason={cookieImportDenial}>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={
+                cookieImportDenial !== undefined ||
+                profileWritesDisabled ||
+                importInFlight ||
+                previewBridge === null ||
+                (sources !== null && quickImportSource === undefined) ||
+                primaryEnvironment == null
+              }
+              onClick={() => void quickImport()}
             >
-              Blank profile
-            </MenuItem>
-            {atProfileLimit ? (
-              <MenuItem disabled>You&rsquo;ve reached the profile limit</MenuItem>
-            ) : null}
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuGroupLabel>Import from</MenuGroupLabel>
-              {cookieImportDenial !== undefined ? (
-                <MenuItem disabled>{cookieImportDenial}</MenuItem>
-              ) : sources === null ? (
-                <MenuItem disabled>Looking for browsers…</MenuItem>
-              ) : importableSources.length === 0 ? (
-                <MenuItem disabled>No supported browsers found</MenuItem>
-              ) : (
-                <>
-                  {importableSources.map((source) => (
-                    <MenuItem
-                      key={source.id}
-                      disabled={!settingsHydrated || primaryEnvironment == null}
-                      onClick={() => {
-                        if (!settingsHydrated || primaryEnvironment == null) return;
-                        setImportSession({
-                          source,
-                          environmentId: primaryEnvironment.environmentId,
-                          environmentName: resolveEnvironmentOptionLabel({
-                            isPrimary: true,
+              <DownloadIcon />
+              {quickImportSource ? `Import from ${quickImportSource.name}` : "Import"}
+            </Button>
+          </ManagedControl>
+          <Menu onOpenChange={(open) => open && loadSources()}>
+            <MenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="secondary"
+                  aria-label="More import and profile options"
+                  disabled={profileWritesDisabled || importInFlight}
+                />
+              }
+            >
+              <ChevronDownIcon />
+            </MenuTrigger>
+            <MenuPopup align="end">
+              <MenuItem
+                disabled={!settingsHydrated || atProfileLimit}
+                onClick={() => createProfile("New profile")}
+              >
+                Blank profile
+              </MenuItem>
+              {atProfileLimit ? (
+                <MenuItem disabled>You&rsquo;ve reached the profile limit</MenuItem>
+              ) : null}
+              <MenuSeparator />
+              <MenuGroup>
+                <MenuGroupLabel>Import from</MenuGroupLabel>
+                {cookieImportDenial !== undefined ? (
+                  <MenuItem disabled>{cookieImportDenial}</MenuItem>
+                ) : sources === null ? (
+                  <MenuItem disabled>Looking for browsers…</MenuItem>
+                ) : importableSources.length === 0 ? (
+                  <MenuItem disabled>No supported browsers found</MenuItem>
+                ) : (
+                  <>
+                    {importableSources.map((source) => (
+                      <MenuItem
+                        key={source.id}
+                        disabled={!settingsHydrated || primaryEnvironment == null}
+                        onClick={() => {
+                          if (!settingsHydrated || primaryEnvironment == null) return;
+                          setImportSession({
+                            source,
                             environmentId: primaryEnvironment.environmentId,
-                            runtimeLabel: primaryEnvironment.label,
-                          }),
-                        });
-                      }}
-                    >
-                      {source.name}
-                    </MenuItem>
-                  ))}
-                  {primaryEnvironment == null ? (
-                    <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
-                  ) : null}
-                </>
-              )}
-            </MenuGroup>
-          </MenuPopup>
-        </Menu>
+                            environmentName: resolveEnvironmentOptionLabel({
+                              isPrimary: true,
+                              environmentId: primaryEnvironment.environmentId,
+                              runtimeLabel: primaryEnvironment.label,
+                            }),
+                          });
+                        }}
+                      >
+                        {source.name}
+                      </MenuItem>
+                    ))}
+                    {primaryEnvironment == null ? (
+                      <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
+                    ) : null}
+                  </>
+                )}
+              </MenuGroup>
+            </MenuPopup>
+          </Menu>
+        </Group>
       }
     >
-      <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
+      <div className="mt-2 mb-2 overflow-hidden rounded-control border border-border/60 surface-card-settings">
         {listedProfiles.map((profile, index) => {
           const builtIn = isBuiltInBrowserProfileId(profile.id);
           const isDefault = profile.id === resolvedDefaultId;
@@ -1374,7 +1417,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 {builtIn ? (
                   <span
                     className={cn(
-                      "truncate text-sm text-foreground",
+                      "truncate text-body text-foreground",
                       profileWritesDisabled && "opacity-64",
                     )}
                   >
@@ -1394,7 +1437,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                 )}
                 {isDefault ? (
                   <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge>Default</Badge>
+                    <Badge variant="secondary">Default</Badge>
                   </span>
                 ) : null}
               </span>
@@ -1416,7 +1459,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                     disabled={!settingsHydrated || isDefault}
                     onClick={() => {
                       if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
+                        updateDefaultProfile({ browserDefaultProfileId: profile.id });
                       }
                     }}
                   >
@@ -1476,12 +1519,12 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
               open until you close them; server browser tabs close now.
             </AlertDialogDescription>
             {profileRemovalError ? (
-              <p aria-live="polite" className="text-sm text-destructive">
+              <p aria-live="polite" className="text-body text-destructive">
                 {profileRemovalError}
               </p>
             ) : null}
             {!removalAvailable ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body text-muted-foreground">
                 Connect to an environment to remove this profile and its data.
               </p>
             ) : null}
@@ -1489,7 +1532,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
           <AlertDialogFooter>
             <AlertDialogClose
               disabled={profileRemovalInFlight}
-              render={<Button variant="outline" disabled={profileRemovalInFlight} />}
+              render={<Button variant="secondary" disabled={profileRemovalInFlight} />}
             >
               Cancel
             </AlertDialogClose>
@@ -1523,7 +1566,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="secondary" />}>Cancel</AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -1575,37 +1618,22 @@ export function BrowserSettingsPanel() {
   const desktopOnlyMessage = desktopOnly ? "Only available in the desktop app." : undefined;
 
   return (
-    <SettingsPageContainer>
-      <SettingsSection id="browser-agent-access" title="Agent access">
+    <SettingsPageContainer className="max-w-[688px]">
+      <SettingsSection id="browser-agent-access" title="Browser">
         <AgentBrowserAccessSetting />
       </SettingsSection>
-      <SettingsSection id="browser" title="Browsing">
-        <SettingsUnavailableGroup message={desktopOnlyMessage}>
+      <SettingsSection id="browser" title="Browser defaults" warning={desktopOnlyMessage}>
+        <SettingsUnavailableGroup unavailable={desktopOnly}>
           <BrowserProfilesSetting disabled={desktopOnly} />
+          <BrowserViewportSetting disabled={desktopOnly} />
+          <BrowserZoomSetting disabled={desktopOnly} />
+          <BrowserAppearanceSetting disabled={desktopOnly} />
+          <BrowserRecordingFrameRateSetting disabled={desktopOnly} />
+          <BrowserRecordingInputSettings disabled={desktopOnly} />
           <BrowserLinkTargetSetting disabled={desktopOnly} />
           <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
         </SettingsUnavailableGroup>
-        {/* Not desktop-only: web clients search from server-run browser tabs too. */}
         <BrowserSearchEngineSetting />
-        <AdvancedSettings
-          targetIds={[
-            searchableSetting("browser-default-viewport").id,
-            searchableSetting("browser-default-zoom").id,
-            searchableSetting("browser-default-appearance").id,
-          ]}
-        >
-          <SettingsUnavailableGroup message={desktopOnlyMessage}>
-            <BrowserViewportSetting disabled={desktopOnly} />
-            <BrowserZoomSetting disabled={desktopOnly} />
-            <BrowserAppearanceSetting disabled={desktopOnly} />
-          </SettingsUnavailableGroup>
-        </AdvancedSettings>
-      </SettingsSection>
-      <SettingsSection id="browser-recordings" title="Recordings">
-        <SettingsUnavailableGroup message={desktopOnlyMessage}>
-          <BrowserRecordingFrameRateSetting disabled={desktopOnly} />
-          <BrowserRecordingInputSettings disabled={desktopOnly} />
-        </SettingsUnavailableGroup>
       </SettingsSection>
     </SettingsPageContainer>
   );

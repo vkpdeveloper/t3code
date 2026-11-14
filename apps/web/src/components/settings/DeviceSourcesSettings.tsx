@@ -28,6 +28,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { incompleteListings } from "../device/DeviceSetup";
 import { DeviceHostEditor } from "./DeviceHostEditor";
 import { updateDeviceHosts, groupDeviceHosts } from "./deviceHostsSettings.logic";
 import { EasDeviceHostEditor } from "./EasDeviceHostEditor";
@@ -115,10 +116,12 @@ function hostStatus(
   if (!state) return { tone: "pending", label: "Loading" };
   const status = state.hostStatuses[hostId];
   switch (status?.status) {
-    case "ready":
-      return status.androidDiscoveryIncomplete
-        ? { tone: "warning", label: "Android list may be incomplete", detail: status.detail }
-        : undefined;
+    case "ready": {
+      const incomplete = incompleteListings(status);
+      if (incomplete.length === 0) return undefined;
+      const list = incomplete.length > 1 ? "Device" : incomplete[0] === "ios" ? "iOS" : "Android";
+      return { tone: "warning", label: `${list} list may be incomplete`, detail: status.detail };
+    }
     case "installing":
     case "starting":
       return { tone: "pending", label: "Starting", detail: status.detail };
@@ -328,7 +331,7 @@ export function DeviceSourcesSettings(props: {
 
   const rowActions = (onEdit: () => void, onRemove: () => void, extra?: ReactNode) => (
     <>
-      <Button size="sm" variant="outline" disabled={disabled} onClick={onEdit}>
+      <Button size="sm" variant="secondary" disabled={disabled} onClick={onEdit}>
         Edit
       </Button>
       <Menu>
@@ -495,7 +498,12 @@ export function DeviceSourcesSettings(props: {
         shared: true,
         title: host.label,
         kind: "Simlock",
-        description: `${host.gatewayUrl.replace(/^https?:\/\//, "")} · ${simlockLeaseLimits(host)}`,
+        description: (
+          <span className="grid gap-1">
+            <span>{host.gatewayUrl.replace(/^https?:\/\//, "")}</span>
+            <span>{simlockLeaseLimits(host)}</span>
+          </span>
+        ),
         environments: active.map((member) => {
           const held = (member.settings?.simlockDeviceHosts ?? []).find(
             (candidate) => candidate.id === host.id,
@@ -519,7 +527,9 @@ export function DeviceSourcesSettings(props: {
   const addMenu = (
     <Menu>
       <MenuTrigger
-        render={<Button size="sm" variant="outline" disabled={disabled || editing !== null} />}
+        render={
+          <Button size="standard" variant="secondary" disabled={disabled || editing !== null} />
+        }
       >
         <PlusIcon className="size-3.5" /> Add source
         <ChevronDownIcon className="size-3.5" />
@@ -651,13 +661,10 @@ function PlatformIcon(props: {
         delay={150}
         closeDelay={100}
         render={
-          <button
-            type="button"
+          <Button
+            size="icon-xs"
+            variant={available ? "ghost" : "ghost-muted"}
             aria-label={`${props.row.title}: ${props.label} ${available ? "available" : "not available"}`}
-            className={cn(
-              "relative grid size-6 shrink-0 place-items-center rounded-md outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-              available ? "text-foreground" : "text-muted-foreground/45",
-            )}
           />
         }
       >
@@ -670,17 +677,17 @@ function PlatformIcon(props: {
         ) : null}
       </PopoverTrigger>
       <PopoverPopup side="top" align="end" width="sm">
-        <p className="text-sm font-medium">
+        <p className="text-label">
           {props.label}{" "}
           {available ? (partial ? "available on some" : "available") : "not available"}
         </p>
         {props.row.shared ? (
           <>
             {uniform && !available && sharedAnswer?.reason ? (
-              <p className="mt-1 text-xs text-muted-foreground">{sharedAnswer.reason}</p>
+              <p className="mt-1 text-meta text-muted-foreground">{sharedAnswer.reason}</p>
             ) : null}
             {several ? (
-              <dl className="mt-2 space-y-1.5 text-xs">
+              <dl className="mt-2 space-y-1.5 text-meta">
                 {(
                   [
                     ...(uniform
@@ -716,7 +723,7 @@ function PlatformIcon(props: {
             ) : null}
           </>
         ) : several ? (
-          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-meta">
             {props.known.map((environment) => {
               const entry = availability(environment);
               return (
@@ -730,7 +737,7 @@ function PlatformIcon(props: {
             })}
           </dl>
         ) : !available ? (
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-meta text-muted-foreground">
             {availability(props.known[0]!)?.reason ?? "Not set up on this machine."}
           </p>
         ) : null}
@@ -749,32 +756,42 @@ function DeviceSourceRow(props: { row: SourceRow }) {
   const problems = issues.filter((environment) => environment.status.tone !== "pending");
   const pending = issues.find((environment) => environment.status.tone === "pending");
   return (
-    <div className="flex items-center gap-3 border-t border-border/60 px-3 py-3 first:border-t-0 sm:px-4">
+    <div className="flex items-center gap-3 border-t border-border px-3 py-3 first:border-t-0 sm:px-4">
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="truncate text-sm font-medium">{row.title}</p>
+          <p className="truncate text-label text-strong-foreground">{row.title}</p>
           {row.kind ? (
-            <span className="shrink-0 rounded border border-border px-1 text-3xs uppercase tracking-wide text-muted-foreground">
+            <span className="shrink-0 rounded border border-border px-1 text-caption uppercase text-muted-foreground">
               {row.kind}
             </span>
           ) : null}
         </div>
-        <p className="truncate text-xs text-muted-foreground">{row.description}</p>
+        <p className="truncate text-meta text-muted-foreground">{row.description}</p>
         {problems.map((environment) => (
           <p
             key={environment.environmentId}
             role="status"
             className={cn(
-              "mt-1 flex flex-wrap items-center gap-1.5 text-xs",
+              "mt-1 flex flex-wrap items-center gap-1.5 text-meta",
               environment.status.tone === "error" ? "text-destructive" : "text-warning",
             )}
           >
             <span className="min-w-0 break-words">
               {several ? `${environment.label}: ` : ""}
-              {!several && environment.status.detail
+              {environment.status.tone === "error" && !several && environment.status.detail
                 ? environment.status.detail
                 : environment.status.label}
             </span>
+            {environment.status.tone === "warning" && environment.status.detail ? (
+              <Popover>
+                <PopoverTrigger render={<InlineButton />}>Details</PopoverTrigger>
+                <PopoverPopup side="bottom" align="start" width="lg" padding="compact">
+                  <p className="whitespace-pre-wrap break-words font-mono text-meta text-muted-foreground">
+                    {environment.status.detail}
+                  </p>
+                </PopoverPopup>
+              </Popover>
+            ) : null}
             {environment.status.action ? (
               <InlineButton onClick={environment.status.action.run}>
                 {environment.status.action.label}
@@ -786,7 +803,7 @@ function DeviceSourceRow(props: { row: SourceRow }) {
       {pending ? (
         <span
           role="status"
-          className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+          className="flex shrink-0 items-center gap-1.5 text-meta text-muted-foreground"
         >
           <Spinner size="xs" />
           {pending.status.label}

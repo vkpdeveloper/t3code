@@ -9,6 +9,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { WifiOffIcon } from "lucide-react";
+import { secondTick } from "@t3tools/client-runtime/clock";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { environmentCatalog } from "../../connection/catalog";
 import { ConnectionDiagnosisHeadline } from "../settings/ConnectionDiagnosisDetails";
@@ -177,8 +178,11 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
       unavailableConnection !== null &&
       (unavailableConnection.phase === "connecting" ||
         unavailableConnection.phase === "reconnecting");
+    const awaitingApproval = unavailableConnection?.awaitingApproval === true;
     const suppressUnavailableBanner =
-      environmentReconnecting && (updateRunning || !reconnectWarningGraceElapsed);
+      environmentReconnecting &&
+      !awaitingApproval &&
+      (updateRunning || !reconnectWarningGraceElapsed);
     const showUnavailableBanner =
       activeEnvironmentUnavailableState !== null &&
       unavailableConnection !== null &&
@@ -189,25 +193,45 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         group: "environment",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
-        description: activeEnvironment ? (
+        title: awaitingApproval
+          ? `${activeEnvironmentUnavailableState.label} is waiting to approve this device`
+          : `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        description: awaitingApproval ? (
+          (unavailableConnection.error ?? undefined)
+        ) : environmentReconnecting && typeof unavailableConnection.retryAt === "number" ? (
+          <RetryCountdown retryAt={unavailableConnection.retryAt} />
+        ) : activeEnvironment ? (
           <ConnectionDiagnosisHeadline environment={activeEnvironment} />
         ) : undefined,
+        descriptionDetails:
+          !awaitingApproval &&
+          environmentReconnecting &&
+          typeof unavailableConnection.retryAt === "number" &&
+          activeEnvironment ? (
+            <ConnectionDiagnosisHeadline environment={activeEnvironment} />
+          ) : undefined,
         actions: (
           <>
-            {!environmentReconnecting ? (
+            {unavailableConnection.phase !== "connecting" ? (
               <Button
                 size="xs"
-                variant="ghost"
+                variant="secondary"
                 onClick={() =>
                   void handleReconnectActiveEnvironmentStable(
                     activeEnvironmentUnavailableState.environmentId,
                   )
                 }
               >
-                Reconnect
+                {environmentReconnecting ? "Retry now" : "Reconnect"}
               </Button>
             ) : null}
+            <Button
+              size="xs"
+              variant="secondary"
+              onClick={() => void navigate({ to: "/settings/connections" })}
+            >
+              Connections
+            </Button>
             {disconnectAction}
           </>
         ),
@@ -227,11 +251,18 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
         variant: updateFailed ? "error" : "default",
         group: "environment",
         icon: <ComposerServerUpdateIcon status={serverUpdateState.status} />,
-        title: `${updateFailed ? "Could not update" : "Updating"} ${versionMismatchServerLabel}`,
+        title: updateFailed ? `${versionMismatchServerLabel} update failed` : "Updating",
         description:
-          serverUpdateState.status === "failed"
-            ? serverUpdateState.message
-            : serverUpdateStageLabel(serverUpdateState.stage),
+          serverUpdateState.status === "failed" ? (
+            serverUpdateState.message
+          ) : (
+            <span className="inline-flex flex-col">
+              <span>{serverUpdateStageLabel(serverUpdateState.stage)}</span>
+              <span>
+                {versionMismatchServerLabel} to {serverUpdateState.targetVersion}
+              </span>
+            </span>
+          ),
         actions: !updateFailed ? (
           disconnectAction
         ) : !versionMismatch ||
@@ -245,7 +276,7 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
             desktopAppUpdate={versionMismatchDesktopAppUpdate}
             targetVersion={versionMismatch.clientVersion}
             label="Retry"
-            variant="ghost"
+            variant="secondary"
           />
         ),
         ...(updateFailed
@@ -262,4 +293,27 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
     if (autoBalanceUpdateBanner) items.push(autoBalanceUpdateBanner);
     return items;
   })() as ComposerBannerStackItem[];
+}
+
+/** The reconnect countdown updates its text from the shared clock. */
+function RetryCountdown({ retryAt }: { readonly retryAt: number }) {
+  const attachText = (element: HTMLSpanElement | null) => {
+    if (!element) return;
+    const update = () => {
+      const now = Date.now();
+      const seconds = Math.ceil((retryAt - now) / 1000);
+      element.textContent = seconds > 0 ? `Trying again in ${seconds}s` : "Trying again";
+      return now < retryAt;
+    };
+    if (!update()) return;
+    const stop = secondTick.subscribe(() => {
+      if (!update()) stop();
+    });
+    return stop;
+  };
+  return (
+    <span ref={attachText} className="tabular-nums">
+      Trying again
+    </span>
+  );
 }

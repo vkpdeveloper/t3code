@@ -1,13 +1,22 @@
+import { RegistryContext } from "@effect/atom-react";
+import type { EnvironmentThreadState } from "@t3tools/client-runtime/state/threads";
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import {
+  formatComposerContextReference,
+  toComposerContextId,
+} from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
-import type { ComponentProps } from "react";
+import * as Option from "effect/Option";
+import { AsyncResult, type Atom, AtomRegistry } from "effect/reactivity";
+import { Profiler, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
-  projection: null as unknown,
+  threadState: null as unknown as Atom.Writable<AsyncResult.AsyncResult<EnvironmentThreadState>>,
   workflow: null as unknown,
+  command: vi.fn(async (_input: unknown) => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -17,9 +26,17 @@ vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importO
 
 vi.mock(import("../../state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useThreadProjection: (() => state.projection) as never,
-  useQuietThreadShell: ((target: unknown) =>
-    target === null ? null : { title: "Release lead" }) as never,
+  // The linked environment is connected, but its thread is not in the loaded shell.
+  useQuietThreadShell: ((target: { readonly environmentId: string } | null) =>
+    target === null || target.environmentId === "environment:linked"
+      ? null
+      : { title: "Release lead" }) as never,
+}));
+
+vi.mock(import("../../state/environments"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  useEnvironment: ((environmentId: string | null) =>
+    environmentId === "environment:linked" ? { environmentId } : null) as never,
 }));
 
 vi.mock(import("../../state/query"), async (importOriginal) => ({
@@ -29,9 +46,28 @@ vi.mock(import("../../state/query"), async (importOriginal) => ({
   })) as never,
 }));
 
+// The thread detail atoms are real, fed by one state atom the test writes.
+vi.mock(import("../../state/threads"), async (importOriginal) => {
+  const { createEnvironmentThreadDetailAtoms, EMPTY_ENVIRONMENT_THREAD_STATE } =
+    await import("@t3tools/client-runtime/state/threads");
+  const { AsyncResult, Atom } = await import("effect/reactivity");
+  const Option = await import("effect/Option");
+  const { makeThreadProjectionFixture } = await import("../../test-fixtures");
+  state.threadState = Atom.make<AsyncResult.AsyncResult<EnvironmentThreadState>>(
+    AsyncResult.success({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      data: Option.some(makeThreadProjectionFixture()),
+    }),
+  ).pipe(Atom.keepAlive);
+  return {
+    ...(await importOriginal()),
+    environmentThreadDetails: createEnvironmentThreadDetailAtoms(() => state.threadState),
+  };
+});
+
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useAtomCommand: (() => async () => undefined) as never,
+  useAtomCommand: (() => state.command) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -41,12 +77,15 @@ vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
 }));
 
 import "~/index.css";
-import { render as renderUi } from "../../../test/render";
+import { EMPTY_ENVIRONMENT_THREAD_STATE } from "@t3tools/client-runtime/state/threads";
+
+import { act, render as renderUi } from "../../../test/render";
+import { makeStreamingTimelineFixture, makeThreadProjectionFixture } from "../../test-fixtures";
 import { QueuedRunsControl } from "./QueuedRunsControl";
 
 function setup() {
-  state.projection = null;
   state.workflow = null;
+  state.command.mockClear();
 }
 
 const baseProps = {
@@ -59,6 +98,7 @@ const baseProps = {
   onCancelEdit: () => undefined,
   timestampFormat: "locale",
   onOpenThread: () => undefined,
+  onRemovePending: () => undefined,
 } satisfies ComponentProps<typeof QueuedRunsControl>;
 
 async function renderQueue(props: Partial<ComponentProps<typeof QueuedRunsControl>> = {}) {
@@ -80,7 +120,11 @@ it("previews assistant quotes as readable text and preserves the citation when e
     suffix: "",
   });
   const quoteAndText = `${quote}\n\nWhy per worktree?`;
-  state.projection = { projection: { messages: [] } };
+  const inlineImage = formatComposerContextReference({
+    kind: "image",
+    contextId: toComposerContextId("header"),
+    label: "header.png",
+  });
   state.workflow = {
     activeRun: { id: "run:active" },
     canPromoteToSteer: true,
@@ -95,6 +139,11 @@ it("previews assistant quotes as readable text and preserves the citation when e
         text: quoteAndText,
         attachments: [],
       },
+      {
+        run: { id: "run:inline-image", userMessageId: "message:inline-image" },
+        text: `Make the header look like ${inlineImage} and keep the logo.`,
+        attachments: [{ type: "image", id: "attachment:header", name: "header.png" }],
+      },
     ],
   };
   const onEditQueuedRun = vi.fn();
@@ -103,6 +152,11 @@ it("previews assistant quotes as readable text and preserves the citation when e
   await expect.element(page.getByText(quotedText, { exact: true })).toBeVisible();
   await expect
     .element(page.getByText(`${quotedText} Why per worktree?`, { exact: true }))
+    .toBeVisible();
+  await expect
+    .element(
+      page.getByText("Make the header look like header.png and keep the logo.", { exact: true }),
+    )
     .toBeVisible();
 
   await page.getByRole("button", { name: "Edit queued message", exact: true }).nth(1).click();
@@ -119,7 +173,6 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
     createdAt: DateTime.makeUnsafe("2026-10-27T12:00:00.000Z"),
     ...fields,
   });
-  state.projection = { projection: { messages: [] } };
   state.workflow = {
     activeRun: { id: "run:active" },
     canPromoteToSteer: true,
@@ -142,6 +195,19 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
         },
       ],
       [
+        "run:linked",
+        "Linked review finished.",
+        {
+          createdBy: "agent",
+          creationSource: "mcp",
+          linkedSender: {
+            environmentId: "environment:linked",
+            threadId: "thread:linked-lead",
+            title: "Title when sent",
+          },
+        },
+      ],
+      [
         "run:server",
         "Continue where you left off.",
         {
@@ -158,6 +224,8 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   };
   const onOpenThread = vi.fn();
   await using _screen = await renderQueue({ onOpenThread });
+  // Four rows collapse the queue.
+  await page.getByRole("button", { name: "Show all 4 queued" }).click();
 
   const automation = page.getByRole("button", { name: /PR dispatcher/ });
   await expect.element(automation).toHaveAttribute("aria-expanded", "false");
@@ -167,16 +235,55 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   await expect.element(page.getByRole("link", { name: "Open automation" })).toBeInTheDocument();
 
   await expect.element(page.getByRole("button", { name: /Release lead/ })).toBeVisible();
-  await page.getByRole("button", { name: "Open thread" }).click({ force: true });
-  expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead");
+  await page.getByRole("button", { name: "Open thread" }).nth(0).click({ force: true });
+  expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
+  // A sender in a connected linked environment keeps the title it sent and opens there.
+  await expect.element(page.getByRole("button", { name: /Title when sent/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open thread" }).nth(1).click({ force: true });
+  expect(onOpenThread).toHaveBeenLastCalledWith("thread:linked-lead", "environment:linked");
 
   await expect.element(page.getByText("Sent by T3 Code")).toBeVisible();
   await expect.element(page.getByText("Continue where you left off.")).toBeVisible();
+
+  const dataTransfer = new DataTransfer();
+  await act(() => {
+    page
+      .getByRole("button", { name: "Reorder queued message 1" })
+      .element()
+      .dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer }));
+  });
+  await act(() => {
+    const last = page.getByRole("listitem").last().element();
+    const bounds = last.getBoundingClientRect();
+    last.dispatchEvent(
+      new DragEvent("dragover", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientY: bounds.bottom - 1,
+      }),
+    );
+  });
+  await act(() => {
+    page
+      .getByRole("list")
+      .element()
+      .dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+        }),
+      );
+  });
+  expect(state.command).toHaveBeenLastCalledWith({
+    environmentId: baseProps.environmentId,
+    input: { threadId: baseProps.threadId, runId: "run:automation", beforeRunId: null },
+  });
 });
 
 it("stays inside the timeline scroller instead of growing the chat column", async () => {
   setup();
-  state.projection = { projection: { messages: [] } };
   state.workflow = {
     activeRun: { id: "run:active" },
     canPromoteToSteer: true,
@@ -202,4 +309,93 @@ it("stays inside the timeline scroller instead of growing the chat column", asyn
   await expect.element(page.getByText("Later", { exact: true })).toBeInTheDocument();
   const column = screen.getByTestId("column").element();
   expect(column.scrollHeight).toBe(column.clientHeight);
+});
+
+it("lets a message that is still saving be removed, on the same fill as a saved one", async () => {
+  setup();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    queuedRuns: [
+      {
+        run: { id: "run:saved", userMessageId: "message:saved" },
+        text: "Saved",
+        attachments: [],
+      },
+    ],
+  };
+  const onRemovePending = vi.fn();
+  await using screen = await renderQueue({
+    optimisticMessages: [
+      { id: MessageId.make("message:saving"), inputIntent: "queued_turn", text: "Saving one" },
+    ],
+    onRemovePending,
+  });
+
+  const [saved, saving] = screen.getByRole("listitem").elements();
+  expect(getComputedStyle(saving!).backgroundColor).toBe(getComputedStyle(saved!).backgroundColor);
+  const remove = screen.getByRole("button", { name: "Remove queued message" }).nth(1);
+  await expect.element(remove).toBeEnabled();
+  await remove.click();
+  expect(onRemovePending).toHaveBeenCalledExactlyOnceWith("message:saving");
+});
+
+it("does not re-render while assistant text streams into the thread", async () => {
+  setup();
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canPromoteToSteer: true,
+    canReorder: true,
+    queuedRuns: [
+      {
+        run: { id: "run:queued", userMessageId: "message:queued" },
+        text: "Run the tests next",
+        attachments: [],
+      },
+    ],
+  };
+  const base = makeThreadProjectionFixture();
+  // Each delta replaces only the streaming reply; every other item keeps its identity.
+  const timeline = makeStreamingTimelineFixture().visibleTurnItems;
+  const thread = (text: string, done = false) => {
+    const items = timeline.map((entry) =>
+      entry.item.type === "assistant_message" && entry.item.streaming
+        ? {
+            ...entry,
+            item: done
+              ? { ...entry.item, text, streaming: false, status: "completed" as const }
+              : { ...entry.item, text },
+          }
+        : entry,
+    );
+    return AsyncResult.success<EnvironmentThreadState>({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      data: Option.some({
+        ...base,
+        turnItems: items.map(({ item }) => item),
+        visibleTurnItems: items,
+      }),
+    });
+  };
+  const registry = AtomRegistry.make();
+  await using stack = new AsyncDisposableStack();
+  stack.defer(() => registry.dispose());
+  registry.set(state.threadState, thread("Hel"));
+  let renders = 0;
+  await using _screen = await renderUi(
+    <RegistryContext.Provider value={registry}>
+      <Profiler id="queue" onRender={() => (renders += 1)}>
+        <QueuedRunsControl {...baseProps} />
+      </Profiler>
+    </RegistryContext.Provider>,
+  );
+  await expect.element(page.getByText("Run the tests next", { exact: true })).toBeVisible();
+  const settled = renders;
+
+  await act(() => registry.set(state.threadState, thread("Hello")));
+  await act(() => registry.set(state.threadState, thread("Hello there")));
+  expect(renders).toBe(settled);
+
+  await act(() => registry.set(state.threadState, thread("Hello there", true)));
+  expect(renders).toBeGreaterThan(settled);
 });

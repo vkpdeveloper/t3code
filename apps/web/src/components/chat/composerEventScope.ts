@@ -1,4 +1,5 @@
 import { useComposerHandleContext } from "../../composerHandleContext";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-composer-drawer-layer="true"]',
@@ -11,19 +12,22 @@ export const composerFloatingLayerProps = {
 
 export function useComposerMenuProps() {
   const composerRef = useComposerHandleContext();
+  const isCoarsePointer = useMediaQuery({ pointer: "coarse" });
 
   return {
     ...composerFloatingLayerProps,
-    finalFocus: composerRef
-      ? () => {
-          const activeElement = document.activeElement;
-          if (activeElement !== document.body && !isInsideComposerFloatingLayer(activeElement)) {
+    // Focusing the editor on a touch device opens the on-screen keyboard, so the menu keeps its own focus return.
+    finalFocus:
+      composerRef && !isCoarsePointer
+        ? () => {
+            const activeElement = document.activeElement;
+            if (activeElement !== document.body && !isInsideComposerFloatingLayer(activeElement)) {
+              return false;
+            }
+            composerRef.current?.focusAtEnd();
             return false;
           }
-          composerRef.current?.focusAtEnd();
-          return false;
-        }
-      : undefined,
+        : undefined,
   };
 }
 
@@ -63,7 +67,7 @@ export function focusRequestedPermission(open: boolean, trigger: HTMLElement | n
 }
 
 /** Focuses the checked permission in the menu this trigger opened. */
-export function focusCheckedPermission(trigger: HTMLElement | null): void {
+function focusCheckedPermission(trigger: HTMLElement | null): void {
   const popupId = trigger?.getAttribute("aria-controls");
   const popup = popupId ? document.getElementById(popupId) : null;
   popup
@@ -90,4 +94,8 @@ export function takeOpenTarget(trigger: HTMLElement | null): "effort" | "permiss
     return "permissions";
   }
   return null;
+}
+
+export function isInsideComposerEditor(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-testid="composer-editor"]') !== null;
 }

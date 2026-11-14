@@ -1,9 +1,8 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
 import type {
-  EnvironmentId,
-  ProjectId,
   PullRequestAction,
   PullRequestListEntry,
+  PullRequestSummary,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -29,13 +28,17 @@ import {
   rankPullRequestsBlockedOnAuthor,
   rankPullRequestsByMergeReadiness,
   sortPullRequestGroups,
+  displayPullRequestGroups,
+  settlePullRequestSortStats,
   resolveQueryEnvironmentIds,
   resolveSelectedEnvironmentId,
   type EnvironmentPullRequestEntry,
   applyPullRequestOverrides,
+  pullRequestOverrideAfterAction,
   reusePullRequestEntries,
   settlePullRequestOverrides,
 } from "./pullRequestList.logic";
+import { pullRequestGroups } from "./pullRequestListGroups.logic";
 import {
   readPullRequestListPreferences,
   writePullRequestListPreferences,
@@ -175,6 +178,43 @@ describe("ranking what a search found", () => {
       rankPullRequestMatches([mentioned, titled], "welcome wizard").map((entry) => entry.number),
     ).toEqual([1, 2]);
   });
+
+  it("keeps loaded partial-word matches the host's whole-word search missed, after its answer", () => {
+    const bilal = { login: "bilal", name: null, avatarUrl: null };
+    const hosted = row({ number: 1, title: "Notifications match the body text", author: bilal });
+    const toast = row({ number: 2, title: "Threads show a completed toast", author: bilal });
+    const toaster = row({ number: 3, title: "Toaster fixtures cover retries", author: bilal });
+    const theirs = row({ number: 4, title: "Toasted sidebar" });
+    const unrelated = row({ number: 5, title: "Cursor no longer adds attribution", author: bilal });
+
+    const { entries } = pullRequestGroups({
+      known: [hosted, toast],
+      baseline: [theirs, unrelated, toaster, toast],
+      providers: [
+        {
+          host: "github.com",
+          kind: SourceControlProviderKind.make("github"),
+          searchesOnHost: true,
+          projectCount: 1,
+          configured: true,
+          detail: null,
+        },
+      ],
+      viewers: VIEWERS,
+      involvement: "all",
+      localFilters: { author: "bilal" },
+      hasLocalFilters: true,
+      text: "toa",
+      answeredLocally: true,
+      baselineEmpty: false,
+      held: undefined,
+      authored: undefined,
+      reviewing: undefined,
+      partitionsWanted: false,
+    });
+
+    expect(entries.map((entry) => entry.number)).toEqual([1, 2, 3]);
+  });
 });
 
 describe("default merge-readiness ranking", () => {
@@ -241,6 +281,66 @@ describe("default merge-readiness ranking", () => {
       groups,
     );
   });
+
+  it.each(["ready", "largest", "smallest"] as const)(
+    "%s uses loaded counts but keeps late detail counts in place",
+    (sort) => {
+      const rows = [1, 2, 3].map((number) => entry({ number, additions: 0, deletions: 0 }));
+      const groups = [{ key: "others", label: "Others", entries: rows }] as const;
+      const batches = [
+        { ...rows[0]!, additions: 100, deletions: 0 },
+        { ...rows[1]!, additions: 10, deletions: 0 },
+      ];
+      const loadedStats = mergePullRequestDiffStats(new Map(), batches);
+      const initial = settlePullRequestSortStats(null, sort, new Map(), null, false);
+      const partialStats = mergePullRequestDiffStats(new Map(), batches.slice(0, 1));
+      const partial = settlePullRequestSortStats(
+        initial,
+        sort,
+        partialStats,
+        batches.slice(0, 1),
+        false,
+      );
+      expect(partial).toBe(initial);
+      const settling = displayPullRequestGroups(
+        groups,
+        sort,
+        "",
+        partialStats,
+        partial.stats,
+        "all",
+      )[0]!.entries;
+      expect(settling.map((row) => row.number)).toEqual([1, 2, 3]);
+      expect(settling[0]!.additions).toBe(100);
+
+      const settled = settlePullRequestSortStats(partial, sort, loadedStats, batches, true);
+      const display = (stats: typeof loadedStats) =>
+        displayPullRequestGroups(groups, sort, "", stats, settled.stats, "all")[0]!.entries;
+      const expected = sort === "largest" ? [1, 2, 3] : [2, 1, 3];
+      expect(display(loadedStats).map((row) => row.number)).toEqual(expected);
+
+      const detail = { ...rows[2]!, additions: sort === "largest" ? 1_000 : 1, deletions: 0 };
+      const detailStats = mergePullRequestDiffStats(loadedStats, [detail]);
+      expect(
+        settlePullRequestSortStats(settled, sort, detailStats, [...batches, detail], true),
+      ).toBe(settled);
+      const filled = display(detailStats);
+      expect(filled.map((row) => row.number)).toEqual(expected);
+      expect(filled.find((row) => row.number === 3)?.additions).toBe(detail.additions);
+      const reset = settlePullRequestSortStats(
+        settled,
+        `${sort}:refetched`,
+        detailStats,
+        null,
+        false,
+      );
+      expect(
+        displayPullRequestGroups(groups, sort, "", detailStats, reset.stats, "all")[0]!.entries.map(
+          (row) => row.number,
+        ),
+      ).toEqual(sort === "largest" ? [3, 1, 2] : [3, 2, 1]);
+    },
+  );
 
   // regression: #9453 authored pull requests were not prioritized
   it("keeps authored work first and ranks each group by readiness", () => {
@@ -357,6 +457,18 @@ describe("remembered pull request list controls", () => {
     };
   };
 
+  it("remembers the selected project member independently of the server scope", () => {
+    const storage = makeStorage();
+    const preferences = {
+      involvement: "all",
+      state: "open",
+      projectId: ProjectId.make("main"),
+      projectEnvironmentId: EnvironmentId.make("cups"),
+    } as const;
+    writePullRequestListPreferences(preferences, storage);
+    expect(readPullRequestListPreferences(storage)).toEqual(preferences);
+  });
+
   // regression: #9188 corrupt stored list controls broke the page
   it("falls back to the default controls when storage is corrupt", () => {
     const storage = makeStorage();
@@ -431,6 +543,51 @@ describe("merging the environments' own listings", () => {
     ]);
   });
 
+  it.each([false, true])(
+    "merges worktree batches without duplicate rows (reversed: %s)",
+    (reverse) => {
+      const older = entry({
+        projectId: "worktree-1" as ProjectId,
+        number: 4,
+        updatedAt: "2026-07-01T00:00:00Z",
+      });
+      const newer = entry({
+        projectId: "worktree-101" as ProjectId,
+        number: 4,
+        updatedAt: "2026-07-02T00:00:00Z",
+      });
+      const rows = reverse ? [newer, older] : [older, newer];
+      const merged = mergePullRequestLists([
+        ...rows.map((row) => [ENV_1, answer({ entries: [row] })] as const),
+        [ENV_2, answer({ entries: [older] })],
+      ]);
+      expect(merged?.entries).toEqual([
+        { ...newer, environmentId: ENV_1 },
+        { ...older, environmentId: ENV_2 },
+      ]);
+    },
+  );
+
+  it("keeps Azure pull requests from distinct projects with the same repository name and number", () => {
+    const first = entry({
+      provider: SourceControlProviderKind.make("azure-devops"),
+      host: "dev.azure.com",
+      repository: "web",
+      number: 4,
+      projectId: "azure-first" as ProjectId,
+      url: "https://dev.azure.com/acme/first/_git/web/pullrequest/4",
+    });
+    const second = {
+      ...first,
+      projectId: "azure-second" as ProjectId,
+      url: "https://dev.azure.com/acme/second/_git/web/pullrequest/4",
+    };
+    const merged = mergePullRequestLists([[ENV_1, answer({ entries: [first, second] })]]);
+    expect(merged?.entries).toEqual(
+      [first, second].map((entry) => ({ ...entry, environmentId: ENV_1 })),
+    );
+  });
+
   // regression: #6490 one environment's error showed on every environment
   it("keeps project errors scoped to the environment that reported them", () => {
     const error = {
@@ -475,6 +632,17 @@ describe("merging the environments' own listings", () => {
         detail: null,
       },
     ]);
+  });
+
+  it("keeps continuations from every project batch on the same environment", () => {
+    const merged = mergePullRequestLists([
+      [ENV_1, answer({ truncated: true, nextCursors: { "github.com acme/first": "cursor-1" } })],
+      [ENV_1, answer({ truncated: true, nextCursors: { "github.com acme/second": "cursor-2" } })],
+    ]);
+    expect(merged?.nextCursors).toEqual({
+      [ENV_1]: { "github.com acme/first": "cursor-1", "github.com acme/second": "cursor-2" },
+    });
+    expect(merged?.truncatedEnvironments).toEqual([ENV_1]);
   });
 });
 
@@ -594,6 +762,26 @@ describe("pull request list overrides", () => {
       [2, "open"],
     ]);
     expect(applyPullRequestOverrides(rows, new Map(), key, "open")).toBe(rows);
+  });
+
+  it("shows a reply's queued merge as open and never un-merges a merged row", () => {
+    const reply = { state: "open", updatedAt: "2026-07-03T00:00:00Z", observedAt: 300 } as const;
+    const override = pullRequestOverrideAfterAction(
+      entry(1, "open"),
+      "merge",
+      new Date(900),
+      1,
+      reply as unknown as PullRequestSummary,
+    )!;
+    const overrides = new Map([["#1", override]]);
+    expect(applyPullRequestOverrides([entry(1, "open")], overrides, key, "open")).toMatchObject([
+      { state: "open", updatedAt: reply.updatedAt, observedAt: 300 },
+    ]);
+    expect(
+      applyPullRequestOverrides([entry(1, "merged")], overrides, key, "all").map(
+        (row) => row.state,
+      ),
+    ).toEqual(["merged"]);
   });
 
   it("keeps a confirmed close hidden when its override is cleared", () => {

@@ -1,4 +1,5 @@
 import { surfaceShortcutKey } from "~/lib/surfaceShortcutKey";
+import { openLayerMatches } from "../../lib/openLayers";
 
 export const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -59,13 +60,26 @@ function isSurfaceLauncherKey(event: KeyboardEvent): boolean {
   return key !== null && (launcherKeys?.includes(key) ?? false);
 }
 
+function isKeyClaimedInPath(event: KeyboardEvent): boolean {
+  if (event.shiftKey) return false;
+  const key = event.key.toUpperCase();
+  return event
+    .composedPath()
+    .some(
+      (target) =>
+        target instanceof Element &&
+        (target.getAttribute("aria-keyshortcuts")?.split(/\s+/).includes(key) ?? false),
+    );
+}
+
 export function shouldRedirectInputToComposer(event: Event): boolean {
   if (event.defaultPrevented) return false;
   // Never persist or send secret-request typing through the composer.
   if (eventPathContainsSelector(event, SECRET_REQUEST_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
   if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
-  if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
+  if (openLayerMatches(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
+  if (document.querySelector('[data-chat-column-maximized-away="true"]')) return false;
   return true;
 }
 
@@ -75,6 +89,7 @@ export function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
   if (event.key.length !== 1) return false;
   if (!shouldRedirectInputToComposer(event)) return false;
   if (isSurfaceLauncherKey(event)) return false;
+  if (isKeyClaimedInPath(event)) return false;
 
   return true;
 }

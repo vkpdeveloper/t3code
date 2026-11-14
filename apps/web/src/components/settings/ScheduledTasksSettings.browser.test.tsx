@@ -1,5 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
-import { Atom, AtomRegistry } from "effect/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import {
   DEFAULT_UNIFIED_SETTINGS,
   EnvironmentId,
@@ -15,6 +15,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 import { act, render } from "../../../test/render";
 import { ScheduledTasksSettings } from "./ScheduledTasksSettings";
+import { ConfirmDialogHost } from "../ConfirmDialogHost";
 
 const environmentId = EnvironmentId.make("laptop");
 const projectId = ProjectId.make("project");
@@ -47,13 +48,19 @@ const threadFamilyRead = {
   threads: [{ id: task.threadId, title: "Fix login bug" }],
 };
 
-const state = vi.hoisted(() => ({ connected: true, tasksLoaded: true, secondary: false }));
+const state = vi.hoisted(() => ({
+  connected: true,
+  tasksLoaded: true,
+  secondary: false,
+  remove: vi.fn(),
+}));
 const secondaryId = EnvironmentId.make("secondary");
 const permissions = new Map<string, Atom.Writable<boolean>>();
 
 function setup() {
   state.connected = true;
   state.tasksLoaded = true;
+  state.remove.mockReset().mockResolvedValue({ _tag: "Success", value: { id: task.id } });
   state.secondary = false;
   permissions.clear();
   permissions.set(environmentId, Atom.make(true));
@@ -65,10 +72,16 @@ function secondaryEnvironment() {
   return { ...environment(), environmentId: secondaryId, label: "Secondary" };
 }
 
+vi.mock(import("../../state/session"), async (original) => ({
+  ...(await original()),
+  readEnvironmentScope: () => true,
+}));
+
 function environment() {
   return {
     environmentId,
     label: "Laptop",
+    entry: { target: { _tag: "PrimaryConnectionTarget" } },
     connection: { phase: state.connected ? "connected" : "disconnected" },
     serverConfig: state.connected
       ? { environment: { platform: "linux", capabilities: { oneTimeSchedules: true } } }
@@ -104,6 +117,12 @@ vi.mock(import("../../state/server"), async (original) => {
     ...actual,
     serverEnvironment: {
       ...actual.serverEnvironment,
+      scheduledTasksLive: (() =>
+        Atom.make(AsyncResult.success({ tasks: state.tasksLoaded ? [task] : [] }))) as never,
+      deleteScheduledTask: {
+        ...actual.serverEnvironment.deleteScheduledTask,
+        run: state.remove,
+      },
       upsertScheduledTask: {
         ...actual.serverEnvironment.upsertScheduledTask,
         permissionAtom: (id: string | null) => permissions.get(id ?? "")!,
@@ -146,6 +165,70 @@ vi.mock(import("../../hooks/useSettings"), async (original) => ({
 }));
 
 describe("ScheduledTasksSettings", () => {
+  it("opens templates on a permitted secondary environment", async () => {
+    setup();
+    state.secondary = true;
+    state.tasksLoaded = false;
+    const registry = AtomRegistry.make();
+    using _registry = { [Symbol.dispose]: () => registry.dispose() };
+    registry.set(permissions.get(environmentId)!, false);
+    await using screen = await render(
+      <RegistryContext.Provider value={registry}>
+        <ScheduledTasksSettings />
+      </RegistryContext.Provider>,
+    );
+    await screen.getByRole("button", { name: "Use template" }).first().click();
+    await expect.element(page.getByLabelText("Runs on")).toHaveTextContent("Secondary");
+  });
+
+  it.each([false, true])(
+    "hides templates when creation is denied with secondary=%s",
+    async (secondary) => {
+      setup();
+      state.secondary = secondary;
+      state.tasksLoaded = false;
+      const registry = AtomRegistry.make();
+      using _registry = { [Symbol.dispose]: () => registry.dispose() };
+      registry.set(permissions.get(environmentId)!, false);
+      registry.set(permissions.get(secondaryId)!, false);
+      await using screen = await render(
+        <RegistryContext.Provider value={registry}>
+          <ScheduledTasksSettings />
+        </RegistryContext.Provider>,
+      );
+      await expect
+        .element(screen.getByRole("button", { name: "Use template" }))
+        .not.toBeInTheDocument();
+    },
+  );
+  it("only deletes a scheduled task after confirmation, including after cancelling", async () => {
+    setup();
+    await using screen = await render(
+      <>
+        <ScheduledTasksSettings />
+        <ConfirmDialogHost />
+      </>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Review issues" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "Delete", exact: true }));
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
+    expect(state.remove).not.toHaveBeenCalled();
+    await userEvent.click(page.getByRole("button", { name: "Cancel", exact: true }));
+    expect(state.remove).not.toHaveBeenCalled();
+    await expect
+      .element(screen.getByRole("button", { name: "Actions for Review issues" }))
+      .toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Review issues" }));
+    await userEvent.click(page.getByRole("menuitem", { name: "Delete", exact: true }));
+    await userEvent.click(page.getByRole("button", { name: "Confirm", exact: true }));
+    await vi.waitFor(() =>
+      expect(state.remove).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+        environmentId,
+        input: { id: task.id },
+      }),
+    );
+  });
+
   it("creates on a permitted secondary and reacts to permission changes", async () => {
     setup();
     state.secondary = true;
@@ -212,7 +295,9 @@ describe("ScheduledTasksSettings", () => {
     state.tasksLoaded = true;
     await screen.rerender(<ScheduledTasksSettings taskId={task.id} />);
 
-    await expect.element(dialog.getByRole("heading", { name: "New task" })).toBeInTheDocument();
+    await expect
+      .element(dialog.getByRole("heading", { name: "New scheduled task" }))
+      .toBeInTheDocument();
     await expect.element(name).toHaveValue("My draft");
   });
 });

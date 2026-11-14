@@ -164,12 +164,14 @@ export function BrowserDocumentFrame(props: {
 // URL renewals must not discard form input or scroll; a new key mounts a fresh document.
 function FileDocument(props: { readonly src: string; readonly title: string }) {
   const [src] = useState(props.src);
+  const [loaded, setLoaded] = useState(false);
   return (
     <iframe
       src={src}
       title={props.title}
-      className="min-h-0 flex-1 border-0 bg-white"
+      className={cn("min-h-0 flex-1 border-0 scheme-light", loaded && "bg-white")}
       sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+      onLoad={() => setLoaded(true)}
     />
   );
 }
@@ -301,7 +303,7 @@ export function HtmlRenderDocument(props: {
     }
     const imageRequest = readHtmlRenderImageRequest(event.data);
     if (imageRequest !== undefined) {
-      setExpandedImage({ images: [{ src: imageRequest.src, name: imageRequest.name }], index: 0 });
+      setExpandedImage({ images: [...imageRequest.images], index: imageRequest.index });
     }
   });
   // Attach at commit because a fast page may post its initial height before passive effects run.

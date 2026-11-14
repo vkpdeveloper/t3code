@@ -3,6 +3,8 @@ import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-s
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_LAYOUT_SETTINGS,
+  type LayoutSettings,
   AuthSettingsWriteScope,
   requiredScopesForServerSettingsPatch,
   type EnvironmentId,
@@ -31,6 +33,7 @@ import {
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
 import { ensureLocalApi } from "~/localApi";
+import { subscribeBrowserClientSettingsWrites } from "~/clientPersistenceStorage";
 import {
   getThemeDefinition,
   getThemePreviewSidebarArtwork,
@@ -49,7 +52,11 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { toastManager } from "~/components/ui/toast";
 import { isHostedStaticApp } from "~/hostedPairing";
 import { environmentCatalog } from "~/connection/catalog";
-import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
+import {
+  primaryServerConfigAtom,
+  primaryServerSettingsAtom,
+  serverEnvironment,
+} from "~/state/server";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
@@ -75,6 +82,7 @@ let clientSettingsHydrationPromise: Promise<void> | null = null;
 let clientSettingsHydrationGeneration = 0;
 let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
 let deferredClientSettingsPatchCount = 0;
+let unsubscribeOtherTabClientSettings: (() => void) | null = null;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -152,6 +160,9 @@ async function hydrateClientSettings(): Promise<void> {
       if (persistedSettings) {
         replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
       }
+      unsubscribeOtherTabClientSettings ??= subscribeBrowserClientSettingsWrites(
+        refreshClientSettingsFromOtherTab,
+      );
       setClientSettingsHydrationStatus("ready");
     } catch (error) {
       if (hydrationGeneration === clientSettingsHydrationGeneration) {
@@ -175,6 +186,20 @@ async function hydrateClientSettings(): Promise<void> {
   return clientSettingsHydrationPromise;
 }
 
+function refreshClientSettingsFromOtherTab(): void {
+  void enqueueClientSettingsPersistence(async () => {
+    const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
+    if (persistedSettings) {
+      replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+    }
+  }).catch((error) => {
+    console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} refresh failed`, {
+      operation: "refresh",
+      ...safeErrorLogAttributes(error),
+    });
+  });
+}
+
 const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<void> =>
   ensureLocalApi().persistence.setClientSettings(settings);
 
@@ -187,6 +212,20 @@ function enqueueClientSettingsPersistence<A>(work: () => Promise<A>): Promise<A>
   return result;
 }
 
+function applyClientSettingsPatch(
+  current: ClientSettings,
+  patch: ClientSettingsPatch,
+): ClientSettings {
+  const { layout, ...scalarPatch } = patch;
+  return {
+    ...current,
+    ...scalarPatch,
+    ...(layout === undefined
+      ? {}
+      : { layout: { ...(current.layout ?? DEFAULT_LAYOUT_SETTINGS), ...layout } }),
+  };
+}
+
 export function persistClientSettingsPatch(
   patch: ClientSettingsPatch,
   persist: (settings: ClientSettings) => Promise<void> = defaultClientSettingsPersistence,
@@ -197,7 +236,7 @@ export function persistClientSettingsPatch(
   if (deferPatch) {
     deferredClientSettingsPatchCount += 1;
   } else {
-    replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
+    replaceClientSettingsSnapshot(applyClientSettingsPatch(getClientSettingsSnapshot(), patch));
   }
   return enqueueClientSettingsPersistence(async () => {
     if (deferPatch) {
@@ -205,10 +244,16 @@ export function persistClientSettingsPatch(
         if (clientSettingsHydrationStatus !== "ready") {
           await hydrateClientSettings();
         }
-        replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
       } finally {
         deferredClientSettingsPatchCount -= 1;
       }
+    }
+    // Also reapplies an optimistic patch that a refresh from another tab replaced.
+    const current = getClientSettingsSnapshot();
+    if (
+      !Object.entries(patch).every(([key, value]) => current[key as keyof ClientSettings] === value)
+    ) {
+      replaceClientSettingsSnapshot(applyClientSettingsPatch(current, patch));
     }
     await persist(getClientSettingsSnapshot());
   }).catch((error) => {
@@ -221,7 +266,7 @@ export function persistClientSettingsPatch(
 
 /** Reapply to newer snapshots after pending writes to avoid losing concurrent changes. */
 export async function persistClientSettingsUpdate(
-  update: (current: ClientSettings) => ClientSettings,
+  update: (current: ClientSettings) => ClientSettings | null,
   persist: (settings: ClientSettings) => Promise<void> = defaultClientSettingsPersistence,
 ): Promise<ClientSettings> {
   return enqueueClientSettingsPersistence(async () => {
@@ -231,6 +276,7 @@ export async function persistClientSettingsUpdate(
     for (;;) {
       const current = getClientSettingsSnapshot();
       const next = update(current);
+      if (next === null) return current;
       await persist(next);
       if (getClientSettingsSnapshot() === current) {
         replaceClientSettingsSnapshot(next);
@@ -238,6 +284,13 @@ export async function persistClientSettingsUpdate(
       }
     }
   });
+}
+
+/** Copy the primary environment's old preference only while this client has no saved layout. */
+export async function migrateLegacyLayoutSettings(legacyLayout: LayoutSettings): Promise<void> {
+  await persistClientSettingsUpdate((current) =>
+    current.layout === undefined ? { ...current, layout: legacyLayout } : null,
+  );
 }
 
 const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
@@ -307,13 +360,14 @@ export function useClientSettings<T = ClientSettings>(
 }
 
 export function mergeEnvironmentSettings(
-  serverSettings: ServerSettings,
+  serverSettings: ServerSettings & { readonly layout?: LayoutSettings },
   clientSettings: ClientSettings,
 ): UnifiedSettings {
   // Older untyped adapters can return retired client keys; server values must win.
+  const { layout: _legacyLayout, ...serverOwnedSettings } = serverSettings;
   return {
     ...clientSettings,
-    ...serverSettings,
+    ...serverOwnedSettings,
     ...resolveModelPreferences(serverSettings, clientSettings),
   };
 }
@@ -383,6 +437,41 @@ export function useMergedSettings<T = UnifiedSettings>(
   });
 }
 
+/** Copies the primary server's retired layout after client preferences hydrate. */
+export function startLegacyLayoutSettingsMigration(): () => void {
+  const migrate = () => {
+    if (clientSettingsHydrationStatus !== "ready" || clientSettingsSnapshot.layout !== undefined)
+      return;
+    const legacyLayout = appAtomRegistry.get(primaryServerConfigAtom)?.settings.layout;
+    if (legacyLayout === undefined) return;
+    void migrateLegacyLayoutSettings(legacyLayout).catch((error) => {
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} layout migration failed`, {
+        operation: "migrate-layout",
+        ...safeErrorLogAttributes(error),
+      });
+    });
+  };
+  const unsubscribes = [
+    appAtomRegistry.subscribe(primaryServerConfigAtom, migrate),
+    subscribeClientSettings(migrate),
+    subscribeClientSettingsHydration(migrate),
+  ];
+  migrate();
+  return () => {
+    for (const unsubscribe of unsubscribes) unsubscribe();
+  };
+}
+
+/** The device-local layout; legacy values come only from the primary environment. */
+export function useClientLayoutSettings(): LayoutSettings {
+  return useClientSettings((settings) => settings.layout) ?? DEFAULT_LAYOUT_SETTINGS;
+}
+
+/** Labs › Scrolling workspaces: the niri parts of the layout. Off for everyone until turned on. */
+export function useScrollingWorkspacesEnabled(): boolean {
+  return useClientSettings((settings) => settings.scrollingWorkspacesEnabled);
+}
+
 function resolveEnvironmentIdentificationMode(input: {
   mode: EnvironmentIdentificationMode;
   settingsHydrated: boolean;
@@ -413,13 +502,6 @@ export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMod
     paletteThemeActive: previewSidebarArtwork !== null || activeThemeDefinition !== null,
     paletteThemeAllowsArtwork: previewSidebarArtwork ?? themeAllowsSidebarArtwork(activeTheme),
   });
-}
-
-/** Legacy sidebar opt-ins still count, so those users land in the boring sidebar. */
-export function useBoringSidebarEnabled(): boolean {
-  return useClientSettings(
-    (settings) => settings.boringSidebarEnabled || settings.legacySidebarEnabled,
-  );
 }
 
 export async function prepareModelPreferencesPatch(
@@ -527,6 +609,11 @@ export function useEnvironmentModelPreferences(environmentId: EnvironmentId | nu
   return resolveModelPreferences(settings ?? DEFAULT_SERVER_SETTINGS, legacy);
 }
 
+/** Whether macOS hides the traffic lights while the sidebar is collapsed. */
+export function useHideWindowControlsWhenSidebarCollapsed(): boolean {
+  return useClientSettings((settings) => settings.hideWindowControlsWhenSidebarCollapsed);
+}
+
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,
   selector?: (settings: UnifiedSettings) => T,
@@ -610,7 +697,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   const sharedSettingsSyncTargetIds = useSharedSettingsSyncTargetIds(true);
   const updateSettings = (
     patch: UnifiedSettingsPatch,
-    options?: { readonly onFailed?: () => void },
+    options?: { readonly onFailed?: () => void; readonly onSaved?: () => void },
   ) => {
     const { serverPatch, clientPatch } = splitPatch(patch);
 
@@ -643,7 +730,9 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           void persistServerSettings(
             { environmentId, input: { patch: localPatch } },
             options?.onFailed,
-          );
+          ).then((result) => {
+            if (result._tag === "Success") options?.onSaved?.();
+          });
         } else {
           warnUnsaved();
         }
@@ -711,6 +800,12 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
                 `Could not save on ${label}: ${error instanceof Error ? error.message : "The save failed. Try reconnecting and saving again."}`,
               ];
             });
+            if (
+              deniedLabels.length === 0 &&
+              outcomes.every(({ result }) => result._tag === "Success")
+            ) {
+              options?.onSaved?.();
+            }
             if (failures.length === 0) return;
             const saved = outcomes
               .filter(({ result }) => result._tag === "Success")
@@ -754,6 +849,8 @@ export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsHydrationPromise = null;
   clientSettingsPersistenceQueue = Promise.resolve();
   deferredClientSettingsPatchCount = 0;
+  unsubscribeOtherTabClientSettings?.();
+  unsubscribeOtherTabClientSettings = null;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }

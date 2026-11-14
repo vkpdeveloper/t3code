@@ -1,4 +1,4 @@
-import type { SecretProviderConfig, SecretProviderId } from "@t3tools/contracts";
+import type { EnvironmentId, SecretProviderConfig, SecretProviderId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -18,6 +18,7 @@ import {
 import { Button } from "../ui/button";
 import { SecretProviderDialog } from "./SecretProviderDialog";
 import { classifySecretProvider } from "./SecretProviderDialog.logic";
+import { secretProviderUses } from "./SecretsSettings.logic";
 import {
   classifyProviderEnvironmentAccess,
   resolveRemoteOperateAccess,
@@ -42,7 +43,7 @@ export function SecretsSettingsPanel() {
       environment.serverConfig !== null &&
       environment.serverConfig.secretProviderSettings !== true ? (
         <SettingsSection {...searchableSetting("secret-providers")}>
-          <p className="px-4 py-3 text-sm text-muted-foreground">
+          <p className="px-4 py-3 text-body text-muted-foreground">
             Update T3 Code on {environment.label} to manage its secret providers.
           </p>
         </SettingsSection>
@@ -54,7 +55,7 @@ export function SecretsSettingsPanel() {
         />
       ) : (
         <SettingsSection {...searchableSetting("secret-providers")}>
-          <p className="px-4 py-3 text-sm text-muted-foreground">
+          <p className="px-4 py-3 text-body text-muted-foreground">
             Connect an environment to manage the secret providers its provider variables read from.
           </p>
         </SettingsSection>
@@ -100,7 +101,7 @@ function EnvironmentSecretProviders({
         {...searchableSetting("secret-providers")}
         headerAction={
           !readOnly ? (
-            <Button size="xs" variant="outline" onClick={() => setDialog({ mode: "add" })}>
+            <Button size="xs" variant="secondary" onClick={() => setDialog({ mode: "add" })}>
               <PlusIcon className="size-3" aria-hidden />
               Add provider
             </Button>
@@ -108,7 +109,7 @@ function EnvironmentSecretProviders({
         }
       >
         {projectScoped ? (
-          <p className="px-4 pt-3 text-xs text-muted-foreground">
+          <p className="px-4 pt-3 text-meta text-muted-foreground">
             Environment-wide setting. Select an environment to change it.
           </p>
         ) : null}
@@ -137,8 +138,8 @@ function EnvironmentSecretProviders({
                 }
                 description={
                   classified.kind === "one_password" && kind ? (
-                    <span className="flex min-w-0 items-center gap-1">
-                      <span className="shrink-0">{kind.name} ·</span>
+                    <span className="grid min-w-0 justify-items-start gap-1">
+                      <span className="shrink-0">{kind.name}</span>
                       <RedactedSensitiveText
                         value={classified.account}
                         ariaLabel="Toggle account visibility"
@@ -164,6 +165,8 @@ function EnvironmentSecretProviders({
                         </Button>
                       ) : null}
                       <RemoveSecretProviderButton
+                        environmentId={environmentId}
+                        id={id}
                         label={config.label}
                         onConfirm={() => updateSettings({ secretProviders: { [id]: null } })}
                       />
@@ -189,9 +192,13 @@ function EnvironmentSecretProviders({
 }
 
 function RemoveSecretProviderButton({
+  environmentId,
+  id,
   label,
   onConfirm,
 }: {
+  readonly environmentId: EnvironmentId;
+  readonly id: SecretProviderId;
   readonly label: string;
   readonly onConfirm: () => void;
 }) {
@@ -205,13 +212,10 @@ function RemoveSecretProviderButton({
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Provider variables that read from {label} stop resolving until a provider with the
-              same name is added again. The secrets themselves are untouched.
-            </AlertDialogDescription>
+            <SecretProviderUses environmentId={environmentId} id={id} label={label} />
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="secondary" />}>Cancel</AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -224,6 +228,37 @@ function RemoveSecretProviderButton({
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+    </>
+  );
+}
+
+function SecretProviderUses({
+  environmentId,
+  id,
+  label,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly id: SecretProviderId;
+  readonly label: string;
+}) {
+  const uses = secretProviderUses(useEnvironmentSettings(environmentId), id);
+  if (uses.length === 0) {
+    return (
+      <AlertDialogDescription>
+        Nothing reads from {label}. The secrets themselves are untouched.
+      </AlertDialogDescription>
+    );
+  }
+  return (
+    <>
+      <AlertDialogDescription>
+        These read from {label} and will be unset. The secrets themselves are untouched.
+      </AlertDialogDescription>
+      <ul className="max-h-48 list-disc space-y-0.5 overflow-y-auto ps-5 text-sm wrap-anywhere">
+        {uses.map((use) => (
+          <li key={use.id}>{use.label}</li>
+        ))}
+      </ul>
     </>
   );
 }

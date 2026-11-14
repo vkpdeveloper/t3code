@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, ContextMenuSource } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -17,6 +17,7 @@ export interface ElectronMenuContextInput {
   readonly window: Electron.BrowserWindow;
   readonly items: readonly ContextMenuItem[];
   readonly position: Option.Option<ElectronMenuPosition>;
+  readonly source: Option.Option<ContextMenuSource>;
 }
 
 export interface ElectronMenuTemplateInput {
@@ -75,11 +76,17 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
 
     const normalizedItem: ContextMenuItem = {
       id: sourceItem.id,
-      label: sourceItem.label,
+      label:
+        typeof sourceItem.detail === "string" && sourceItem.detail.length > 0
+          ? `${sourceItem.label} (${sourceItem.detail})`
+          : sourceItem.label,
       destructive: sourceItem.destructive === true,
       disabled: sourceItem.disabled === true,
       ...(sourceItem.separatorBefore === true ? { separatorBefore: true } : {}),
       ...(typeof sourceItem.checked === "boolean" ? { checked: sourceItem.checked } : {}),
+      ...(typeof sourceItem.accelerator === "string"
+        ? { accelerator: sourceItem.accelerator }
+        : {}),
     };
 
     if (sourceItem.children) {
@@ -167,6 +174,8 @@ export const make = Effect.gen(function* () {
         label: item.label,
         enabled: !item.disabled,
         ...(typeof item.checked === "boolean" ? { type: "checkbox", checked: item.checked } : {}),
+        // Shown beside the label for learning; the app's own handler runs the key.
+        ...(item.accelerator ? { accelerator: item.accelerator, registerAccelerator: false } : {}),
       };
       if (item.children && item.children.length > 0) {
         itemOption.submenu = buildTemplate(item.children, complete);
@@ -256,7 +265,11 @@ export const make = Effect.gen(function* () {
               callback: () => complete(Option.none()),
             }),
           });
-          menu.popup(popupOptions);
+          menu.popup(
+            Option.isSome(input.source)
+              ? { ...popupOptions, sourceType: input.source.value }
+              : popupOptions,
+          );
         } catch (cause) {
           if (completed) {
             return;

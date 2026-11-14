@@ -26,7 +26,9 @@ import {
 import {
   classifyComposerAttachmentFile,
   composerFileAttachmentMimeType,
+  composerImageSourceKey,
   normalizeComposerImageFileMimeType,
+  rememberComposerImageSource,
 } from "./composerAttachmentFiles";
 import {
   fileAttachmentTooLargeMessage,
@@ -48,6 +50,7 @@ import { toastManager } from "../ui/toast";
 import { type RefObject, useRef } from "react";
 import {
   addPreparingComposerImages,
+  getPreparingComposerImages,
   isPreparingComposerImage,
   removePreparingComposerImages,
 } from "./preparingComposerImages";
@@ -232,22 +235,30 @@ export function useComposerAttachmentIntake(input: {
         toastManager.add({
           type: "info",
           title: `Large paste attached as ${attached.name}`,
-          description: `${formatAttachmentSize(attached.sizeBytes)} · Use ${
+          description: `Use ${
             isMacPlatform(navigator.platform) ? "⌘⇧V" : "Ctrl+Shift+V"
           } to keep a large paste inline.`,
-          data: { hideCopyButton: true },
+          data: { hideCopyButton: true, body: formatAttachmentSize(attached.sizeBytes) },
         });
       }
     }
     if (acceptedImages.length === 0) return insertedAny;
 
+    // The store drops a repeated image only after compressing it, so a likely repeat prepares
+    // without a tile instead of flashing one. Only the store decides it is a duplicate.
+    const imageSourceKeys = new Set(
+      [...composerImagesRef.current, ...getPreparingComposerImages(attachmentTargetKey)].map(
+        (image) => composerImageSourceKey(image.file),
+      ),
+    );
     // The draft image reuses its placeholder's id and thumbnail so the strip tile stays exactly
     // as it is when the compressed file replaces it.
-    const preparingImages = acceptedImages.map((file) => ({
-      id: randomUUID(),
-      name: file.name || "image",
-      file,
-    }));
+    const preparingImages = acceptedImages.map((file) => {
+      const sourceKey = composerImageSourceKey(file);
+      const hidden = imageSourceKeys.has(sourceKey);
+      imageSourceKeys.add(sourceKey);
+      return { id: randomUUID(), name: file.name || "image", file, hidden };
+    });
     addPreparingComposerImages(attachmentTargetKey, preparingImages);
     if (questionAttachmentTarget)
       changeQuestionAttachmentPreparation(questionAttachmentTarget, acceptedImages.length);
@@ -272,7 +283,8 @@ export function useComposerAttachmentIntake(input: {
         );
         continue;
       }
-      inheritComposerImageThumbnail(file, result.file);
+      await inheritComposerImageThumbnail(file, result.file);
+      rememberComposerImageSource(file, result.file);
       compressed.push({ id, file: result.file });
     }
     const questionDiscarded =
@@ -345,7 +357,7 @@ export function useComposerAttachmentIntake(input: {
     }
     const confirmation = requestConfirmDialog(
       `Remove ${image?.name ?? "this image"} from the message?\nIt is referenced in your text; removing it also removes every reference.`,
-      { variant: "destructive" },
+      { variant: "destructive", confirmLabel: "Remove" },
     );
     if (!confirmation) {
       removeComposerImageFromDraft(imageId);

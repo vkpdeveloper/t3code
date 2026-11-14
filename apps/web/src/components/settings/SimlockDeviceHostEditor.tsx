@@ -1,6 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useId, useState, type ReactNode } from "react";
-import type { EnvironmentId, SimlockDeviceHostConfig } from "@t3tools/contracts";
+import {
+  isSecretReference,
+  type EnvironmentId,
+  type SettingsSecretValue,
+  type SimlockDeviceHostConfig,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -21,7 +26,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
-import { SecretInput } from "./SecretInput";
+import { SecretSourceInput, useSecretSources } from "./SecretSourceInput";
 import {
   planSimlockDeviceHostSave,
   simlockDeviceHostProblem,
@@ -67,8 +72,9 @@ export function SimlockDeviceHostEditor(props: {
     .map((result) => Option.getOrUndefined(AsyncResult.value(result))?.gatewayUrl)
     .find(Boolean);
   const gatewayUrl = urlEdited || draft.gatewayUrl ? draft.gatewayUrl : (detectedUrl ?? "");
-  const savedToken = (environment: SimlockHostEnvironment) =>
-    environment.hosts.some((host) => host.id === props.host.id && host.agentToken !== "");
+  const savedValue = (environment: SimlockHostEnvironment) =>
+    environment.hosts.find((host) => host.id === props.host.id)?.agentToken ?? "";
+  const savedToken = (environment: SimlockHostEnvironment) => savedValue(environment) !== "";
   const [tokens, setTokens] = useState<ReadonlyMap<EnvironmentId, SimlockTokenEntry>>(
     () =>
       new Map(
@@ -84,8 +90,15 @@ export function SimlockDeviceHostEditor(props: {
     gatewayUrl: gatewayUrl.trim(),
   };
   const checkUrl = simlockDeviceHostProblem(next) === null ? next.gatewayUrl : null;
+  // Environments whose token field holds a secret reference that cannot be saved yet.
+  const [invalidTokens, setInvalidTokens] = useState<ReadonlySet<EnvironmentId>>(new Set());
   const plan = planSimlockDeviceHostSave(props.environments, next, tokens);
-  const problem = "problem" in plan ? plan.problem : null;
+  const problem =
+    "problem" in plan
+      ? plan.problem
+      : invalidTokens.size > 0
+        ? "Enter a valid secret reference."
+        : null;
   const several = props.environments.length > 1;
 
   const limit = (
@@ -94,7 +107,7 @@ export function SimlockDeviceHostEditor(props: {
     min: number,
     max: number,
   ) => (
-    <label className="block space-y-1.5">
+    <label className="block space-y-1.5 text-label">
       <span>{label}</span>
       <Input
         type="number"
@@ -134,7 +147,7 @@ export function SimlockDeviceHostEditor(props: {
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>
-            <label className="block space-y-1.5 text-sm">
+            <label className="block space-y-1.5 text-label">
               <span>Name</span>
               <Input
                 autoFocus
@@ -147,7 +160,7 @@ export function SimlockDeviceHostEditor(props: {
                 }}
               />
             </label>
-            <label className="block space-y-1.5 text-sm">
+            <label className="block space-y-1.5 text-label">
               <span>Gateway URL</span>
               <Input
                 required
@@ -169,16 +182,31 @@ export function SimlockDeviceHostEditor(props: {
                   environmentId={environment.environmentId}
                   hostId={props.isNew ? null : props.host.id}
                   gatewayUrl={checkUrl}
-                  label={several ? `Agent token · ${environment.label}` : "Agent token"}
+                  label={
+                    <span className="grid gap-1">
+                      <span>Agent token</span>
+                      {several ? (
+                        <span className="text-meta text-muted-foreground">{environment.label}</span>
+                      ) : null}
+                    </span>
+                  }
                   token={tokens.get(environment.environmentId) ?? { kind: "cleared" }}
-                  hasSaved={savedToken(environment)}
+                  saved={savedValue(environment)}
                   busy={props.busy}
                   onChange={(token) =>
                     setTokens((current) => new Map(current).set(environment.environmentId, token))
                   }
+                  onValidityChange={(valid) =>
+                    setInvalidTokens((current) => {
+                      const nextInvalid = new Set(current);
+                      if (valid) nextInvalid.delete(environment.environmentId);
+                      else nextInvalid.add(environment.environmentId);
+                      return nextInvalid;
+                    })
+                  }
                 />
               ))}
-              <p className="text-xs text-muted-foreground">
+              <p className="text-meta text-muted-foreground">
                 Leases, drives, and streams devices. Create one{several ? " per environment" : ""}{" "}
                 with <code>simlock --gateway token create --role agent</code>, or leave it blank to
                 add it later. A blank token uses the machine's{" "}
@@ -186,16 +214,16 @@ export function SimlockDeviceHostEditor(props: {
                 <code>AGENT_DEVICE_DAEMON_BASE_URL</code> is this gateway.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-2 gap-3 text-body">
               {limit("maxLeases", "Devices at once", 1, 20)}
               {limit("maxLeaseMinutes", "Lease minutes", 5, 240)}
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-meta text-muted-foreground">
               A lease ends after the lease minutes even while in use.
               {props.isNew ? null : " Saving restarts this host, which releases its devices."}
             </p>
             {problem === null || !gatewayUrl ? null : (
-              <p className="text-xs text-destructive" role="alert">
+              <p className="text-meta text-destructive-foreground" role="alert">
                 {problem}
               </p>
             )}
@@ -220,12 +248,23 @@ function SimlockTokenField(props: {
   gatewayUrl: string | null;
   label: ReactNode;
   token: SimlockTokenEntry;
-  hasSaved: boolean;
+  /** This environment's saved token: redacted when a literal, shown when a secret reference. */
+  saved: SettingsSecretValue;
   busy: boolean;
   onChange: (token: SimlockTokenEntry) => void;
+  onValidityChange: (valid: boolean) => void;
 }) {
   const id = useId();
-  const entered = props.token.kind === "new" ? props.token.value.trim() : "";
+  const sources = useSecretSources(props.environmentId);
+  const [inputKey, setInputKey] = useState(0);
+  // Emptying the field or leaving a reference returns to a saved literal, never to a saved reference.
+  const savedLiteral = typeof props.saved === "string" && props.saved !== "";
+  const entered =
+    props.token.kind !== "new"
+      ? ""
+      : typeof props.token.value === "string"
+        ? props.token.value.trim()
+        : props.token.value;
   // A cleared field asks about the machine's own token, which a blank one falls back to.
   const check = useAtomValue(
     props.gatewayUrl === null
@@ -254,31 +293,52 @@ function SimlockTokenField(props: {
       </span>
     ) : AsyncResult.isFailure(check) ? (
       <span
-        className={props.token.kind === "cleared" ? "text-muted-foreground" : "text-destructive"}
+        className={
+          props.token.kind === "cleared" ? "text-muted-foreground" : "text-destructive-foreground"
+        }
       >
         {failureMessage(check.cause)}
       </span>
     ) : null;
   return (
-    <div className="space-y-1.5 text-sm">
-      <label htmlFor={id} className="block">
+    <div className="space-y-1.5 text-body">
+      <label htmlFor={id} className="block text-label">
         {props.label}
       </label>
       <div className="flex items-center gap-2">
-        <SecretInput
+        <SecretSourceInput
+          key={inputKey}
           id={id}
+          aria-label="Agent token"
+          environmentId={props.environmentId}
           className="min-w-0 flex-1"
-          configured={props.token.kind === "saved"}
-          value={props.token.kind === "new" ? props.token.value : ""}
+          configured={props.token.kind === "saved" && typeof props.saved === "string"}
+          value={
+            props.token.kind === "new"
+              ? props.token.value
+              : props.token.kind === "saved" && isSecretReference(props.saved)
+                ? props.saved
+                : ""
+          }
+          sources={sources}
+          onValidityChange={props.onValidityChange}
+          onSecretChange={(secret) =>
+            props.onChange(
+              secret
+                ? { kind: "new", value: secret }
+                : savedLiteral
+                  ? { kind: "saved" }
+                  : { kind: "cleared" },
+            )
+          }
           disabled={props.busy}
           onChange={(event) => {
             const value = event.target.value;
-            // Emptying the field is not clearing the saved token; the Clear
-            // button is, so a saved token comes back here.
+            // Emptying the field is not clearing the saved token; the Clear button is.
             props.onChange(
               value
                 ? { kind: "new", value }
-                : props.hasSaved
+                : savedLiteral
                   ? { kind: "saved" }
                   : { kind: "cleared" },
             );
@@ -291,13 +351,17 @@ function SimlockTokenField(props: {
             variant="ghost-destructive"
             aria-label="Clear agent token"
             disabled={props.busy}
-            onClick={() => props.onChange({ kind: "cleared" })}
+            onClick={() => {
+              props.onChange({ kind: "cleared" });
+              props.onValidityChange(true);
+              setInputKey((key) => key + 1);
+            }}
           >
             <XIcon className="size-3.5" />
           </Button>
         ) : null}
       </div>
-      {status ? <p className="text-xs">{status}</p> : null}
+      {status ? <p className="text-meta">{status}</p> : null}
     </div>
   );
 }

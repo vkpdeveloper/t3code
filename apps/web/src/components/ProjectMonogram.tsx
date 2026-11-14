@@ -17,12 +17,13 @@ export function ProjectMonogram({
   return (
     <span
       aria-hidden="true"
+      data-slot="project-monogram"
       className={cn("inline-flex size-4 shrink-0 items-center justify-center", className)}
     >
       <svg
         viewBox="0 0 16 16"
         className={cn(
-          "size-full overflow-hidden rounded-[25%] font-mono select-none",
+          "size-full overflow-hidden rounded-[25%] outline -outline-offset-1 outline-(--project-icon-rim) font-mono select-none",
           projectIconColorClassName(color),
         )}
         style={{

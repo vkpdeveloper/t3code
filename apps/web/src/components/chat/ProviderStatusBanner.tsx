@@ -1,10 +1,17 @@
-import { type ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
-import { memo } from "react";
-import { InfoIcon, XIcon } from "lucide-react";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
-import { Button, InlineButton } from "../ui/button";
+import { useAtomValue } from "@effect/atom-react";
+import { useRef, useState, useSyncExternalStore } from "react";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { RefreshIcon } from "../ui/refresh-icon";
+import {
+  type EnvironmentId,
+  type ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { BotOffIcon, CircleAlertIcon, KeyRoundIcon, TriangleAlertIcon } from "lucide-react";
+import { Button } from "../ui/button";
 import { formatProviderDriverKindLabel } from "../../providerModels";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
 function getIncompatibleVersion(status: ServerProvider) {
   const compatibility = status.compatibilityAdvisory;
@@ -43,10 +50,43 @@ export function getProviderStatusBannerKey(status: ServerProvider | null): strin
 
 export function shouldShowProviderStatusBanner(
   status: ServerProvider | null,
-  dismissedBannerKey: string | null,
+  isDismissed: boolean,
 ): boolean {
+  return getProviderStatusBannerKey(status) !== null && !isDismissed;
+}
+
+// Built-in instance ids such as `codex` repeat across environments.
+export function getProviderStatusDismissalKey(
+  environmentId: string | undefined,
+  status: ServerProvider | null,
+): string | null {
   const bannerKey = getProviderStatusBannerKey(status);
-  return bannerKey !== null && bannerKey !== dismissedBannerKey;
+  return bannerKey === null ? null : `${environmentId ?? ""}\u0000${bannerKey}`;
+}
+
+// A dismissal lasts the session, not one view, so opening another thread cannot bring it back.
+const sessionDismissedProviderStatusBannerKeys = new Set<string>();
+const dismissalListeners = new Set<() => void>();
+
+export function dismissProviderStatusBannerForSession(bannerKey: string | null): void {
+  if (bannerKey === null || sessionDismissedProviderStatusBannerKeys.has(bannerKey)) return;
+  sessionDismissedProviderStatusBannerKeys.add(bannerKey);
+  for (const listener of dismissalListeners) listener();
+}
+
+export function isProviderStatusBannerDismissedForSession(bannerKey: string | null): boolean {
+  return bannerKey !== null && sessionDismissedProviderStatusBannerKeys.has(bannerKey);
+}
+
+function subscribeToDismissals(listener: () => void) {
+  dismissalListeners.add(listener);
+  return () => dismissalListeners.delete(listener);
+}
+
+export function useProviderStatusBannerDismissed(bannerKey: string | null): boolean {
+  return useSyncExternalStore(subscribeToDismissals, () =>
+    isProviderStatusBannerDismissedForSession(bannerKey),
+  );
 }
 
 export function hasProviderSetup(status: ServerProvider): boolean {
@@ -85,65 +125,127 @@ export function getProviderStatusMessage(status: ServerProvider): string {
       : `${providerName} provider has limited availability.`;
 }
 
-export const ProviderStatusBanner = memo(function ProviderStatusBanner({
+/**
+ * The selected provider's status as a tray notice: signed out, no models,
+ * unsupported version, or degraded. The provider's own message follows the
+ * title; a clipped one opens in the notice's details popover.
+ */
+export function providerStatusBannerItem({
+  environmentId,
   onDismiss,
   onOpenProviderSetup,
+  onOpenTerminal,
   status,
 }: {
+  environmentId: EnvironmentId;
   onDismiss: () => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
+  /** Offered for a signed-out provider whose sign-in runs in its CLI. */
+  onOpenTerminal?: () => void;
   status: ServerProvider | null;
-}) {
-  if (!status || getProviderStatusBannerKey(status) === null) {
+}): ComposerBannerStackItem | null {
+  const bannerKey = getProviderStatusBannerKey(status);
+  if (!status || bannerKey === null) {
     return null;
   }
 
   const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
   const isUnauthenticated = status.status === "error" && status.auth.status === "unauthenticated";
   const incompatible = getIncompatibleVersion(status);
+  const hasNoModels =
+    status.status === "warning" &&
+    status.installed &&
+    status.auth.status !== "unauthenticated" &&
+    status.models.length === 0;
   const title = isUnauthenticated
-    ? `${providerName} is unauthenticated`
+    ? `${providerName} signed out`
     : incompatible
       ? `${providerName} ${status.version ?? ""} is ${incompatible.status === "broken" ? "known to be broken" : "unsupported"}`
-      : `${providerName} provider status`;
+      : hasNoModels
+        ? `${providerName} has no models`
+        : status.status === "error"
+          ? `${providerName} unavailable`
+          : `${providerName} limited`;
   const message = incompatible?.message ?? getProviderStatusMessage(status);
   const isWarning =
-    incompatible?.status !== "broken" && (status.status === "warning" || incompatible !== null);
+    isUnauthenticated ||
+    hasNoModels ||
+    (incompatible?.status !== "broken" && (status.status === "warning" || incompatible !== null));
+  const openSetup = onOpenProviderSetup && hasProviderSetup(status) ? onOpenProviderSetup : null;
+  const { instanceId } = status;
 
-  return (
-    <div className="pointer-events-auto mx-auto w-fit max-w-[calc(100%-2rem)] pt-3">
-      <Alert
-        variant={isWarning ? "warning" : "error"}
-        role={incompatible && incompatible.status !== "broken" ? "status" : "alert"}
-        surface="glass"
-        controlAlignment="first-line"
-      >
-        <InfoIcon />
-        <AlertTitle>{title}</AlertTitle>
-        <AlertDescription>
-          <Tooltip>
-            <TooltipTrigger render={<div className="line-clamp-3" />}>{message}</TooltipTrigger>
-            <TooltipPopup side="top" className="whitespace-pre-wrap">
-              {message}
-            </TooltipPopup>
-          </Tooltip>
-          {onOpenProviderSetup && hasProviderSetup(status) ? (
-            <InlineButton onClick={() => onOpenProviderSetup(status.instanceId)}>
-              Open provider setup
-            </InlineButton>
-          ) : null}
-        </AlertDescription>
-        <AlertAction>
-          <Button
-            aria-label={`Dismiss ${providerName} provider ${status.status}`}
-            onClick={onDismiss}
-            size="icon-xs"
-            variant="ghost-muted"
-          >
-            <XIcon />
+  return {
+    id: `provider-status:${bannerKey}`,
+    textSize: "body",
+    variant: isWarning ? "warning" : "error",
+    icon: isUnauthenticated ? (
+      <KeyRoundIcon />
+    ) : hasNoModels ? (
+      <BotOffIcon />
+    ) : isWarning ? (
+      <TriangleAlertIcon />
+    ) : (
+      <CircleAlertIcon />
+    ),
+    title,
+    description: message,
+    actions: (
+      <>
+        {openSetup ? (
+          <Button size="xs" variant="secondary" onClick={() => openSetup(instanceId)}>
+            Provider setup
           </Button>
-        </AlertAction>
-      </Alert>
-    </div>
+        ) : isUnauthenticated && onOpenTerminal ? (
+          <Button size="xs" variant="secondary" onClick={onOpenTerminal}>
+            Open terminal
+          </Button>
+        ) : null}
+        <ProviderStatusRefreshButton
+          key={`${environmentId}:${instanceId}`}
+          environmentId={environmentId}
+          instanceId={instanceId}
+          providerName={providerName}
+        />
+      </>
+    ),
+    dismissLabel: `Dismiss ${providerName} provider ${status.status}`,
+    onDismiss,
+  };
+}
+
+function ProviderStatusRefreshButton({
+  environmentId,
+  instanceId,
+  providerName,
+}: {
+  environmentId: EnvironmentId;
+  instanceId: ProviderInstanceId;
+  providerName: string;
+}) {
+  const canRefresh = useAtomValue(serverEnvironment.refreshProviders.permissionAtom(environmentId));
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    label: "Refresh provider status",
+  });
+  const refreshingRef = useRef(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refresh = async () => {
+    if (!canRefresh || refreshingRef.current) return;
+    refreshingRef.current = true;
+    setIsRefreshing(true);
+    await refreshProviders({ environmentId, input: { instanceId, refreshModels: true } });
+    refreshingRef.current = false;
+    setIsRefreshing(false);
+  };
+  return (
+    <Button
+      aria-label={`Refresh ${providerName} provider status`}
+      disabled={!canRefresh || isRefreshing}
+      onClick={() => void refresh()}
+      size="xs"
+      variant="secondary"
+    >
+      <RefreshIcon />
+      {isRefreshing ? "Refreshing..." : "Refresh"}
+    </Button>
   );
-});
+}

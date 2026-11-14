@@ -1,4 +1,4 @@
-import { render } from "../../../test/render";
+import { fakeTimers, render } from "../../../test/render";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -22,6 +22,8 @@ function pressEscape(): KeyboardEvent {
 it("confirms on the second click and disarms on Escape", async () => {
   const onConfirm = vi.fn();
   await using screen = await render(<MergeButton scopeKey="a" onConfirm={onConfirm} />);
+  // An armed action disarms after 3s, and a slow runner can take longer between two clicks.
+  using _timers = fakeTimers();
   const button = screen.getByRole("button");
 
   await userEvent.click(button);
@@ -82,30 +84,34 @@ it.each(["merge", "enable-auto-merge"] as const)(
   async (primaryAction) => {
     const perform = vi.fn(async () => true);
     const { PullRequestPrimaryAction } = await import("./PullRequestDetailActions");
-    const control = (mergeBlockedReason: string | null) => (
-      <PullRequestPrimaryAction
-        pullRequestKey="owner/repo/7"
-        primaryAction={primaryAction}
-        mergeBlockedReason={mergeBlockedReason}
-        autoMergeArmed={false}
-        armedAutoMergeLabel="Auto-merge enabled"
-        pendingAutoMergeLabel="Auto-merge (squash)"
-        selectedMergeMethod="squash"
-        selectedMergeMethodLabel="Squash and merge"
-        statePresentation={null}
-        pendingAction={null}
-        perform={perform}
-        resolveConflicts={null}
-      />
-    );
-    await using screen = await render(control("Checking stack membership…"));
+    function Control({ mergeBlockedReason }: { mergeBlockedReason: string | null }) {
+      const inlineConfirm = useInlineActionConfirm("owner/repo/7");
+      return (
+        <PullRequestPrimaryAction
+          handoff={null}
+          unavailable={false}
+          onResolve={() => undefined}
+          inlineConfirm={inlineConfirm}
+          primaryAction={primaryAction}
+          mergeBlockedReason={mergeBlockedReason}
+          armedAutoMergeLabel="Auto-merge enabled"
+          pendingAutoMergeLabel="Auto-merge (squash)"
+          selectedMergeMethod="squash"
+          selectedMergeMethodLabel="Squash and merge"
+          pendingAction={null}
+          perform={perform}
+        />
+      );
+    }
+    await using screen = await render(<Control mergeBlockedReason="Checking stack membership…" />);
+    using _timers = fakeTimers();
     const button = screen.getByRole("button");
     await userEvent.tab();
     await expect.element(button).toHaveFocus();
     await expect.element(button).toHaveAccessibleDescription("Checking stack membership…");
     await userEvent.keyboard("{Enter}{Enter} ");
     expect(perform).not.toHaveBeenCalled();
-    await screen.rerender(control(null));
+    await screen.rerender(<Control mergeBlockedReason={null} />);
     await userEvent.click(button);
     expect(perform).not.toHaveBeenCalled();
     await userEvent.click(button);

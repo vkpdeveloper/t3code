@@ -9,14 +9,18 @@ import { cn } from "~/lib/utils";
 import { readEnvironmentScope, useEnvironmentScope } from "~/state/session";
 
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
+import {
+  PullRequestMarkdownTextarea,
+  type PullRequestCompletionScope,
+} from "./PullRequestMarkdownTextarea";
 
 export function PullRequestMarkdownEditor({
   value,
   cwd,
   environmentId,
+  completionScope,
   threadRef = null,
   placeholder,
   label,
@@ -29,6 +33,7 @@ export function PullRequestMarkdownEditor({
   readonly value: string;
   readonly cwd: string;
   readonly environmentId: EnvironmentId;
+  readonly completionScope: PullRequestCompletionScope | null;
   readonly threadRef?: ScopedThreadRef | null;
   readonly placeholder?: string | undefined;
   readonly label: string;
@@ -89,7 +94,7 @@ export function PullRequestMarkdownEditor({
         <Toggle value="preview">Preview</Toggle>
       </ToggleGroup>
       {preview ? (
-        <div className="rounded-lg border border-border/60 px-3 py-2">
+        <div className="rounded-control surface-well px-3 py-2">
           {empty ? (
             <p className="text-xs text-muted-foreground">Nothing to preview.</p>
           ) : (
@@ -102,14 +107,15 @@ export function PullRequestMarkdownEditor({
           )}
         </div>
       ) : (
-        <Textarea
+        <PullRequestMarkdownTextarea
           autoFocus
           disabled={saving}
+          completionScope={completionScope}
           value={draft}
           rows={6}
           placeholder={placeholder}
           aria-label={label}
-          onChange={(event) => setDraft(event.target.value)}
+          onValueChange={setDraft}
         />
       )}
       <div className="flex justify-end gap-2">
@@ -118,7 +124,7 @@ export function PullRequestMarkdownEditor({
         </Button>
         <Button
           size="xs"
-          variant="outline"
+          variant="secondary"
           disabled={!canWriteSourceControl || saving || (empty && !allowEmpty)}
           onClick={() => {
             if (

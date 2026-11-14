@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_MAX_TERMINAL_BUFFER_BYTES } from "@t3tools/contracts";
 import {
   appendOutput,
+  clearOutput,
   EMPTY_TERMINAL_OUTPUT_STATE,
   resetOutput,
   type TerminalOutputState,
@@ -17,6 +18,7 @@ import {
 export {
   INITIAL_TERMINAL_OUTPUT_CURSOR,
   readTerminalOutputUpdate,
+  terminalOutputReplay,
   terminalOutputText,
   type TerminalOutputCursor,
   type TerminalOutputState,
@@ -70,6 +72,17 @@ export function selectRunningSubprocessTerminalIds(
   return sessions
     .filter((session) => session.state.hasRunningSubprocess)
     .map((session) => session.target.terminalId);
+}
+
+/** What a terminal tab shows: a process running, the last command failed, or an idle shell. */
+export type TerminalActivityStatus = "running" | "failed" | "idle";
+
+export function resolveTerminalActivityStatus(
+  state: Pick<TerminalSessionState, "summary" | "hasRunningSubprocess">,
+): TerminalActivityStatus {
+  if (state.hasRunningSubprocess) return "running";
+  const exitCode = state.summary?.lastCommandExitCode;
+  return exitCode !== undefined && exitCode !== 0 ? "failed" : "idle";
 }
 
 export const EMPTY_TERMINAL_BUFFER_STATE = Object.freeze<TerminalBufferState>({
@@ -162,12 +175,21 @@ export function applyTerminalAttachStreamEvent(
   maxBufferBytes = DEFAULT_MAX_TERMINAL_BUFFER_BYTES,
 ): TerminalBufferState {
   switch (event.type) {
-    case "snapshot":
-      return {
-        ...terminalBufferStateFromSnapshot(event.snapshot, maxBufferBytes, current),
-        lifecycleVersion:
-          current.version === 0 ? current.lifecycleVersion : current.lifecycleVersion + 1,
+    case "snapshot": {
+      if (current.version === 0) {
+        return terminalBufferStateFromSnapshot(event.snapshot, maxBufferBytes, current);
+      }
+      // A later snapshot is a new server attachment, as after a socket reconnect. It starts a
+      // new generation because viewers replay their measured grid once per generation.
+      const reattached = {
+        ...current,
+        output: { ...current.output, generation: ++terminalAttachGeneration },
       };
+      return {
+        ...terminalBufferStateFromSnapshot(event.snapshot, maxBufferBytes, reattached),
+        lifecycleVersion: current.lifecycleVersion + 1,
+      };
+    }
     case "restarted":
       return {
         ...terminalBufferStateFromSnapshot(event.snapshot, maxBufferBytes, current),
@@ -184,7 +206,7 @@ export function applyTerminalAttachStreamEvent(
     case "cleared":
       return {
         ...current,
-        output: resetOutput(current.output, "", maxBufferBytes),
+        output: clearOutput(current.output, maxBufferBytes),
         error: null,
         version: current.version + 1,
       };

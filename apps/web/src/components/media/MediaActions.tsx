@@ -110,6 +110,36 @@ export function useMediaActions(source: MediaActionSource) {
   return { save, copyImage, canReadMedia, assertCanReadMedia };
 }
 
+export type MediaByteAction = "save" | "copy-image";
+
+/** Saves or copies media with the same progress and failure toasts as the media menu. */
+export function useMediaByteAction(source: MediaActionSource) {
+  const { save, copyImage } = useMediaActions(source);
+  return async (action: MediaByteAction) => {
+    const noun = source.kind === "image" ? "image" : "video";
+    const progressToast = toastManager.add({
+      type: "loading",
+      title: action === "save" ? `Preparing ${noun} download…` : "Copying image…",
+    });
+    try {
+      await (action === "save" ? save() : copyImage());
+      toastManager.update(progressToast, {
+        type: "success",
+        title: action === "save" ? "Download started" : "Image copied",
+      });
+    } catch (error) {
+      toastManager.update(
+        progressToast,
+        stackedThreadToast({
+          type: "error",
+          title: action === "save" ? `Could not save ${noun}` : "Could not copy image",
+          description: error instanceof Error ? error.message : "The media action failed.",
+        }),
+      );
+    }
+  };
+}
+
 export function MediaActions({
   source,
   children,
@@ -173,10 +203,6 @@ export function MediaActions({
         const clipboardText =
           reference?.kind === "file" ? formatFilePathForClipboard(text, reference.path) : text;
         await writeTextToClipboard(clipboardText, reference?.kind === "file" ? "file path" : "URL");
-        toastManager.add({
-          type: "success",
-          title: action === "copy-url" ? "URL copied" : "Path copied",
-        });
       } else if (action === "open-file") {
         assertCanReadMedia();
         source.onOpenFile?.();
@@ -186,10 +212,7 @@ export function MediaActions({
           title: action === "save" ? `Preparing ${noun} download…` : "Copying image…",
         });
         await (action === "save" ? save() : copyImage());
-        toastManager.update(progressToast, {
-          type: "success",
-          title: action === "save" ? "Download started" : "Image copied",
-        });
+        toastManager.close(progressToast);
       }
     });
     if (AsyncResult.isFailure(result)) {

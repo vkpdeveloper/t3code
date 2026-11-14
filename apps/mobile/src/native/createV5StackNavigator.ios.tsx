@@ -29,6 +29,7 @@ import { V5StackHeader } from "./V5StackHeader.ios";
 import type { AppNativeStackNavigationOptions } from "./StackHeader";
 import { NativeColumnContent } from "./NativeColumnContent.ios";
 import {
+  isPresentedRoute,
   nativeStackPopAction,
   partitionStackPresentations,
   reconcileStackScreens,
@@ -243,6 +244,7 @@ export function V5CardStackView(
                     }
                   />
                   <NativeColumnContent
+                    insetTop={options.headerShown !== false}
                     backgroundColor={StyleSheet.flatten(options.contentStyle)?.backgroundColor}
                     insetHorizontally={
                       (options as AppNativeStackNavigationOptions).nativeContentInsetHorizontally
@@ -264,8 +266,7 @@ export function V5CardStackView(
 
 export function V5StackView(props: V5StackViewProps) {
   const groups = partitionStackPresentations(props.state.routes, (route) => {
-    const presentation = props.descriptors[route.key]?.options.presentation;
-    return presentation !== undefined && presentation !== "card";
+    return isPresentedRoute(props.descriptors[route.key]?.options);
   });
   const routes = groups.map((group) => group[0]!);
   const descriptors = Object.fromEntries(

@@ -5,9 +5,12 @@ import type {
   ProjectId,
   WorktreeSubmodules,
 } from "@t3tools/contracts";
+import type { ThreadStructureRuntime } from "@t3tools/client-runtime/state/shell";
 import * as Schema from "effect/Schema";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
+import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { toSortableTimestamp } from "@t3tools/client-runtime/state/thread-sort";
+import { deriveCanInterruptRunningThread } from "../session-logic";
 export { deriveLocalBranchNameFromRemoteRef, sanitizeNewRefName } from "@t3tools/shared/git";
 
 export interface EnvironmentOption {
@@ -78,14 +81,23 @@ export function shouldShowComposerContextStrip(input: {
 // Hysteresis prevents labels and icons from flapping at the width boundary.
 const CONTEXT_STRIP_COMPACT_EXPAND_HYSTERESIS_PX = 16;
 
-export function resolveContextStripLabelsCompact(input: {
-  compact: boolean;
+export type ContextStripCompaction = "none" | "labels" | "branch";
+
+export function readContextStripCompaction(value: string | undefined): ContextStripCompaction {
+  return value === "labels" || value === "branch" ? value : "none";
+}
+
+export function resolveContextStripCompaction(input: {
+  current: ContextStripCompaction;
   neededWidth: number;
+  labelsNeededWidth: number;
   availableWidth: number;
-}): boolean {
-  return input.compact
-    ? input.neededWidth > input.availableWidth - CONTEXT_STRIP_COMPACT_EXPAND_HYSTERESIS_PX
-    : input.neededWidth > input.availableWidth;
+}): ContextStripCompaction {
+  const fits = (width: number, expanding: boolean) =>
+    width <= input.availableWidth - (expanding ? CONTEXT_STRIP_COMPACT_EXPAND_HYSTERESIS_PX : 0);
+  if (fits(input.neededWidth, input.current !== "none")) return "none";
+  if (fits(input.labelsNeededWidth, input.current === "branch")) return "labels";
+  return "branch";
 }
 
 export function resolveEnvModeLabel(mode: EnvMode): string {
@@ -106,13 +118,15 @@ export function resolveLockedWorkspaceLabel(
   activeWorktreePath: string | null,
   effectiveEnvMode: EnvMode,
 ): string {
-  if (activeWorktreePath) return "Worktree";
+  if (activeWorktreePath) return activeWorktreePath.split(/[\\/]/).findLast(Boolean) ?? "Worktree";
   return effectiveEnvMode === "worktree" ? resolveEnvModeLabel("worktree") : "Local checkout";
 }
 
 export interface PreviousWorktreeSeed {
   branch: string | null;
   worktreePath: string;
+  /** When a thread last touched the worktree, for the picker's "2h ago". */
+  updatedAt: string;
 }
 
 export function resolvePreviousWorktreeSeed(input: {
@@ -124,7 +138,12 @@ export function resolvePreviousWorktreeSeed(input: {
   }>;
   currentWorktreePath: string | null;
 }): PreviousWorktreeSeed | null {
-  let latest: { branch: string | null; worktreePath: string; updatedAt: number } | null = null;
+  let latest: {
+    branch: string | null;
+    worktreePath: string;
+    updatedAt: number;
+    updatedAtIso: string;
+  } | null = null;
   for (const thread of input.threads) {
     if (
       !thread.worktreePath ||
@@ -142,10 +161,13 @@ export function resolvePreviousWorktreeSeed(input: {
         branch: thread.branch,
         worktreePath: thread.worktreePath,
         updatedAt,
+        updatedAtIso: thread.updatedAt,
       };
     }
   }
-  return latest === null ? null : { branch: latest.branch, worktreePath: latest.worktreePath };
+  return latest === null
+    ? null
+    : { branch: latest.branch, worktreePath: latest.worktreePath, updatedAt: latest.updatedAtIso };
 }
 
 export function resolvePreviousWorktreeLabel(seed: PreviousWorktreeSeed): string {
@@ -194,6 +216,46 @@ export function resolveBranchToolbarValue(input: {
     return activeThreadBranch ?? currentGitBranch;
   }
   return currentGitBranch ?? activeThreadBranch;
+}
+
+export interface BranchHold {
+  readonly branch: string | null;
+  readonly environmentId: EnvironmentId;
+  /**
+   * Each checkout the thread can show before it catches up, with the branch its status reported
+   * before the switch. A move from a worktree to the project root lists both.
+   */
+  readonly checkouts: ReadonlyArray<{ readonly cwd: string; readonly replaces: string | null }>;
+}
+
+/**
+ * A finished checkout's branch stays on screen until status reports any change, because the status
+ * stream and the RPC reply are not ordered and showing status first would flip back to the old branch.
+ */
+export function isBranchHoldCurrent(
+  hold: BranchHold,
+  current: {
+    readonly canonicalBranch: string | null;
+    readonly environmentId: EnvironmentId;
+    readonly cwd: string | null;
+  },
+): boolean {
+  return (
+    hold.environmentId === current.environmentId &&
+    hold.checkouts.some(
+      (checkout) => checkout.cwd === current.cwd && checkout.replaces === current.canonicalBranch,
+    )
+  );
+}
+
+/**
+ * The base a New worktree thread gets without the user picking one. Only a listed ref qualifies:
+ * during a clone the status names an unborn HEAD that no ref backs.
+ */
+export function resolveDefaultWorktreeBaseBranch(
+  refs: ReadonlyArray<Pick<VcsRef, "name" | "isDefault" | "current">>,
+): string | null {
+  return (refs.find((ref) => ref.isDefault) ?? refs.find((ref) => ref.current))?.name ?? null;
 }
 
 export function resolveBranchTriggerLabel(input: {
@@ -247,20 +309,30 @@ export function resolveLocalCheckoutBranchMismatch(input: {
 
 export function resolveBranchSelectionTarget(input: {
   activeProjectCwd: string;
+  activeProjectCheckoutRoot?: string | undefined;
   activeWorktreePath: string | null;
   refName: Pick<VcsRef, "isDefault" | "worktreePath">;
 }): {
   checkoutCwd: string;
   nextWorktreePath: string | null;
   reuseExistingWorktree: boolean;
+  staysInActiveCheckout: boolean;
 } {
   const { activeProjectCwd, activeWorktreePath, refName } = input;
 
   if (refName.worktreePath) {
+    // Until the project's checkout root loads, a checkout containing the project counts as its own.
+    const isProjectCheckout =
+      input.activeProjectCheckoutRoot === undefined
+        ? workspaceRelativeFilePath(activeProjectCwd, refName.worktreePath) !== null
+        : workspaceRelativeFilePath(input.activeProjectCheckoutRoot, refName.worktreePath) === ".";
+    const nextWorktreePath = isProjectCheckout ? null : refName.worktreePath;
     return {
       checkoutCwd: refName.worktreePath,
-      nextWorktreePath: refName.worktreePath === activeProjectCwd ? null : refName.worktreePath,
+      nextWorktreePath,
       reuseExistingWorktree: true,
+      // Listed refs can predate a checkout made outside the picker, so only Git can confirm this one.
+      staysInActiveCheckout: nextWorktreePath === activeWorktreePath,
     };
   }
 
@@ -271,7 +343,19 @@ export function resolveBranchSelectionTarget(input: {
     checkoutCwd: nextWorktreePath ?? activeProjectCwd,
     nextWorktreePath,
     reuseExistingWorktree: false,
+    staysInActiveCheckout: nextWorktreePath === activeWorktreePath,
   };
+}
+
+export function isWorktreeChangeBlocked(input: {
+  runtime: ThreadStructureRuntime | null;
+  currentWorktreePath: string | null;
+  nextWorktreePath: string | null;
+}): boolean {
+  return (
+    input.nextWorktreePath !== input.currentWorktreePath &&
+    deriveCanInterruptRunningThread(true, input.runtime)
+  );
 }
 
 export function shouldIncludeBranchPickerItem(input: {
@@ -305,4 +389,30 @@ export function shouldIncludeBranchPickerItem(input: {
     sanitizedQuery !== normalizedQuery &&
     lowerItemValue.includes(sanitizedQuery)
   );
+}
+
+/** Ref names for the picker: local branches first, then remote refs, each in server order. */
+export function orderRefNamesByGroup(refs: ReadonlyArray<VcsRef>): string[] {
+  return [
+    ...refs.filter((ref) => !ref.isRemote).map((ref) => ref.name),
+    ...refs.filter((ref) => ref.isRemote).map((ref) => ref.name),
+  ];
+}
+
+/**
+ * The section label each group's first visible row carries, keyed by item value. Items whose
+ * group is null (create, checkout-by-reference) get no label and do not start a group.
+ */
+export function groupLabelsForPickerItems(
+  items: ReadonlyArray<string>,
+  groupOf: (item: string) => string | null,
+): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  let previousGroup: string | null = null;
+  for (const item of items) {
+    const group = groupOf(item);
+    if (group !== null && group !== previousGroup) labels.set(item, group);
+    previousGroup = group;
+  }
+  return labels;
 }
