@@ -176,7 +176,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     severeFailure = false,
   } = props;
   const ctx = use(TimelineRowCtx);
-  const { onImageExpand, timestampFormat } = ctx;
+  const { timestampFormat } = ctx;
   const { retryableWorkspacePreparationRunIds, onRetryWorkspacePreparation } = ctx;
   const threadTarget = useThreadReadTarget(workEntry, ctx.activeThreadEnvironmentId);
   const createdThread =
@@ -542,7 +542,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
                   onInitialOutputReady={onInitialOutputReady}
                   projectedItem={workEntry.projectedItem}
                   environmentId={ctx.activeThreadEnvironmentId}
-                  onImageExpand={onImageExpand}
+                  onImageExpand={ctx.onImageExpand}
                   source={ctx.turnItemSource}
                   showImages={toolGroupAction(workEntry) !== "read"}
                 />

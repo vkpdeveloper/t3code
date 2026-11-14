@@ -168,9 +168,13 @@ export const WorkGroupSection = memo(function WorkGroupSection({
 });
 
 function WorkingTimer({ createdAt, clock = false }: { createdAt: string; clock?: boolean }) {
+  const { activeThreadEnvironmentId } = use(TimelineRowCtx);
   return (
     <span
-      ref={tickTextContent(() => formatWorkingTimerNow(createdAt, clock), true)}
+      ref={tickTextContent(
+        () => formatWorkingTimerNow(createdAt, activeThreadEnvironmentId, clock),
+        true,
+      )}
       className="tabular-nums"
     />
   );
@@ -467,7 +471,7 @@ export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind:
   const { groupId } = row;
   const activity = (
     <LiveActivityRow
-      label={providerStartingLabel ?? liveAnswerPreview ?? "Thinking"}
+      label={providerStartingLabel ?? row.label ?? liveAnswerPreview ?? "Thinking"}
       iconName="brain"
       active={live}
     />
