@@ -114,6 +114,9 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { isRichTextFormattingShortcut } from "~/keybindings";
 import { cn, isMacPlatform } from "~/lib/utils";
+import { isThreadNavigationShortcut } from "~/keybindings";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { hasCommandForKeyDown } from "~/shortcuts/dispatcher";
 import { basenameOfPath } from "~/pierre-icons";
 import { WorkspaceEntryTooltip } from "./chat/WorkspaceEntryIcon";
@@ -244,6 +247,9 @@ const SURROUND_CLOSE: Record<string, string> = {
 function resolvedThemeFromDocument(): "light" | "dark" {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
 }
+
+// The editor and its placeholder share one text box, so accepted text lands on the placeholder's pixels.
+const COMPOSER_TEXT_CLASS_NAME = "composer-text -m-1 p-1";
 
 const CHIP_NODE_SELECTION_CLASS_NAME =
   "relative inline-flex min-w-0 max-w-full select-none items-baseline data-[composer-chip-selected]:after:pointer-events-none data-[composer-chip-selected]:after:absolute data-[composer-chip-selected]:after:inset-0 data-[composer-chip-selected]:after:rounded-sm data-[composer-chip-selected]:after:bg-[Highlight] data-[composer-chip-selected]:after:opacity-30 data-[composer-chip-selected]:after:content-['']";
@@ -469,7 +475,7 @@ function ComposerCitationNodeView({ node, editor, getPos }: NodeViewProps) {
 
   const removeOnCancel = commentTarget?.removeOnCancel;
   const onRemove = () => {
-    if (!editor.isEditable || !removeOnCancel) return;
+    if (!removeOnCancel) return;
     const pos = nodePos();
     if (pos === null) return;
     const { doc } = editor.state;
@@ -478,7 +484,9 @@ function ComposerCitationNodeView({ node, editor, getPos }: NodeViewProps) {
     const end = pos + current.nodeSize;
     const from = removeOnCancel.before && doc.textBetween(pos - 1, pos) === " " ? pos - 1 : pos;
     const to = removeOnCancel.after && doc.textBetween(end, end + 1) === " " ? end + 1 : end;
-    editor.chain().focus().deleteRange({ from, to }).run();
+    // A read-only composer (dictation) can still receive a new citation, so Cancel must undo it.
+    const chain = editor.chain();
+    (editor.isEditable ? chain.focus() : chain).deleteRange({ from, to }).run();
   };
 
   const sentRef = useRef(false);
@@ -1076,7 +1084,8 @@ function ComposerPromptEditorTiptapInner(
 
   const editorAttributes = {
     class: cn(
-      "composer-tiptap -m-1 block max-h-42 min-h-5 overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-5 text-foreground focus:outline-none",
+      "composer-tiptap block max-h-42 min-h-5 overflow-y-auto bg-transparent text-foreground focus:outline-none",
+      COMPOSER_TEXT_CLASS_NAME,
       className,
     ),
     "data-testid": "composer-editor",
@@ -1143,6 +1152,13 @@ function ComposerPromptEditorTiptapInner(
             !event.ctrlKey &&
             !event.isComposing
           ) {
+            if (
+              isThreadNavigationShortcut(event, appAtomRegistry.get(primaryServerKeybindingsAtom), {
+                context: { editableFocus: true },
+              })
+            ) {
+              return false;
+            }
             const selection = window.getSelection();
             if (
               selection?.anchorNode &&
@@ -1836,12 +1852,13 @@ function ComposerPromptEditorTiptapInner(
           <div
             data-composer-empty={value.length === 0}
             className={cn(
-              "relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)",
+              "relative grid grid-cols-1 font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)",
               containerClassName,
             )}
           >
             <EditorContent
               editor={editor}
+              className="[grid-area:1/1]"
               onKeyDown={(event) => {
                 if (
                   event.key === "Control" ||
@@ -1887,21 +1904,32 @@ function ComposerPromptEditorTiptapInner(
               <div
                 data-composer-placeholder=""
                 className={cn(
-                  "pointer-events-none absolute inset-0 leading-relaxed text-placeholder",
-                  placeholderClassName,
+                  "pointer-events-none text-placeholder [grid-area:1/1]",
+                  COMPOSER_TEXT_CLASS_NAME,
                 )}
               >
-                {narrowPlaceholder ? (
-                  <>
-                    <span className="@max-[440px]/composer-surface:hidden">{placeholder}</span>
-                    <span className="hidden @max-[440px]/composer-surface:inline">
-                      {narrowPlaceholder}
+                <div className={placeholderClassName}>
+                  {narrowPlaceholder ? (
+                    <>
+                      <span className="@max-[440px]/composer-surface:hidden">{placeholder}</span>
+                      <span className="hidden @max-[440px]/composer-surface:inline">
+                        {narrowPlaceholder}
+                      </span>
+                    </>
+                  ) : (
+                    placeholder
+                  )}
+                  {placeholderSuffix ? (
+                    // No width and one top-aligned line tall: a suffix can neither wrap onto a line of
+                    // its own nor push the baseline, so accepted text keeps the placeholder's layout.
+                    <span
+                      data-composer-placeholder-suffix=""
+                      className="inline-flex h-lh w-0 items-center align-top whitespace-nowrap"
+                    >
+                      {placeholderSuffix}
                     </span>
-                  </>
-                ) : (
-                  placeholder
-                )}
-                {placeholderSuffix}
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>

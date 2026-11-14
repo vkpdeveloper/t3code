@@ -321,6 +321,11 @@ export function selectLayoutPaneSlots(
   } else {
     unitWidth = Math.max(arranged, viewport.width / total);
   }
+  // No column is wider than the strip shows, so each fits wholly on screen. A
+  // strip arranged wider (sidebar closed) and then narrowed (sidebar opened)
+  // would otherwise keep a full-width column at the old width, off the edge.
+  const widest = Math.max(...weights);
+  if (widest > 0) unitWidth = Math.min(unitWidth, viewport.width / widest);
   const totalPx = total * unitWidth;
   const fits = totalPx <= viewport.width + 0.5;
   const stripPx = Math.max(viewport.width, totalPx) || 1;
@@ -347,25 +352,6 @@ export function selectLayoutPaneSlots(
   return { slots, stripWidth, fits, unitWidth };
 }
 
-export function selectLayoutStripSize(
-  workspace: LayoutWorkspace,
-  whenNoRoom: LayoutWhenNoRoom,
-): { share: number; minPx: number } {
-  const lone = workspace.columns.length === 1;
-  const weights = lone ? [1] : workspace.columns.map((column) => column.width);
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
-  const arranged = workspace.cameraWidth;
-  if (whenNoRoom === "always-shrink") return { share: 1, minPx: 0 };
-  if (arranged === null) return { share: Math.max(1, total), minPx: 0 };
-  if (total * arranged > arranged + 0.5) return { share: 1, minPx: total * arranged };
-  const narrowest = Math.min(...weights);
-  const readableUnit =
-    lone || narrowest <= 0
-      ? 0
-      : Math.min(LAYOUT_READABLE_COLUMN_PX, narrowest * arranged) / narrowest;
-  return { share: Math.max(1, total), minPx: total * readableUnit };
-}
-
 /**
  * A top pane starting this close to the strip's left edge shares its row with
  * the collapsed sidebar's toggle and arrows, so its header makes room for them.
@@ -390,24 +376,39 @@ export function selectWindowStartPaneId(
   return startPaneId;
 }
 
+/**
+ * Top panes showing within this far of the window's right edge sit under the
+ * Windows and Linux caption buttons, so their headers make room for them.
+ * The strip scrolls, so the last column is not always the one there.
+ */
+const WINDOW_END_EDGE_PX = 160;
+
+/**
+ * The top panes under the caption buttons, each with how far it runs on past
+ * the window's right edge: its header's room for them starts that far in.
+ */
+export function selectWindowEndPanes(
+  slots: readonly LayoutPaneSlot[],
+  scrollLeft: number,
+  stripPx: number,
+  viewportPx: number,
+): { paneId: string; clipPx: number }[] {
+  return slots.flatMap((slot) => {
+    if (slot.hasAbove) return [];
+    const screenLeft = slot.rect.left * stripPx - scrollLeft;
+    const screenRight = screenLeft + slot.rect.width * stripPx;
+    return screenLeft < viewportPx - 1 && screenRight > viewportPx - WINDOW_END_EDGE_PX
+      ? [{ paneId: slot.paneId, clipPx: Math.max(0, Math.round(screenRight - viewportPx)) }]
+      : [];
+  });
+}
+
 /** The pane with this id and where it sits, or null. */
 export function findLayoutPane(
   state: LayoutState,
   paneId: string,
 ): { workspace: LayoutWorkspace; column: LayoutColumn; pane: LayoutPane } | null {
   return findPane(state, paneId);
-}
-
-const layoutTabIds = (state: LayoutState): string[] =>
-  state.workspaces.flatMap((workspace) =>
-    workspace.columns.flatMap((column) =>
-      column.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)),
-    ),
-  );
-
-export function closedLayoutTabIds(before: LayoutState, after: LayoutState): string[] {
-  const open = new Set(layoutTabIds(after));
-  return layoutTabIds(before).filter((tabId) => !open.has(tabId));
 }
 
 /** How many tabs the layout holds across every workspace. */
@@ -1379,12 +1380,13 @@ export function showLayoutContent(state: LayoutState, content: LayoutTabContent)
 
 /**
  * The chats an open swapped on screen: in a pane of the focused workspace that showed `from` and
- * now shows `to`. A chat still showing in another pane, or moving there, is no swap.
+ * now shows `to`. A chat still showing in another pane, or moving there, is no swap. `focusOnly`
+ * marks a swap that only focused a tab the pane already held, as a tab click does.
  */
 export function layoutChatSwaps(
   before: LayoutState,
   after: LayoutState,
-): Array<{ from: ThreadRouteTarget; to: ThreadRouteTarget }> {
+): Array<{ from: ThreadRouteTarget; to: ThreadRouteTarget; focusOnly: boolean }> {
   if (before.focusedWorkspaceId !== after.focusedWorkspaceId) return [];
   const shownChats = (state: LayoutState) =>
     new Map(
@@ -1401,12 +1403,17 @@ export function layoutChatSwaps(
     new Set([...shown.values()].map((content) => layoutTabContentKey(content)));
   const wasKeys = keys(was);
   const nowKeys = keys(now);
+  const holds = (state: LayoutState, paneId: string, content: LayoutTabContent) =>
+    findPane(state, paneId)?.pane.tabs.some(
+      (tab) => layoutTabContentKey(tab.content) === layoutTabContentKey(content),
+    ) ?? false;
   return [...now].flatMap(([paneId, to]) => {
     const from = was.get(paneId);
     if (!from || nowKeys.has(layoutTabContentKey(from)) || wasKeys.has(layoutTabContentKey(to))) {
       return [];
     }
-    return [{ from: from.target, to: to.target }];
+    const focusOnly = holds(before, paneId, to) && holds(after, paneId, from);
+    return [{ from: from.target, to: to.target, focusOnly }];
   });
 }
 

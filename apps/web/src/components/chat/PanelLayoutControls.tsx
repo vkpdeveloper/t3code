@@ -46,7 +46,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   );
   const threadPanelControl = (
     <Tooltip>
-      <TooltipTrigger render={<span className="flex shrink-0" />}>
+      <TooltipTrigger render={<span className="flex shrink-0" data-thread-panel-toggle />}>
         {threadPanelPresentation === "popover" ? (
           <PopoverTrigger handle={threadPanelPopoverHandle} render={threadPanelToggle} />
         ) : (

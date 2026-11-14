@@ -105,8 +105,8 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
         "CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY, name TEXT)",
       );
       const insertBot = botDb.prepare("INSERT INTO effect_sql_migrations VALUES (?, ?)");
-      for (const [id, name] of migrationManifest.filter(([id]) => id < 82)) insertBot.run(id, name);
-      insertBot.run(82, "ProjectionProjectBot");
+      for (const [id, name] of migrationManifest.filter(([id]) => id < 86)) insertBot.run(id, name);
+      insertBot.run(86, "ProjectionProjectBot");
       botDb.close();
       expect(
         runServicePreflight({ databasePath: bot, launcherProtocol: SERVICE_LAUNCHER_PROTOCOL })

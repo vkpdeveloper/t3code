@@ -135,9 +135,9 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
     <div
       ref={drawerRef}
       data-composer-stash-drawer="true"
-      className="relative isolate flex w-full min-w-0 flex-col gap-px rounded-card p-1.5 kbd-in-popover before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-card before:surface-popover"
+      className="relative isolate flex min-h-0 w-full min-w-0 flex-col gap-px rounded-card p-1.5 kbd-in-popover before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-card before:surface-popover"
     >
-      <div className="flex items-center px-2.5 py-1.5 text-meta">
+      <div className="flex shrink-0 items-center px-2.5 py-1.5 text-meta">
         <span className="text-foreground">Stash</span>
         <span className="flex-1" />
         <span className="text-dim-foreground">
@@ -147,7 +147,7 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
       <ul
         role="list"
         aria-label="Stashed prompts"
-        className="flex max-h-72 flex-col gap-px overflow-y-auto"
+        className="flex max-h-72 min-h-0 flex-col gap-px overflow-y-auto"
       >
         {entries.length === 0 ? (
           <li className="px-2.5 py-2 text-body text-muted-foreground">

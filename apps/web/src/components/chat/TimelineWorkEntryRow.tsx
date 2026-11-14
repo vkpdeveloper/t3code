@@ -21,7 +21,7 @@ import {
   workEntryIconName,
   workToneIcon,
 } from "./TimelineWorkEntryRow.logic";
-import { WorkLogDetails, WorkLogRow } from "./WorkLog";
+import { WORK_LOG_OUTPUT_CLASS_NAME, WorkLogDetails, WorkLogRow } from "./WorkLog";
 import {
   getQuestionAnswerPreview,
   getQuestionAnswerText,
@@ -106,9 +106,6 @@ export function ThreadReadLabel({
   );
 }
 
-const toolCallExpandedBodyClassName =
-  "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-muted-foreground text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
-
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
 export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
@@ -179,7 +176,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
     severeFailure = false,
   } = props;
   const ctx = use(TimelineRowCtx);
-  const { onImageExpand, timestampFormat } = ctx;
+  const { timestampFormat } = ctx;
   const { retryableWorkspacePreparationRunIds, onRetryWorkspacePreparation } = ctx;
   const threadTarget = useThreadReadTarget(workEntry, ctx.activeThreadEnvironmentId);
   const createdThread =
@@ -538,14 +535,14 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
           ) : (
             <>
               {expandedBody ? (
-                <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>
+                <pre className={WORK_LOG_OUTPUT_CLASS_NAME}>{expandedBody}</pre>
               ) : null}
               {plainOutputFetches && workEntry.projectedItem ? (
                 <FetchedToolOutput
                   onInitialOutputReady={onInitialOutputReady}
                   projectedItem={workEntry.projectedItem}
                   environmentId={ctx.activeThreadEnvironmentId}
-                  onImageExpand={onImageExpand}
+                  onImageExpand={ctx.onImageExpand}
                   source={ctx.turnItemSource}
                   showImages={toolGroupAction(workEntry) !== "read"}
                 />

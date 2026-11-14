@@ -116,8 +116,6 @@ const contentButtonVariants = cva("outline-none", {
         "cursor-pointer overflow-hidden rounded-card border border-transparent text-left transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-pressed:bg-settings-effective-fill not-aria-pressed:surface-card-settings-rim not-aria-pressed:hover:surface-ghost-hover aria-pressed:shadow-[inset_0_0_0_1px_var(--settings-active-rim)]",
       "drag-chip":
         "flex h-6.5 cursor-grab items-center gap-1.5 rounded-item surface-raised px-2.25 text-meta text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring active:cursor-grabbing",
-      "selection-action":
-        "flex h-5.5 cursor-pointer items-center gap-1.5 rounded-row surface-selected px-2 text-caption text-foreground hover:text-strong-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring",
       panel:
         "flex flex-col overflow-hidden rounded-item bg-background text-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:ring-1 aria-expanded:ring-inset aria-expanded:ring-strong-foreground/70",
       "action-row":
@@ -190,6 +188,8 @@ const inlineButtonVariants = cva(
         default: "text-foreground",
         muted: "text-muted-foreground hover:text-foreground",
         destructive: "text-destructive/80 hover:text-destructive",
+        // A link inside running text: the sentence's weight, always underlined.
+        link: "[font-weight:inherit] text-foreground underline decoration-muted-foreground/50 hover:decoration-foreground",
         ghost:
           "rounded-kbd px-0.5 [font-weight:inherit] text-muted-foreground hover:surface-ghost-hover hover:text-foreground hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
         "ghost-dim":

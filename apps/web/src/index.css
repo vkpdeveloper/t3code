@@ -235,6 +235,21 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
        44px under a pane inset 8px on a 52px row). */
     --pane-notch-height: calc(var(--workspace-chrome-row-height) - var(--workspace-pane-inset-top));
   }
+
+  /* A pane under the caption buttons that runs on past the window's edge
+     (--pane-window-end-clip, SurfaceHost.tsx) keeps its room for them on screen. */
+  .wco
+    [data-slot="sidebar"][data-variant="inset"]
+    ~ [data-slot="sidebar-inset"]
+    [data-layout-pane-id] {
+    --workspace-native-controls-inset: calc(
+      var(--workspace-controls-edge-right) + 0.75rem + var(--pane-window-end-clip, 0px)
+    );
+    --workspace-pane-local-controls-right: calc(
+      var(--workspace-pane-controls-right) - var(--workspace-pane-inset) +
+        var(--pane-window-end-clip, 0px)
+    );
+  }
 }
 
 /* The pane notch (pen maP8m, see PaneNotch.tsx): the pane gives up its
@@ -1904,6 +1919,39 @@ html[data-theme-id]:not([data-theme-id=""]):not(.black-chrome) {
   > [data-chrome-art-layer="dev"]
   :is([data-bp-sidebar], [data-bp-at="pane-left"]) {
   transition: translate var(--panel-animation-duration) ease-out;
+}
+
+[data-slot="sidebar-slide-frame"] {
+  --sidebar-slide-corner: 14px;
+
+  & > [data-corner] {
+    position: absolute;
+    right: 100%;
+    width: var(--sidebar-slide-corner);
+    height: var(--sidebar-slide-corner);
+    background: inherit;
+    mask: radial-gradient(
+      circle var(--sidebar-slide-corner) at var(--sidebar-slide-corner-center),
+      transparent var(--sidebar-slide-corner),
+      #000 calc(var(--sidebar-slide-corner) + 0.5px)
+    );
+  }
+
+  & > [data-corner="top"] {
+    --sidebar-slide-corner-center: 0 100%;
+  }
+
+  & > [data-corner="bottom"] {
+    --sidebar-slide-corner-center: 0 0;
+    translate: 0 -100%;
+  }
+}
+
+[data-chrome-art] [data-slot="sidebar-slide-frame"],
+[data-chrome-art] [data-slot="sidebar-slide-frame"] > [data-corner] {
+  background: var(--chrome-art-paint);
+  background-attachment: fixed;
+  background-blend-mode: var(--chrome-art-blend, normal);
 }
 
 /* Over the art the sidebar goes transparent and its secondary text takes the
@@ -5552,6 +5600,25 @@ body {
   text-decoration: none;
 }
 
+/* Triple-click selection stops at block-level boxes, flex items included, so file chips in
+   prose stay inline-level down to the icon and label. */
+.chat-markdown-file-link {
+  display: inline-block;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-markdown-file-link > :is(svg, img) {
+  display: inline;
+  margin-inline-end: 0.2em;
+  vertical-align: -0.125em;
+}
+
+.chat-markdown-file-link > [data-slot="context-chip-label"] {
+  display: inline;
+}
+
 /* File links and context chips own their color and focus ring. */
 .chat-markdown a:not(.chat-markdown-file-link, :has([data-slot="context-chip-label"])) {
   color: var(--info-foreground);
@@ -5651,6 +5718,11 @@ body {
   font-size: 0.85em;
 }
 
+.chat-markdown.user-message-markdown :not(pre) > code {
+  background: color-mix(in srgb, var(--contrast-message-foreground) 10%, transparent);
+  color: var(--contrast-message-foreground);
+}
+
 .chat-markdown strong {
   font-weight: 700;
 }
@@ -5715,6 +5787,18 @@ body {
   & :is(pre, pre *) {
     color: inherit !important;
   }
+}
+
+/* Sent messages color prose with the message foreground, which is not chosen
+   for the code surface, so their plain-text fences keep the global foreground. */
+.chat-markdown.user-message-markdown
+  .chat-markdown-codeblock:is(
+    [data-language="text" i],
+    [data-language="txt" i],
+    [data-language="plain" i],
+    [data-language="plaintext" i]
+  ) {
+  color: var(--contrast-foreground) !important;
 }
 
 /* Paragraphs and code blocks arrive in chunks while a response streams. Fade
@@ -6123,8 +6207,13 @@ body {
   position: relative;
 }
 
-/* Tiptap's injected base CSS disables ligatures; match sent messages. */
-.composer-tiptap.ProseMirror {
+/* The editor and its placeholder; .ProseMirror outranks Tiptap's injected base CSS, which
+   disables ligatures. Ligatures match sent messages. */
+.composer-text,
+.composer-text.ProseMirror {
+  line-height: 1.25rem;
+  white-space: break-spaces;
+  overflow-wrap: break-word;
   font-variant-ligatures: normal;
   font-feature-settings: normal;
 }
@@ -6134,7 +6223,7 @@ body {
   --composer-actions-gap: calc(var(--spacing) * 1.5);
 }
 
-.composer-prompt-body [data-testid="composer-editor"]::before {
+.composer-prompt-body .composer-text::before {
   content: "";
   float: inline-end;
   width: calc(var(--composer-actions-width, 100px) + var(--composer-actions-gap));
@@ -6142,8 +6231,10 @@ body {
 }
 
 .composer-prompt-body[data-composer-multiline]
-  [data-composer-empty="false"]
-  [data-testid="composer-editor"]::before {
+  :is(
+    [data-composer-empty="false"] [data-testid="composer-editor"],
+    [data-composer-placeholder]
+  )::before {
   height: calc(var(--composer-actions-height, 2rem) + var(--composer-actions-gap));
 }
 
@@ -6181,8 +6272,9 @@ body {
   }
 }
 
-.composer-prompt-body [data-composer-placeholder] {
-  padding-inline-end: calc(var(--composer-actions-width, 100px) + var(--composer-actions-gap));
+/* A suffix that would run under the actions or past the edge stays hidden, as text never wraps for it. */
+.composer-prompt-body[data-composer-suffix-hidden] [data-composer-placeholder-suffix] {
+  visibility: hidden;
 }
 
 .composer-tiptap p {
@@ -6330,13 +6422,21 @@ body {
 }
 
 /* A workspace area with no control of its own takes F6 focus itself; keep that visible.
-   workspaceFocus.ts marks those, since :focus-visible also matches a clicked area after a key press. */
+   workspaceFocus.ts marks those, since :focus-visible also matches a clicked area after a key press.
+   The conversation's timeline takes it instead, and its top fade mask would hide its own ring. */
 [data-workspace-area]:focus-visible {
   outline: none;
 }
-[data-workspace-keyboard-focus]:focus {
+[data-workspace-keyboard-focus]:focus,
+[data-workspace-area="conversation"]:has(
+  .messages-timeline-scroll[data-workspace-keyboard-focus]:focus
+) {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
+}
+
+.messages-timeline-scroll:focus-visible {
+  outline: none;
 }
 
 /* redesign: shell */
@@ -6456,20 +6556,22 @@ body {
     --pane-join-rim-k: 1.6;
     /* The rim's run along the pane's top edge, out from each ear. */
     --pane-join-tail: 36px;
-    --workspace-chrome-controls-top: var(--pane-join-shift);
+    /* The row the tabs centre in. Windows' 40px caption row leaves less than
+       the topbar's height under the shift, and padding cannot go negative. */
+    --pane-join-row: min(
+      var(--workspace-topbar-height),
+      var(--pane-notch-height) - var(--pane-join-shift)
+    );
 
     & [data-pane-header] {
       padding-block: var(--pane-join-shift)
-        calc(var(--pane-notch-height) - var(--workspace-topbar-height) - var(--pane-join-shift));
+        calc(var(--pane-notch-height) - var(--pane-join-row) - var(--pane-join-shift));
       /* From a tab's foot to the pane's top edge. */
       --pane-join-drop: calc(
-        var(--pane-notch-height) - var(--pane-join-shift) -
-          (var(--workspace-topbar-height) + 1.75rem) / 2
+        var(--pane-notch-height) - var(--pane-join-shift) - (var(--pane-join-row) + 1.75rem) / 2
       );
       /* Above a tab, up to 2px under the header's top. */
-      --pane-join-rise: calc(
-        var(--pane-join-shift) + (var(--workspace-topbar-height) - 1.75rem) / 2 - 2px
-      );
+      --pane-join-rise: calc(var(--pane-join-shift) + (var(--pane-join-row) - 1.75rem) / 2 - 2px);
       --pane-join-h: calc(var(--pane-join-rise) + 1.75rem + var(--pane-join-drop));
       --pane-join-rim-size: 100% calc(var(--pane-join-h) * var(--pane-join-rim-k));
     }
@@ -6573,6 +6675,30 @@ body {
       --foreground: var(--pane-join-fg);
     }
 
+    /* A hovered tab shows the joined tab's outline, without its ears, in a
+       faint pane fill, under the joined shape so it never dents it. */
+    &
+      [data-pane-notch=""]:not([data-pane-notch-unfocused])
+      [data-layout-tab-strip]
+      :is([data-layout-pane-tab], [data-tab-key]):not([data-joined]):is(
+        :hover,
+        .group\/tab:hover > *
+      ) {
+      position: relative;
+      background: none;
+
+      &::before {
+        content: "";
+        position: absolute;
+        z-index: -2;
+        inset: calc(var(--pane-join-rise) * -1) 0 calc(var(--pane-join-drop) * -1);
+        border-start-start-radius: var(--pane-join-radius);
+        border-start-end-radius: var(--pane-join-radius);
+        background: color-mix(in srgb, var(--pane-join-fill) 45%, transparent);
+        pointer-events: none;
+      }
+    }
+
     /* An unfocused pane's tab sits on the bar, in the bar's colors. */
     & [data-pane-notch-unfocused] [data-layout-tab-strip] [data-joined] {
       color: var(--pane-bar-fg);
@@ -6583,7 +6709,8 @@ body {
 
     /* The bar's own controls follow the tabs down. */
     & [data-workspace-titlebar-controls] {
-      translate: 0 var(--pane-join-shift);
+      translate: 0
+        calc(var(--pane-join-shift) - (var(--workspace-topbar-height) - var(--pane-join-row)) / 2);
     }
 
     /* The pane's corner cuts sit at the bar's foot; the end one at the pane's
@@ -6713,12 +6840,12 @@ body {
         mask: linear-gradient(to right, transparent, #000);
       }
 
+      /* A stretched 1px layer fades on the Windows compositor. */
       & [data-jm] {
-        width: 1px;
+        width: calc(var(--jm) * 1px);
         height: calc(100% + 1px);
         transform-origin: 0 0;
         translate: calc(var(--jx) + var(--r)) 0;
-        scale: var(--jm) 1;
         background: var(--pane-join-fill);
       }
       & [data-jm]::after {

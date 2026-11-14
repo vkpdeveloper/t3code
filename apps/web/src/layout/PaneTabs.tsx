@@ -357,8 +357,8 @@ function moveJoin(
   );
   const slide = piece("[data-jm]")?.animate(
     [
-      { translate: `${from.x + r}px 0`, scale: `${middle(from.w)} 1` },
-      { translate: `${to.x + r}px 0`, scale: `${middle(to.w)} 1` },
+      { translate: `${from.x + r}px 0`, scale: `${middle(from.w) / Math.max(1, middle(to.w))} 1` },
+      { translate: `${to.x + r}px 0`, scale: "1 1" },
     ],
     timing,
   );

@@ -3,13 +3,10 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  closeLayoutTab,
-  closedLayoutTabIds,
   createLayoutState,
   ghostLoneLayoutChats,
   layoutChatSwaps,
   moveLayoutTab,
-  moveLayoutTabToNewWorkspace,
   moveLayoutTabToWorkspace,
   openLayoutGhostChat,
   openLayoutKeptTab,
@@ -21,7 +18,6 @@ import {
   selectFocusedTab,
   selectFocusedWorkspace,
   selectLayoutPaneSlots,
-  selectLayoutStripSize,
   shareLayoutBeside,
   showLayoutContent,
   THREAD_TERMINAL_SURFACE_ID,
@@ -416,6 +412,12 @@ describe("layoutChatSwaps", () => {
       swaps: [],
     },
     {
+      case: "focus moving to a thread already open in the same pane",
+      before: [[[["A!", "~D"]]]],
+      after: [[[["A", "~D!"]]]],
+      swaps: ["A>D focus only"],
+    },
+    {
       case: "a ghost opening beside a terminal with no chat",
       before: [[[["t:A!"]]]],
       after: [[[["t:A", "~D!"]]]],
@@ -426,7 +428,7 @@ describe("layoutChatSwaps", () => {
       target.kind === "server" ? target.threadRef.threadId : target.kind;
     expect(
       layoutChatSwaps(layoutOf(...before), layoutOf(...after)).map(
-        ({ from, to }) => `${name(from)}>${name(to)}`,
+        ({ from, to, focusOnly }) => `${name(from)}>${name(to)}${focusOnly ? " focus only" : ""}`,
       ),
     ).toEqual(swaps);
   });
@@ -461,6 +463,26 @@ describe("replaceLayoutTabContent", () => {
   it("leaves an open thread alone when the tab to replace has already closed", () => {
     const before = openLayoutTab(createLayoutState(), chat);
     expect(replaceLayoutTabContent(before, "closed-tab", chat)).toBe(before);
+  });
+});
+
+describe("selectLayoutPaneSlots", () => {
+  it("keeps a full-width column on screen when the strip narrows after it was arranged", () => {
+    // Arranged with the sidebar closed, then the sidebar opens and the strip narrows.
+    const state: LayoutState = {
+      focusedWorkspaceId: "workspace",
+      workspaces: [
+        {
+          id: "workspace",
+          name: null,
+          focusedPaneId: null,
+          cameraWidth: 1300,
+          columns: [column("chat", 1), column("terminal", 0.5)],
+        },
+      ],
+    };
+    expect(drawnRightEdges(state, 1300)).toEqual([1300, 1950]);
+    expect(drawnRightEdges(state, 1000)).toEqual([1000, 1500]);
   });
 });
 
@@ -531,38 +553,6 @@ describe("resizeLayoutColumnEdge", () => {
       unitWidth,
     );
     expect(drawnRightEdges(released, viewportWidth, "always-shrink")).toEqual([333, 600, 1000]);
-  });
-});
-
-describe("selectLayoutStripSize", () => {
-  it("gives the strip width the slots are drawn at, for any viewport width", () => {
-    const workspaces = [
-      { cameraWidth: null, widths: [1] },
-      { cameraWidth: null, widths: [0.66, 0.34] },
-      { cameraWidth: null, widths: [0.5, 0.5, 0.5] },
-      { cameraWidth: 1650, widths: [0.66, 0.34] },
-      { cameraWidth: 1490, widths: [0.4, 0.3, 0.3] },
-      { cameraWidth: 1200, widths: [0.5, 0.55] },
-      { cameraWidth: 1400, widths: [0.4, 0.4] },
-      { cameraWidth: 900, widths: [1] },
-    ];
-    const modes: LayoutWhenNoRoom[] = ["shrink-then-scroll", "always-scroll", "always-shrink"];
-    for (const { cameraWidth, widths } of workspaces) {
-      const workspace = {
-        id: "workspace",
-        name: null,
-        focusedPaneId: null,
-        cameraWidth,
-        columns: widths.map((width, index) => column(`c${index}`, width)),
-      };
-      for (const whenNoRoom of modes) {
-        const { share, minPx } = selectLayoutStripSize(workspace, whenNoRoom);
-        for (let width = 700; width <= 2200; width += 25) {
-          const { stripWidth } = selectLayoutPaneSlots(workspace, { width, whenNoRoom });
-          expect(Math.max(share * width, minPx)).toBeCloseTo(stripWidth * width, 6);
-        }
-      }
-    }
   });
 });
 
@@ -658,19 +648,5 @@ describe("moveLayoutTab", () => {
       ["chat-pane", expect.closeTo(0.55)],
       ["other-pane", expect.closeTo(0.45)],
     ]);
-  });
-});
-
-describe("closedLayoutTabIds", () => {
-  it("lists a tab that left the layout, not one that moved to another workspace", () => {
-    const layout = openLayoutTab(openLayoutTab(createLayoutState(), chat), diff, {
-      placement: "new-column",
-    });
-    const diffTabId = selectFocusedTab(layout)!.id;
-
-    expect(closedLayoutTabIds(layout, closeLayoutTab(layout, diffTabId))).toEqual([diffTabId]);
-    expect(closedLayoutTabIds(layout, moveLayoutTabToNewWorkspace(layout, diffTabId, 1))).toEqual(
-      [],
-    );
   });
 });

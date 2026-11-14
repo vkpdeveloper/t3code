@@ -27,6 +27,7 @@ import {
   resolveThreadProviderStack,
 } from "@t3tools/client-runtime/state/models";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { toServerClock } from "@t3tools/client-runtime/clock";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -169,18 +170,20 @@ function JumpHintBadge(props: { label: string }) {
 const JUMP_HINT_SLOT_CLASS_NAME =
   "[&>:not([data-jump-hint])]:invisible [&>:not([data-jump-hint])]:absolute";
 
-function WorkingDuration(props: { startedAt: string | null }) {
+function WorkingDuration(props: { environmentId: EnvironmentId; startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
   if (Number.isNaN(startedMs)) return null;
-  return <WorkingDurationLabel startedMs={startedMs} />;
+  return <WorkingDurationLabel environmentId={props.environmentId} startedMs={startedMs} />;
 }
 
 // Self-ticking so only this span re-renders each second, not the whole row;
 // the shared tick lands every working row's update in the same frame.
-function WorkingDurationLabel(props: { startedMs: number }) {
+function WorkingDurationLabel(props: { environmentId: EnvironmentId; startedMs: number }) {
   const nowMs = useNowSecond();
   return (
-    <span className="tabular-nums">{formatWorkingDurationLabel(nowMs - props.startedMs)}</span>
+    <span className="tabular-nums">
+      {formatWorkingDurationLabel(toServerClock(props.environmentId, nowMs) - props.startedMs)}
+    </span>
   );
 }
 
@@ -228,6 +231,7 @@ function SidebarWokeLabel(props: { onDismiss: (event: ReactMouseEvent) => void }
 function SidebarStatusLabel(props: {
   kind: SidebarV2TopStatusKind;
   label?: string | null;
+  environmentId: EnvironmentId;
   workingStartedAt: string | null;
   compact?: boolean;
 }) {
@@ -244,7 +248,7 @@ function SidebarStatusLabel(props: {
       {!props.compact &&
       (props.kind === "working" || props.kind === "preparing" || props.kind === "waiting") ? (
         <span aria-hidden>
-          <WorkingDuration startedAt={props.workingStartedAt} />
+          <WorkingDuration environmentId={props.environmentId} startedAt={props.workingStartedAt} />
         </span>
       ) : null}
     </span>
@@ -643,8 +647,6 @@ type SidebarThreadRowProps = {
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
   snoozeSupported: boolean;
-  // the descriptor is not loaded. Unpinned cards get a pin quick action on
-  // hover; the context menu keeps pin and unpin for every row.
   pinningSupported: boolean;
   isPinned: boolean;
   sortable?: SortableThreadRowBag | undefined;
@@ -690,7 +692,6 @@ type SidebarThreadRowProps = {
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
-  onPin: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
   onFileDropThreads?: ((threadRef: ScopedThreadRef, files: File[]) => void) | undefined;
@@ -732,7 +733,7 @@ function ThreadRenameInput(props: {
       }}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
-      className="-ms-1 min-w-0 flex-1 rounded-control bg-transparent px-1 text-body font-medium text-strong-foreground outline-none"
+      className="-ms-1 min-w-0 flex-1 rounded-control bg-transparent px-1 text-body leading-5 font-medium text-strong-foreground outline-none"
     />
   );
 }
@@ -754,7 +755,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     onThreadClick,
     onUnsettle,
     onUnsnooze,
-    onPin,
     onUnpin,
     openPullRequestsInRightPanel,
     renamingTitle,
@@ -993,11 +993,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const handleSnoozePreset = (preset: Pick<SnoozePreset, "snoozedUntil">) => {
     onSnooze(threadRef, preset);
   };
-  const handlePinClick = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onPin(threadRef);
-  };
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
   // The React Compiler caches render results on their inputs, so a clock read
   // here would stay frozen until `thread` changes and a queued-turn gate would
@@ -1028,8 +1023,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     canOperateThread && props.snoozeSupported && canSnooze(thread, { now: snoozeGateNow });
   // Closing here, not just masking, keeps the menu from reopening when the button returns.
   if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
-  // Pinned cards already show the clickable unpin glyph in this row.
-  const showPinButton = props.pinningSupported && canOperateThread && !props.isPinned;
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
   const jumpHintLabel = snoozeMenuOpen ? null : props.jumpLabel;
   const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
@@ -1120,7 +1113,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       />
     ) : (
       <span
-        aria-hidden
         className={cn(
           "min-w-0 flex-1 text-start text-body leading-5 transition-opacity motion-reduce:transition-none",
           shouldRecede ? "font-normal" : "font-medium",
@@ -1150,7 +1142,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
         {thread.title}
       </span>
     );
-  const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
 
   const handlePrListClick = () => {
     useRightPanelStore.getState().open(threadRef, "pull-requests");
@@ -1334,7 +1325,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               />
             }
           >
-            {accessibleTitle}
             <div className="relative flex h-4 min-w-0 items-center gap-1.5">
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
@@ -1377,7 +1367,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                 title
               ) : (
                 <span
-                  aria-hidden
                   className={cn(
                     "min-w-0 flex-1 truncate text-start text-meta @min-[12rem]/sidebar-tile:text-label",
                     shouldRecede
@@ -1446,7 +1435,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             }
           >
             <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
-              {accessibleTitle}
               {inFolder ? null : (
                 <span
                   className={cn(
@@ -1476,8 +1464,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               ) : (
                 <span
                   className={cn(
-                    "relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
-                    props.settlementSupported && variantAction === "settle" && "min-w-16",
+                    "group/sidebar-status-slot relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end",
                     props.sweepAction !== null && "hidden",
                     jumpHintLabel && JUMP_HINT_SLOT_CLASS_NAME,
                   )}
@@ -1486,7 +1473,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     className={cn(
                       "inline-flex justify-end tabular-nums text-secondary-label",
                       variantAction === "unsettle" && "text-(--sidebar-settled-meta)",
-                      !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                      !isWoke &&
+                        (props.settlementSupported && variantAction === "settle"
+                          ? "group-has-[:focus-visible]/sidebar-status-slot:hidden group-any-hover/sidebar-row:hidden"
+                          : "group-any-hover/sidebar-row:opacity-0"),
                     )}
                   >
                     {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -1502,6 +1492,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                         compact
                         kind={topStatus}
                         label={topStatusLabel}
+                        environmentId={thread.environmentId}
                         workingStartedAt={
                           topStatus === "working" || topStatus === "preparing"
                             ? resolveWorkingStartedAt(thread)
@@ -1574,8 +1565,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                             onClick={handleSettleClick}
                             onPointerDown={handleActionPointerDown}
                             className={cn(
-                              "pointer-events-none absolute inset-y-0 right-0 -mr-2 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-meta text-muted-foreground opacity-0 outline-none transition-opacity hover:surface-ghost-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
-                              isWoke && "group-any-hover/sidebar-row:static",
+                              "pointer-events-none absolute inset-y-0 right-0 -mr-2 inline-flex cursor-pointer items-center gap-1 self-stretch rounded-md bg-transparent px-2 text-meta text-muted-foreground opacity-0 outline-none transition-opacity hover:surface-ghost-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                              !jumpHintLabel &&
+                                "focus-visible:static group-any-hover/sidebar-row:static",
                             )}
                           />
                         }
@@ -1604,9 +1596,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       data-thread-item={threadKey}
       {...sortableRootProps}
       {...(fileDropHandlers ?? {})}
+      // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
+      // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_58px]",
+        metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1636,7 +1630,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
             />
           }
         >
-          {accessibleTitle}
           <div
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
@@ -1665,7 +1658,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
               ) : (
                 <span
                   className={cn(
-                    "group/sidebar-status-slot relative ml-auto grid h-5 min-w-15 shrink-0 grid-flow-col auto-cols-max items-stretch justify-end text-meta font-normal",
+                    "group/sidebar-status-slot relative ml-auto grid h-5 min-w-8 shrink-0 grid-flow-col auto-cols-max items-stretch justify-end text-meta font-normal",
                     props.sweepAction !== null && "hidden",
                     jumpHintLabel && JUMP_HINT_SLOT_CLASS_NAME,
                   )}
@@ -1687,6 +1680,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                       <SidebarStatusLabel
                         kind={topStatus}
                         label={topStatusLabel}
+                        environmentId={thread.environmentId}
                         workingStartedAt={
                           topStatus === "working" || topStatus === "preparing"
                             ? resolveWorkingStartedAt(thread)
@@ -1697,17 +1691,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                       />
                     )}
                   </span>
-                  {props.settlementSupported ||
-                  showSnoozeButton ||
-                  showPinButton ||
-                  hasUnsentDraft ? (
+                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
                     <span
                       className={cn(
                         // Mouse clicks leave Settle focused; focus-within would pin controls over
                         // the status label after the pointer leaves. Use focus-visible instead.
-                        "pointer-events-none row-start-1 flex items-stretch justify-self-end opacity-0 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
+                        "pointer-events-none absolute inset-y-0 right-0 row-start-1 flex items-stretch justify-self-end opacity-0 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
                         isWokeStatus ? "col-start-2" : "col-start-1",
-                        snoozeMenuOpen && "pointer-events-auto opacity-100",
+                        snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >
                       {hasUnsentDraft ? (
@@ -1725,23 +1716,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                             <XIcon className="size-3.5" />
                           </TooltipTrigger>
                           <TooltipPopup side="top">Discard draft</TooltipPopup>
-                        </Tooltip>
-                      ) : null}
-                      {showPinButton ? (
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <button
-                                type="button"
-                                aria-label="Pin thread"
-                                onClick={handlePinClick}
-                                className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-badge bg-transparent text-muted-foreground outline-none transition-colors hover:surface-ghost-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                              />
-                            }
-                          >
-                            <PinIcon className="size-3" />
-                          </TooltipTrigger>
-                          <TooltipPopup>Pin thread</TooltipPopup>
                         </Tooltip>
                       ) : null}
                       {showSnoozeButton ? (
@@ -1922,6 +1896,13 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
               aria-label={accessibility.label}
               {...dragListeners}
               onMouseMove={props.onHighlight}
+              // Focus stays in the search box, as for Enter. A focused result would lose focus as
+              // the results close, and its recovery scrolls the list away from the opened thread.
+              // dnd-kit ignores a prevented press, so the drag listener runs first.
+              onPointerDown={(event) => {
+                dragListeners?.onPointerDown?.(event);
+                event.preventDefault();
+              }}
               onClick={props.onSelect}
               className={cn(
                 "group/sidebar-row group/v2-row flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-control px-2.5 py-1 text-left text-body outline-none",

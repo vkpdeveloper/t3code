@@ -19,7 +19,7 @@ import {
 } from "./renderer";
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { isMonospaceFamily } from "../../appearanceFonts";
-import { setWheelScroller } from "../../motion/gesture";
+import { setWheelScroller, sidewaysWheelDelta } from "../../motion/gesture";
 import { observeResize } from "../../lib/observeResize";
 
 const DEFAULT_TERMINAL_FONT_SIZE = 12;
@@ -1031,26 +1031,6 @@ export class GhosttyTerminalSurface {
     return before ? { start, end } : { start: end, end: start };
   }
 
-  getSelectionEndClientRect(): { readonly right: number; readonly bottom: number } | null {
-    const position = this.getSelectionPosition();
-    if (!position) return null;
-    const viewportEnd = this.core.screenPointToViewport(position.end.x, position.end.y);
-    if (
-      !viewportEnd ||
-      viewportEnd.x < 0 ||
-      viewportEnd.x >= this.cols ||
-      viewportEnd.y < 0 ||
-      viewportEnd.y >= this.rows
-    ) {
-      return null;
-    }
-    const bounds = this.canvas.getBoundingClientRect();
-    return {
-      right: bounds.left + CONTENT_PADDING + (viewportEnd.x + 1) * this.metrics.width,
-      bottom: bounds.top + this.originY + (viewportEnd.y + 1) * this.metrics.height,
-    };
-  }
-
   clearSelection({ source = "user" }: { source?: "user" | "output" } = {}): void {
     if (source === "user") this.linkActivationRequestId += 1;
     this.clearPrimedCopy();
@@ -1751,7 +1731,7 @@ export class GhosttyTerminalSurface {
   };
 
   private readonly onWheel = (event: WheelEvent) => {
-    if (event.deltaY === 0 || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+    if (sidewaysWheelDelta(event) !== 0 || event.deltaY === 0) return;
     event.preventDefault();
     const delta = terminalWheelDeltaRows(
       event,

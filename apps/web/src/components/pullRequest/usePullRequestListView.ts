@@ -347,7 +347,7 @@ export function usePullRequestDisplayGroups({
 
 const MAX_SEARCH_LABEL_CANDIDATES = 100;
 
-function pullRequestSearchLabels(raw: unknown): Partial<Pick<PullRequestsSearch, "labels">> {
+function pullRequestSearchLabels(raw: unknown): PullRequestsSearch["labels"] {
   const values = (Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : []).slice(
     0,
     MAX_SEARCH_LABEL_CANDIDATES,
@@ -363,7 +363,7 @@ function pullRequestSearchLabels(raw: unknown): Partial<Pick<PullRequestsSearch,
     seen.add(key);
     if (labels.length === 10) break;
   }
-  return labels.length === 0 ? {} : { labels };
+  return labels.length === 0 ? undefined : labels;
 }
 
 export function validatePullRequestsSearch(raw: Record<string, unknown>): PullRequestsSearch {
@@ -401,7 +401,7 @@ export function validatePullRequestsSearch(raw: Record<string, unknown>): PullRe
     ...(typeof raw.selectedEnvironmentId === "string" && raw.selectedEnvironmentId
       ? { selectedEnvironmentId: raw.selectedEnvironmentId as EnvironmentId }
       : {}),
-    // Keep every query as text and always own the key so an unvalidated parent value cannot leak.
+    // Keep every query as text and always own the free-text keys so an unvalidated parent value cannot leak.
     q:
       raw.q !== undefined && raw.q !== null && raw.q !== ""
         ? (typeof raw.q === "string" ? raw.q : JSON.stringify(raw.q)).slice(0, 200)
@@ -414,9 +414,10 @@ export function validatePullRequestsSearch(raw: Record<string, unknown>): PullRe
       ? { review: raw.review }
       : {}),
     ...(raw.checks === "passing" || raw.checks === "failing" ? { checks: raw.checks } : {}),
-    ...(typeof raw.author === "string" && raw.author.trim()
-      ? { author: raw.author.trim().slice(0, 200) }
-      : {}),
-    ...pullRequestSearchLabels(raw.labels),
+    author:
+      typeof raw.author === "string" && raw.author.trim()
+        ? raw.author.trim().slice(0, 200)
+        : undefined,
+    labels: pullRequestSearchLabels(raw.labels),
   };
 }

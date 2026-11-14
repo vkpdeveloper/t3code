@@ -95,6 +95,8 @@ export interface ThreadRunSummary {
    * instead of "Thinking".
    */
   readonly providerStartingLabel?: string;
+  /** The run prepared a new worktree before its provider started, so its work began at `requestedAt`. */
+  readonly preparedWorktree?: true;
   readonly sourcePlanRef?: {
     readonly threadId: ThreadId;
     readonly planId: PlanId;
@@ -235,7 +237,7 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
   const parkAtIdle =
     backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []) &&
     thread.status !== "failed";
-  if (thread.latestRunId === null && thread.activeProviderThreadId === null && !parkAtIdle) {
+  if (thread.latestRunId === null && !parkAtIdle) {
     return null;
   }
   const status = parkAtIdle ? "idle" : (thread.activityRunStatus ?? thread.status);

@@ -1,6 +1,14 @@
 import { page, userEvent } from "vite-plus/test/browser";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+
+import "~/index.css";
+
+import {
+  __resetClientSettingsPersistenceForTests,
+  __setClientSettingsForTests,
+} from "~/hooks/useSettings";
 import { render } from "../../../test/render";
 import { Sidebar, SidebarProvider, SidebarRail, SidebarTrigger, useSidebar } from "./sidebar";
 
@@ -159,4 +167,26 @@ it("keeps closed mobile sheet contents mounted and reports the sheet only while 
   await userEvent.keyboard("{Escape}");
   await expect.element(sheetMounted).toHaveTextContent("false");
   expect(document.querySelector('[data-mobile="true"]')?.textContent).toContain("Sheet contents");
+});
+
+it("opens the mobile sheet without a transition while panel animations are off", async () => {
+  await page.viewport(390, 844);
+  // Panel animations default to on in the redesign, so the test turns them off.
+  __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, panelAnimationDurationMs: 0 });
+  using _settings = { [Symbol.dispose]: __resetClientSettingsPersistenceForTests };
+  await using screen = await render(
+    <div data-panel-animations="false">
+      <SidebarProvider>
+        <Sidebar>
+          <span>Sheet contents</span>
+        </Sidebar>
+        <SidebarTrigger />
+      </SidebarProvider>
+    </div>,
+    { router: false /* no routes involved */ },
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+  const popup = document.querySelector<HTMLElement>('[data-mobile="true"][data-sidebar="sidebar"]');
+  expect(popup).not.toBeNull();
+  expect(getComputedStyle(popup!).transitionDuration).toBe("0s");
 });

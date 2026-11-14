@@ -29,7 +29,7 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
-  it.effect.each([78, 80, 81, 82])(
+  it.effect.each([78, 80, 81, 82, 86])(
     "upgrades bot builds that recorded ProjectionProjectBot as %i",
     (id) =>
       Effect.gen(function* () {
@@ -42,7 +42,7 @@ describe("runMigrations", () => {
 
         yield* runMigrations();
 
-        assert.deepStrictEqual((yield* history).slice(-9), [
+        assert.deepStrictEqual((yield* history).slice(-15), [
           [78, "DropOrchestrationEventCorrelationIndex"],
           [79, "DelegatedRecoveryIndexes"],
           [80, "ScheduledTaskThreadMode"],
@@ -51,7 +51,13 @@ describe("runMigrations", () => {
           [83, "CommandReadIndexes"],
           [84, "LastExecutedRunIndex"],
           [85, "TurnItemCounts"],
-          [86, "ProjectionProjectBot"],
+          [86, "QueuedTurnInputIndex"],
+          [87, "ProjectionProjectsCustomTitle"],
+          [88, "TurnItemTypeStatusIndex"],
+          [89, "ShellThreadReadIndexes"],
+          [90, "AuthConnectDevices"],
+          [91, "AuthConnectDeniedRequests"],
+          [92, "ProjectionProjectBot"],
         ]);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
@@ -175,6 +181,22 @@ describe("runMigrations", () => {
       );
       assert.notInclude(String(exit), "57_ScheduledTaskWebhooks");
       assert.deepStrictEqual(yield* history, before);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("keeps the migrations that finished before a later one failed", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 81 });
+      yield* sql`CREATE TABLE orchestration_v2_projection_turn_item_counts (thread_id TEXT)`;
+
+      const exit = yield* Effect.exit(runMigrations());
+
+      assert.isTrue(Exit.isFailure(exit));
+      assert.deepStrictEqual(
+        yield* history,
+        migrationManifest.filter(([id]) => id <= 84),
+      );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
