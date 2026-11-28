@@ -1,4 +1,3 @@
-import { Atom } from "effect/reactivity";
 import { useGT, useMessages } from "gt-react-native";
 import {
   WORKSPACE_TAB_LABELS,
@@ -8,6 +7,7 @@ import {
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -21,6 +21,7 @@ import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import type { NavigationTab } from "./navigation-tab-order";
 import {
   NATIVE_WORKSPACE_TAB_SLOTS,
+  pinnedWorkspaceTabsAtom,
   workspaceTabForNativeSlot,
   workspaceUsesColumns,
 } from "./workspace-tabs-state";
@@ -59,24 +60,37 @@ function RetainedWorkspaceTab(props: {
     activeRef.current = props.active;
   }, [props.active]);
   const isActive = () => activeRef.current;
+  // Bound to this slot's tab, so a hidden slot keeps the page it showed while its search state
+  // stays live.
+  const slotAtom = useMemo(
+    () => pinnedWorkspaceTabsAtom(workspace.stateAtom, props.tab),
+    [workspace.stateAtom, props.tab],
+  );
+  const slotWorkspace = {
+    ...workspace,
+    // The settings slot also shows an overflow tab, which it does without Settings open.
+    settingsOpen: props.active ? workspace.settingsOpen : props.slot === "settings",
+    state: { ...workspace.state, selectedTab: props.tab },
+    stateAtom: slotAtom,
+  };
   const [content, setContent] = useState(
     props.active
-      ? { source: workspace, workspace, children: props.children, headerOnly: false }
+      ? { source: workspace, workspace: slotWorkspace, children: props.children, headerOnly: false }
       : null,
   );
   const stale = content?.source !== workspace || content?.children !== props.children;
   if (props.active && (content?.headerOnly !== false || stale))
-    setContent({ source: workspace, workspace, children: props.children, headerOnly: false });
+    setContent({
+      source: workspace,
+      workspace: slotWorkspace,
+      children: props.children,
+      headerOnly: false,
+    });
   // A slot not shown yet follows the workspace, so the page it opens with stays current.
   else if (!props.active && props.prewarm && (content === null || (content.headerOnly && stale)))
     setContent({
       source: workspace,
-      workspace: {
-        ...workspace,
-        settingsOpen: props.slot === "settings",
-        state: { ...workspace.state, selectedTab: props.tab },
-        stateAtom: Atom.make((get) => ({ ...get(workspace.stateAtom), selectedTab: props.tab })),
-      },
+      workspace: slotWorkspace,
       children: props.children,
       headerOnly: true,
     });

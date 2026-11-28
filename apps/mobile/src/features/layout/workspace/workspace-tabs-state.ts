@@ -1,3 +1,4 @@
+import { Atom } from "effect/reactivity";
 import {
   NAVIGATION_TAB_ORDER,
   navigationCustomizationAvailable,
@@ -32,6 +33,14 @@ export interface WorkspaceTabsState {
   readonly selectedTab: WorkspaceTab;
   readonly selectionRevision: number;
   readonly tabs: Readonly<Record<WorkspaceSearchTab, WorkspaceTabState>>;
+}
+
+/**
+ * The tab state as a slot for `tab` sees it: live, except that its own tab stays selected, so a
+ * retained iOS slot keeps rendering its own page after the user switches away.
+ */
+export function pinnedWorkspaceTabsAtom(base: Atom.Atom<WorkspaceTabsState>, tab: WorkspaceTab) {
+  return Atom.make((get) => ({ ...get(base), selectedTab: tab }));
 }
 
 function emptyTab(): WorkspaceTabState {

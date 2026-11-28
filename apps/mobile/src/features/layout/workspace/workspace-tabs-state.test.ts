@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { act, createElement, createContext, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { WorkspaceRootScreen } from "./WorkspaceRootScreen.android";
 import {
   initialWorkspaceTabsState,
+  pinnedWorkspaceTabsAtom,
   workspaceTabsReducer,
   shouldRestoreNativeSearch,
   workspaceTabForNativeSlot,
@@ -193,6 +195,18 @@ describe("workspace root navigation", () => {
     state = workspaceTabsReducer(state, { type: "select", tab: "threads" });
     expect(state.tabs.threads.query).toBe("retained");
   });
+  it("a retained slot keeps its own tab after the user switches away, with live search state", () => {
+    const registry = AtomRegistry.make();
+    const base = Atom.make(initialWorkspaceTabsState());
+    const threadsSlot = pinnedWorkspaceTabsAtom(base, "threads");
+    using _mount = { [Symbol.dispose]: registry.mount(threadsSlot) };
+    let state = workspaceTabsReducer(registry.get(base), { type: "select", tab: "issues" });
+    state = workspaceTabsReducer(state, { type: "query", query: "crash", tab: "threads" });
+    registry.set(base, state);
+    expect(registry.get(threadsSlot).selectedTab).toBe("threads");
+    expect(registry.get(threadsSlot).tabs.threads.query).toBe("crash");
+  });
+
   it("opens Settings on native reselection instead of selecting its overflow section", () => {
     const order = ["threads", "pullRequests", "usage"] as const;
     expect(workspaceTabForNativeSlot(order, "settings")).toBe("settings");
