@@ -53,7 +53,16 @@ if (Platform.OS === "android") {
         Number.isNaN(this.getTime())
       )
         return native.call(this, locales, options);
-      const key = JSON.stringify([required, defaults, locales, options]);
+      // Intl.Locale objects stringify to their tags; JSON would collapse them all to {}. Without an
+      // explicit zone the key carries the local offset, a cheap native read, so a device zone change
+      // gets a new formatter; reading the zone's name would mean building a formatter per call.
+      const key = JSON.stringify([
+        required,
+        defaults,
+        typeof locales === "object" ? [locales].flat().map(String) : locales,
+        options,
+        options?.timeZone === undefined ? this.getTimezoneOffset() : null,
+      ]);
       let formatter = formatters.get(key);
       if (!formatter) {
         const has = (fields: ReadonlyArray<keyof Intl.DateTimeFormatOptions>) =>
