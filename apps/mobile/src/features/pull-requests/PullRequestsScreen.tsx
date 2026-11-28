@@ -47,7 +47,10 @@ import {
   pullRequestProjectChoices,
 } from "./pullRequestList";
 import { useDebouncedValue } from "../../state/queries";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { useSearchScrollRestoration } from "../layout/workspace/useSearchScrollRestoration";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 
@@ -100,7 +103,8 @@ export function PullRequestsScreen(
   const navigation = useNavigation();
   const gt = useGT();
   const primaryColumn = use(NativePrimaryColumnContext);
-  const workspace = useWorkspaceTabs()!;
+  const workspace = useWorkspaceTabControls()!;
+  const tab = useWorkspaceTabsSelector((state) => state.tabs.pullRequests)!;
   const { environments } = useWorkspaceState();
   const configs = useAtomValue(environmentServerConfigsAtom);
   const insets = useSafeAreaInsets();
@@ -110,7 +114,6 @@ export function PullRequestsScreen(
   const bottomSafeArea =
     Platform.OS === "ios" ? (columnSafeBottom ?? insets.bottom) : insets.bottom;
   const listRef = useRef<LegendListRef>(null);
-  const tab = workspace.state.tabs.pullRequests;
   const [initialScrollOffset] = useState(() => workspace.getScrollOffset("pullRequests"));
   useSearchScrollRestoration(tab.searchMode, () => {
     void listRef.current?.scrollToOffset({

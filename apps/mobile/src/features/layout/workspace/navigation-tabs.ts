@@ -13,7 +13,7 @@ import {
 import type { AppSymbolName } from "../../../components/ui/AppSymbol";
 import { mobilePreferencesAtom } from "../../../state/preferences";
 import { PullRequestGlyph } from "../../pull-requests/pullRequestGlyphs";
-import { useWorkspaceTabs } from "./WorkspaceTabsContext";
+import { useWorkspaceTabsSelector } from "./WorkspaceTabsContext";
 import { resolveWorkspaceTabOrder } from "./workspace-tabs-state";
 
 export const WORKSPACE_TAB_LABELS = {
@@ -44,7 +44,7 @@ export function useNavigationTabOrder() {
 
 export function useHiddenNavigationTabs() {
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const selected = useWorkspaceTabs()?.state.selectedTab ?? "threads";
+  const selected = useWorkspaceTabsSelector((state) => state.selectedTab) ?? "threads";
   const saved = AsyncResult.isSuccess(preferences) ? preferences.value : undefined;
   return [
     ...(navigationCustomizationAvailable()

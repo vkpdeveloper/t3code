@@ -5,7 +5,7 @@ import { View } from "react-native";
 import type { AppBarProps } from "../../../components/ui/AppBar.types";
 import { AppBar } from "../../../components/ui/AppBar";
 import { ScreenContent as SettingsScreenContent } from "../../../components/ui/ScreenContent";
-import { useWorkspaceTabs } from "../../layout/workspace/WorkspaceTabsContext";
+import { useWorkspaceTabControls } from "../../layout/workspace/WorkspaceTabsContext";
 import { useDeviceType } from "../../../native/native-layout-metrics";
 import { useCompactWorkspaceTabs } from "../../layout/workspace/useSystemWorkspaceTabBar";
 import { useSettingsPageBack } from "../useSettingsPageBack";
@@ -26,7 +26,7 @@ export function SettingsScreen(
   },
 ) {
   const route = useRoute();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
   const deviceType = useDeviceType();
   const compactTabs = useCompactWorkspaceTabs();
   const back = useSettingsPageBack();

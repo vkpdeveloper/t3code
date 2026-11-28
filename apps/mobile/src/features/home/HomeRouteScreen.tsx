@@ -34,7 +34,10 @@ import {
 } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
@@ -59,12 +62,11 @@ export function HomeRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
   const selectTab = useSelectWorkspaceTab();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const threadsTab = useWorkspaceTabsSelector((state) => state.tabs.threads);
   const [localSearchQuery, setLocalSearchQuery] = useState("");
   const searchQuery =
-    Platform.OS === "android"
-      ? primarySidebarSearchQuery
-      : (workspace?.state.tabs.threads.query ?? localSearchQuery);
+    Platform.OS === "android" ? primarySidebarSearchQuery : (threadsTab?.query ?? localSearchQuery);
   const setSearchQuery = (query: string) => {
     if (Platform.OS === "android") setPrimarySidebarSearchQuery(query);
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });

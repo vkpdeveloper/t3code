@@ -104,6 +104,7 @@ overrides:
   # Pin every patched package, including transitive dependencies, so lockfile-free
   # release installs cannot drift past the patch. Update these with patchedDependencies.
   react-native-image-viewing: 0.2.2
+  "@react-native/normalize-colors": 0.88.1
   "@exodus/bytes": 1.15.1
   mdast-util-math: 3.0.0
   micromark-extension-llm-math: 3.1.0
@@ -295,6 +296,12 @@ patchedDependencies:
   effect@4.1.5: patches/effect@4.1.5.patch
   "@generaltranslation/format@0.1.9": patches/@generaltranslation__format@0.1.9.patch
   gt-i18n@1.0.40: patches/gt-i18n@1.0.40.patch
+  # Every translated string reparsed its message and re-resolved its locale on each render, which
+  # crosses JNI on Android and stalled taps for seconds; cache both per locale.
+  "@generaltranslation/icu@0.1.2": patches/@generaltranslation__icu@0.1.2.patch
+  # Android: a color cache hit no longer deletes and re-adds its entry, which stalled renders of
+  # SVG icons on Hermes.
+  "@react-native/normalize-colors@0.88.1": patches/@react-native__normalize-colors@0.88.1.patch
 
 # Unmet peers fail resolution, so a pin outside a dependency's peer range is
 # caught when the lockfile changes instead of scrolling past as a warning.

@@ -1,6 +1,6 @@
-import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomMount, useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { createContext, use, useState, type Dispatch, type ReactNode } from "react";
+import { createContext, use, useMemo, useState, type Dispatch, type ReactNode } from "react";
 
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../../state/preferences";
 import { useAtomCommand } from "../../../state/use-atom-command";
@@ -21,8 +21,10 @@ import {
   type WorkspaceTabsState,
 } from "./workspace-tabs-state";
 
+// The context carries no tab state, so its value survives tab switches. Every mounted tab reads it,
+// and a value that changed per switch re-rendered all of them, hidden ones included.
 export const WorkspaceTabsContext = createContext<{
-  readonly state: WorkspaceTabsState;
+  readonly stateAtom: Atom.Atom<WorkspaceTabsState>;
   readonly dispatch: Dispatch<WorkspaceTabsAction>;
   readonly isTabActive: (tab: WorkspaceTab) => boolean;
   readonly bottomClearance: number;
@@ -33,8 +35,27 @@ export const WorkspaceTabsContext = createContext<{
   readonly cancelSearch: (tab: WorkspaceSearchTab) => void;
 } | null>(null);
 
-export function useWorkspaceTabs() {
+const noWorkspaceTabsAtom = Atom.make<WorkspaceTabsState | null>(null);
+
+export function useWorkspaceTabControls() {
   return use(WorkspaceTabsContext);
+}
+
+/** Re-renders only when the selected value changes, unlike `useWorkspaceTabs`. */
+export function useWorkspaceTabsSelector<A>(
+  select: (state: WorkspaceTabsState) => A,
+): A | undefined {
+  const controls = use(WorkspaceTabsContext);
+  return useAtomValue(controls?.stateAtom ?? noWorkspaceTabsAtom, (state) =>
+    state === null ? undefined : select(state),
+  );
+}
+
+/** The whole tab state. Re-renders on every tab change, so tab panes use the selector instead. */
+export function useWorkspaceTabs() {
+  const controls = use(WorkspaceTabsContext);
+  const state = useWorkspaceTabsSelector((current) => current);
+  return useMemo(() => (controls && state ? { ...controls, state } : null), [controls, state]);
 }
 
 type MobilePreferencesResult = Atom.Type<typeof mobilePreferencesAtom>;
@@ -89,7 +110,8 @@ export function WorkspaceTabsProvider(props: {
 }) {
   const registry = use(RegistryContext);
   const [model] = useState(() => createWorkspaceTabsModel(props.initialTab));
-  const state = useAtomValue(model.resolved);
+  // Keeps the tab state alive without re-rendering this provider on each change.
+  useAtomMount(model.resolved);
   const savePreferences = useAtomCommand(saveMobilePreferences);
   const dispatch = (action: WorkspaceTabsAction) => {
     registry.set(model.stored, workspaceTabsReducer(registry.get(model.resolved), action));
@@ -97,7 +119,7 @@ export function WorkspaceTabsProvider(props: {
       void savePreferences({ sharedSlotTab: action.tab });
   };
   const context = {
-    state,
+    stateAtom: model.resolved,
     dispatch,
     isTabActive: (tab: WorkspaceTab) => registry.get(model.resolved).selectedTab === tab,
     bottomClearance: 0,

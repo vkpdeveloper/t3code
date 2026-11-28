@@ -8,7 +8,7 @@ import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardComma
 import { WorkspaceConnectionTitle } from "../../home/WorkspaceConnectionTitle";
 import type { SharedSlotTab } from "./navigation-tab-order";
 import { SharedSlotTitle } from "./SharedSlotTitle";
-import { useWorkspaceTabs } from "./WorkspaceTabsContext";
+import { useWorkspaceTabControls, useWorkspaceTabsSelector } from "./WorkspaceTabsContext";
 import type { PullRequestFilterMenu } from "../../pull-requests/PullRequestListFilters";
 import { openSettings } from "../../settings/settings-navigation";
 
@@ -21,10 +21,10 @@ export function ListSearchToolbar(props: {
   const gt = useGT();
   const navigation = useNavigation();
   const { filters, tab: section } = props;
-  const workspace = useWorkspaceTabs()!;
+  const workspace = useWorkspaceTabControls()!;
   const { dispatch, getScrollOffset, recordScrollOffset, isTabActive } = workspace;
   const { onRequestVisibility } = props;
-  const tab = workspace.state.tabs[section];
+  const tab = useWorkspaceTabsSelector((state) => state.tabs[section])!;
   const searching = tab.searchMode !== "resting";
   const openSearch = () => {
     onRequestVisibility?.();

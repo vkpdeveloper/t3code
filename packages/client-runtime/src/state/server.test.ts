@@ -576,6 +576,51 @@ describe("server state projection", () => {
       }),
   );
 
+  it.effect("saves provider check stamps at most every five minutes", () =>
+    Effect.gen(function* () {
+      const saved = yield* Ref.make<ReadonlyArray<ServerConfig>>([]);
+      const checked = (checkedAt: string, enabled = true) =>
+        snapshotEvent({
+          ...CONFIG,
+          providers: [
+            {
+              instanceId: ProviderInstanceId.make("codex"),
+              enabled,
+              checkedAt,
+              usageLimits: { checkedAt },
+            } as unknown as ServerConfig["providers"][number],
+          ],
+        });
+      const savedStamps = Effect.map(Ref.get(saved), (configs) =>
+        configs.map((config) => config.providers[0]?.checkedAt),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const h = yield* makeConfigPersistenceHarness((_id, config) =>
+            Ref.update(saved, (values) => [...values, config]),
+          );
+          yield* h.send(checked("2026-11-28T00:00:00.000Z"));
+          yield* TestClock.adjust("10 seconds");
+          yield* h.send(checked("2026-11-28T00:00:10.000Z"));
+          yield* TestClock.adjust("10 seconds");
+          expect(yield* savedStamps).toEqual(["2026-11-28T00:00:00.000Z"]);
+
+          yield* h.send(checked("2026-11-28T00:00:20.000Z", false));
+          yield* TestClock.adjust("10 seconds");
+          expect(yield* savedStamps).toEqual([
+            "2026-11-28T00:00:00.000Z",
+            "2026-11-28T00:00:20.000Z",
+          ]);
+
+          yield* TestClock.adjust("5 minutes");
+          yield* h.send(checked("2026-11-28T00:05:40.000Z", false));
+          yield* TestClock.adjust("10 seconds");
+          expect((yield* savedStamps).at(-1)).toBe("2026-11-28T00:05:40.000Z");
+        }),
+      );
+    }),
+  );
+
   it.effect("saves once across transient themes, usage sources and stall updates", () =>
     Effect.gen(function* () {
       const saved = yield* Ref.make<ReadonlyArray<ServerConfig>>([]);

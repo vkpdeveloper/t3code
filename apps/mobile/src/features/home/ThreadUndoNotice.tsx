@@ -12,7 +12,10 @@ import {
   useNativeColumnLayoutMetrics,
 } from "../../native/native-layout-metrics";
 import { workspaceSearchBottomClearance } from "../layout/workspace/workspace-tabs-state";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import {
   dismissThreadUndoNotice,
   readThreadUndoNotice,
@@ -26,7 +29,8 @@ export function ThreadUndoNotice(props: { readonly visible: boolean }) {
   const insets = useSafeAreaInsets();
   const columnMetrics = useNativeColumnLayoutMetrics();
   const rootMetrics = useNativeLayoutMetrics();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const threadsTab = useWorkspaceTabsSelector((state) => state.tabs.threads);
   const deviceType = useDeviceType();
   const keyboardHeight = useKeyboardState((keyboard) => keyboard.height);
   const horizontalInsets =
@@ -49,7 +53,7 @@ export function ThreadUndoNotice(props: { readonly visible: boolean }) {
   const foldedResting =
     rootMetrics?.hasHinge &&
     rootMetrics.horizontalSizeClass === "compact" &&
-    workspace?.state.tabs.threads.searchMode === "resting";
+    threadsTab?.searchMode === "resting";
   const bottom =
     Platform.OS === "ios"
       ? foldedResting

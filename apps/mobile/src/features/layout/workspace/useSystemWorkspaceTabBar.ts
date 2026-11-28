@@ -3,13 +3,14 @@ import { Platform } from "react-native";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../../native/native-glass";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
 import { useDeviceType, useNativeLayoutMetrics } from "../../../native/native-layout-metrics";
-import { useWorkspaceTabs } from "./WorkspaceTabsContext";
+import { useWorkspaceTabControls, useWorkspaceTabsSelector } from "./WorkspaceTabsContext";
 import { workspaceUsesColumns } from "./workspace-tabs-state";
 
 function useWorkspacePage() {
-  const workspace = useWorkspaceTabs();
+  const settingsOpen = useWorkspaceTabControls()?.settingsOpen ?? false;
   return (
-    workspace !== null && !workspaceUsesColumns(workspace.state.selectedTab, workspace.settingsOpen)
+    useWorkspaceTabsSelector((state) => !workspaceUsesColumns(state.selectedTab, settingsOpen)) ===
+    true
   );
 }
 

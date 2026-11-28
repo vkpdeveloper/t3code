@@ -11,7 +11,6 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
 import { Platform, Pressable, View } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { m as resolveMessage } from "../../i18n/messages";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -118,7 +117,7 @@ export function ConnectionEnvironmentRow(props: {
         });
 
   return (
-    <Animated.View layout={LinearTransition.duration(250)} className="bg-grouped-card">
+    <View className="bg-grouped-card">
       <View className="flex-row items-center gap-3 px-4 py-3.5">
         <Pressable
           className="min-w-0 flex-1 gap-0.5 active:opacity-70"
@@ -218,12 +217,10 @@ export function ConnectionEnvironmentRow(props: {
         </Pressable>
       </View>
 
+      {/* Opens in place without a resize or fade: those animations held the details back for
+          about half a second on slower Android phones. */}
       {props.expanded ? (
-        <Animated.View
-          entering={FadeIn.duration(200)}
-          exiting={FadeOut.duration(150)}
-          className="gap-3 px-4 pb-4"
-        >
+        <View className="gap-3 px-4 pb-4">
           {diagnosis ? (
             <ConnectionDiagnosisDetails
               hostLabel={props.environment.environmentLabel}
@@ -337,8 +334,8 @@ export function ConnectionEnvironmentRow(props: {
               </Pressable>
             </View>
           )}
-        </Animated.View>
+        </View>
       ) : null}
-    </Animated.View>
+    </View>
   );
 }

@@ -17,7 +17,11 @@ import { selectedPullRequestKey } from "../../pull-requests/pullRequestSelection
 import { AndroidHomeFabLayout } from "../../home/AndroidHomeFab";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
 import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
-import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
+import {
+  WorkspaceTabsContext,
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "./WorkspaceTabsContext";
 import { WorkspaceTabPanes } from "./WorkspaceTabPanes";
 import { WorkspaceThreadSidebar } from "./WorkspaceThreadSidebar";
 import { WorkspaceAppBarScope } from "../../../components/ui/WorkspaceAppBar.android";
@@ -25,7 +29,8 @@ import { WorkspaceAppBarScope } from "../../../components/ui/WorkspaceAppBar.and
 /** The Home route in the sidebar column: the selected tab's list. */
 export function AndroidWorkspaceSidebar() {
   const floatingTabsEnabled = useAndroidFloatingTabs();
-  const workspace = useWorkspaceTabs()!;
+  const controls = useWorkspaceTabControls()!;
+  const selectedTab = useWorkspaceTabsSelector((state) => state.selectedTab)!;
   const enabled = useEnabledNavigationTabs();
   const insets = useSafeAreaInsets();
   const { fabSize } = useAndroidControlSizing();
@@ -34,18 +39,17 @@ export function AndroidWorkspaceSidebar() {
   const selectedIssue = useNavigationState(selectedIssueKey);
   // Settings and the one-page tabs cover the sidebar.
   const coveredByPage =
-    (useAndroidWorkspaceRoot()?.settingsOpen ?? false) ||
-    !workspaceUsesColumns(workspace.state.selectedTab);
+    (useAndroidWorkspaceRoot()?.settingsOpen ?? false) || !workspaceUsesColumns(selectedTab);
   const bottomClearance = floatingTabsEnabled
     ? insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
     : 16;
-  const context = { ...workspace, bottomClearance };
+  const context = { ...controls, bottomClearance };
   if (enabled.length === 0) return <WorkspaceNoTabs />;
   return (
     <WorkspaceAppBarScope>
       <WorkspaceTabPanes
         tabs={NAVIGATION_TAB_ORDER}
-        selected={workspace.state.selectedTab}
+        selected={selectedTab}
         renderTab={(tab) =>
           tab === "threads" ? (
             <AndroidHomeFabLayout sidebar disabled={coveredByPage} onStartNewTask={startNewTask}>

@@ -34,6 +34,7 @@ import { IssuesScreen } from "../../issues/IssuesScreen";
 import {
   WorkspaceTabsContext,
   WorkspaceTabsProvider,
+  useWorkspaceTabControls,
   useWorkspaceTabs,
 } from "./WorkspaceTabsContext";
 import { WorkspaceToolbar } from "./WorkspaceToolbar";
@@ -110,6 +111,7 @@ function WorkspaceRootContent() {
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardState((keyboard) => keyboard.height);
   const workspace = useWorkspaceTabs()!;
+  const controls = useWorkspaceTabControls()!;
   const { state } = workspace;
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
@@ -135,7 +137,7 @@ function WorkspaceRootContent() {
                 ? 80
                 : 16
               : WORKSPACE_DOCK.height + WORKSPACE_DOCK.bottomGap + 16);
-  const context = { ...workspace, bottomClearance };
+  const context = { ...controls, bottomClearance };
 
   return (
     <WorkspaceTabsContext value={context}>
@@ -205,7 +207,7 @@ function WorkspaceRootContent() {
 }
 
 export function WorkspaceRootScreen() {
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
   return workspace ? (
     <WorkspaceRootContent />
   ) : (
