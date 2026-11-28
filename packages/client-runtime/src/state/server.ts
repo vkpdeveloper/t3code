@@ -26,6 +26,7 @@ import {
   WS_METHODS,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Deferred from "effect/Deferred";
@@ -530,7 +531,8 @@ function withFetchedMachineCatalogs(
 }
 
 // Configs are JSON-shaped. Missing and undefined object fields persist identically.
-function sameCacheValue(previous: unknown, next: unknown): boolean {
+// `ignoreCheckStamps` treats `checkedAt` fields as equal.
+function sameCacheValue(previous: unknown, next: unknown, ignoreCheckStamps = false): boolean {
   if (previous === next) return true;
   if (
     previous === null ||
@@ -545,7 +547,7 @@ function sameCacheValue(previous: unknown, next: unknown): boolean {
       return false;
     }
     for (let index = 0; index < previous.length; index += 1) {
-      if (!sameCacheValue(previous[index], next[index])) return false;
+      if (!sameCacheValue(previous[index], next[index], ignoreCheckStamps)) return false;
     }
     return true;
   }
@@ -558,11 +560,19 @@ function sameCacheValue(previous: unknown, next: unknown): boolean {
   const before = previous as Record<string, unknown>;
   const after = next as Record<string, unknown>;
   return (
-    Object.keys(before).every((key) =>
-      sameCacheValue(before[key], Object.hasOwn(after, key) ? after[key] : undefined),
+    Object.keys(before).every(
+      (key) =>
+        (ignoreCheckStamps && key === "checkedAt") ||
+        sameCacheValue(
+          before[key],
+          Object.hasOwn(after, key) ? after[key] : undefined,
+          ignoreCheckStamps,
+        ),
     ) && Object.keys(after).every((key) => Object.hasOwn(before, key) || after[key] === undefined)
   );
 }
+
+const CHECK_STAMP_SAVE_INTERVAL_MS = 5 * 60_000;
 
 export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConfigState.make")(
   function* (
@@ -594,6 +604,7 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
     const persistence = yield* Queue.sliding<ServerConfig>(1);
     const pendingPersistence = yield* Ref.make<Option.Option<ServerConfig>>(Option.none());
     let lastPersisted: ServerConfig | undefined;
+    let lastPersistedAt = 0;
 
     const persist = Effect.fn("EnvironmentServerConfigState.persist")(function* (
       config: ServerConfig,
@@ -610,6 +621,16 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
       if (lastPersisted !== undefined && sameCacheValue(lastPersisted, cacheable)) {
         return true;
       }
+      // Hosts re-stamp every provider's `checkedAt` each status check, every few seconds across
+      // several hosts, and each save re-encodes the whole config with its model lists.
+      const now = yield* Clock.currentTimeMillis;
+      if (
+        lastPersisted !== undefined &&
+        now - lastPersistedAt < CHECK_STAMP_SAVE_INTERVAL_MS &&
+        sameCacheValue(lastPersisted, cacheable, true)
+      ) {
+        return true;
+      }
       const saved = yield* cache.saveServerConfig(environmentId, cacheable).pipe(
         Effect.as(true),
         Effect.catch((error) =>
@@ -622,7 +643,10 @@ export const makeEnvironmentServerConfigState = Effect.fn("EnvironmentServerConf
           ),
         ),
       );
-      if (saved) lastPersisted = cacheable;
+      if (saved) {
+        lastPersisted = cacheable;
+        lastPersistedAt = now;
+      }
       return saved;
     });
 
