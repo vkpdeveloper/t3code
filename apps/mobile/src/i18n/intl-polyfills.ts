@@ -46,8 +46,9 @@ if (Platform.OS === "android") {
   ) =>
     function (this: Date, locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
       // Native keeps the spec's TypeError for a time style on a date-only method (and the
-      // reverse) and its own text for an invalid date.
+      // reverse), its own text for an invalid date, and inherited options the spread would drop.
       if (
+        (options != null && Object.getPrototypeOf(options) !== Object.prototype) ||
         (required === "date" && options?.timeStyle !== undefined) ||
         (required === "time" && options?.dateStyle !== undefined) ||
         Number.isNaN(this.getTime())

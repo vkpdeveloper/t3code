@@ -29,6 +29,12 @@ describe("Android Date locale formatter cache", () => {
     expect(date.toLocaleDateString(new Intl.Locale("de-DE"), options)).toBe("Januar");
   });
 
+  it("reads inherited options", () => {
+    const date = new Date(Date.UTC(2026, 0, 31, 9));
+    const options = Object.create({ hour: "2-digit", timeZone: "UTC" });
+    expect(date.toLocaleString("en-US", options)).toBe("09 AM");
+  });
+
   it("follows a device time zone change", () => {
     const date = new Date(Date.UTC(2026, 0, 31, 12));
     process.env.TZ = "UTC";
