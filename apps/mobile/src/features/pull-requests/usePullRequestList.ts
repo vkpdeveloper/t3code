@@ -2,6 +2,7 @@ import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
 import {
   editHeldPullRequestListEntries,
   pullRequestHostAnswer,
+  pullRequestPendingEditsAtom,
   pullRequestPendingEditsFor,
 } from "@t3tools/client-runtime/state/pull-requests";
 import { RegistryContext, useAtomMount, useAtomSubscribe, useAtomValue } from "@effect/atom-react";
@@ -61,6 +62,9 @@ const sourcesFamily = Atom.family((key: string) => {
   return Atom.make((get) =>
     targets.map((target) => {
       const pages = currentPages(get, target);
+      // Per-row edit atoms cost a key and a subscription each, so rows skip them while the
+      // environment has no write in flight; this read still re-derives the list when one starts.
+      const editing = get(pullRequestPendingEditsAtom(target.environmentId)).length > 0;
       return {
         target,
         result: get(composerPullRequests.list(target)),
@@ -70,7 +74,7 @@ const sourcesFamily = Atom.family((key: string) => {
             : {
                 ...pages,
                 entries: editHeldPullRequestListEntries(target.input, pages.entries, (entry) =>
-                  get(pullRequestPendingEditsFor(target.environmentId, entry)),
+                  editing ? get(pullRequestPendingEditsFor(target.environmentId, entry)) : [],
                 ),
               },
         stats: get(pullRequestListStatsFamily(target.environmentId)),
