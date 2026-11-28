@@ -1,0 +1,22 @@
+diff --git a/index.js b/index.js
+index 05bdc3a..7e4d727 100644
+--- a/index.js
++++ b/index.js
+@@ -26,13 +26,11 @@ function normalizeColor(color) {
+     return null;
+   }
+ 
++  // Hits return without re-inserting: deleting and re-adding on every hit made Hermes rebuild the
++  // map in bursts of hundreds of milliseconds when a screen of SVG icons rendered. Eviction is
++  // first-in first-out instead of least-recently-used.
+   if (cachedColors.has(color)) {
+-    // Map iteration order follows insertion order, so re-inserting on every
+-    // hit keeps the least-recently-used entry first.
+-    const cachedColor = cachedColors.get(color);
+-    cachedColors.delete(color);
+-    cachedColors.set(color, cachedColor);
+-    return cachedColor;
++    return cachedColors.get(color);
+   }
+   const normalizedColor = parseColorString(color);
+   if (cachedColors.size >= 1024) {
