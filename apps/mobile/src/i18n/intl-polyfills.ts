@@ -33,4 +33,58 @@ if (Platform.OS === "android") {
       ? collator.compare(this, that)
       : localeCompare.call(this, that, locales, options);
   };
+
+  // Date's locale methods pay the same per-call cost (~25x a shared formatter), so they reuse one
+  // formatter per locale and options. Defaults follow ECMA-402 ToDateTimeOptions.
+  const dateFields = ["weekday", "year", "month", "day"] as const;
+  const timeFields = ["dayPeriod", "hour", "minute", "second", "fractionalSecondDigits"] as const;
+  const formatters = new Map<string, Intl.DateTimeFormat>();
+  const cachedDateMethod = (
+    native: (locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) => string,
+    required: "any" | "date" | "time",
+    defaults: "all" | "date" | "time",
+  ) =>
+    function (this: Date, locales?: Intl.LocalesArgument, options?: Intl.DateTimeFormatOptions) {
+      // Native keeps the spec's TypeError for a time style on a date-only method (and the
+      // reverse) and its own text for an invalid date.
+      if (
+        (required === "date" && options?.timeStyle !== undefined) ||
+        (required === "time" && options?.dateStyle !== undefined) ||
+        Number.isNaN(this.getTime())
+      )
+        return native.call(this, locales, options);
+      const key = JSON.stringify([required, defaults, locales, options]);
+      let formatter = formatters.get(key);
+      if (!formatter) {
+        const has = (fields: ReadonlyArray<keyof Intl.DateTimeFormatOptions>) =>
+          fields.some((field) => options?.[field] !== undefined);
+        const needsDefaults =
+          options?.dateStyle === undefined &&
+          options?.timeStyle === undefined &&
+          !(required !== "time" && has(dateFields)) &&
+          !(required !== "date" && has(timeFields));
+        formatter = new Intl.DateTimeFormat(locales, {
+          ...options,
+          ...(needsDefaults && defaults !== "time"
+            ? { year: "numeric", month: "numeric", day: "numeric" }
+            : {}),
+          ...(needsDefaults && defaults !== "date"
+            ? { hour: "numeric", minute: "numeric", second: "numeric" }
+            : {}),
+        });
+        formatters.set(key, formatter);
+      }
+      return formatter.format(this);
+    };
+  Date.prototype.toLocaleString = cachedDateMethod(Date.prototype.toLocaleString, "any", "all");
+  Date.prototype.toLocaleDateString = cachedDateMethod(
+    Date.prototype.toLocaleDateString,
+    "date",
+    "date",
+  );
+  Date.prototype.toLocaleTimeString = cachedDateMethod(
+    Date.prototype.toLocaleTimeString,
+    "time",
+    "time",
+  );
 }
