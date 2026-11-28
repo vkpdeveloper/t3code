@@ -1,28 +1,25 @@
-import { RadioButton } from "@expo/ui/jetpack-compose";
-import { size } from "@expo/ui/jetpack-compose/modifiers";
 import { View } from "react-native";
-import { NativeThemeHost } from "./NativeThemeHost.android";
-import { useControlTheme } from "./useControlTheme";
 
+import { cn } from "../../lib/cn";
+
+// Material's radio, drawn with views: a Compose RadioButton needs a Compose host per row, and
+// mounting hundreds of those made long pickers stutter while scrolling.
 /** The enclosing radio row owns selection, touch and accessibility. */
 export function RadioIndicator({ selected }: { readonly selected: boolean }) {
-  const { colors, systemColorsActive } = useControlTheme();
   return (
-    <View pointerEvents="none" importantForAccessibility="no-hide-descendants">
-      <NativeThemeHost ignoreSafeAreaKeyboardInsets style={{ width: 24, height: 24 }}>
-        <RadioButton
-          selected={selected}
-          modifiers={[size(24, 24)]}
-          colors={
-            systemColorsActive
-              ? {}
-              : {
-                  selectedColor: colors["--color-primary-text"],
-                  unselectedColor: colors["--color-foreground-muted"],
-                }
-          }
-        />
-      </NativeThemeHost>
+    <View
+      pointerEvents="none"
+      importantForAccessibility="no-hide-descendants"
+      className="size-6 items-center justify-center"
+    >
+      <View
+        className={cn(
+          "size-5 items-center justify-center rounded-full border-2",
+          selected ? "border-primary-text" : "border-foreground-muted",
+        )}
+      >
+        {selected ? <View className="size-2.5 rounded-full bg-primary-text" /> : null}
+      </View>
     </View>
   );
 }

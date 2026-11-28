@@ -138,8 +138,6 @@ const THREAD_SETTINGS_MAINTAIN_VISIBLE_CONTENT_POSITION = {
   size: true,
 } as const;
 const THREAD_SETTINGS_CATALOG_LAYOUT_TRANSITION = LinearTransition.duration(180);
-const THREAD_SETTINGS_CATALOG_ENTER_TRANSITION = FadeIn.duration(140);
-const THREAD_SETTINGS_CATALOG_EXIT_TRANSITION = FadeOut.duration(120);
 const THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION = LinearTransition.duration(180);
 const THREAD_SETTINGS_OPTION_ENTER_TRANSITION = FadeIn.duration(140);
 const THREAD_SETTINGS_OPTION_EXIT_TRANSITION = FadeOut.duration(100);
@@ -1133,26 +1131,30 @@ function ThreadSettingsMainContent(props: {
     ...(catalogItems.length === 0 ? ([{ kind: "empty", key: "empty" }] as const) : catalogItems),
     { kind: "options", key: "options" },
   ] satisfies ReadonlyArray<ThreadSettingsCatalogItem>;
+  // Rows recycle without an entering fade: keyed fades remounted every row scrolled into view and
+  // showed it half transparent. The list's item layout animation still moves rows on filter changes.
   const renderCatalogItem = (itemProps: LegendListRenderItemProps<ThreadSettingsCatalogItem>) => {
     const item = itemProps.item;
-    let content: ReactNode;
-
     if (item.kind === "provider") {
-      content = <ThreadSettingsProviderListHeader provider={item.provider} />;
-    } else if (item.kind === "subProvider") {
-      content = <ThreadSettingsSubProviderListHeader item={item} />;
-    } else if (item.kind === "model") {
-      content = (
+      return <ThreadSettingsProviderListHeader provider={item.provider} />;
+    }
+    if (item.kind === "subProvider") {
+      return <ThreadSettingsSubProviderListHeader item={item} />;
+    }
+    if (item.kind === "model") {
+      return (
         <ThreadSettingsModelListRow
           isFirst={item.isFirst}
           isLast={item.isLast}
           option={item.option}
         />
       );
-    } else if (item.kind === "notice") {
-      content = <Text className="mx-8 mt-2 text-xs text-foreground-muted">{item.text}</Text>;
-    } else if (item.kind === "empty") {
-      content = (
+    }
+    if (item.kind === "notice") {
+      return <Text className="mx-8 mt-2 text-xs text-foreground-muted">{item.text}</Text>;
+    }
+    if (item.kind === "empty") {
+      return (
         <View className="items-center px-8 py-14">
           <Text className="text-center text-sm text-foreground-muted">
             {session.favoritesOnly &&
@@ -1165,24 +1167,13 @@ function ThreadSettingsMainContent(props: {
           </Text>
         </View>
       );
-    } else {
-      content = (
-        <ThreadSettingsOptionsItem
-          animationsReady={animationsReady}
-          bottomInset={props.bottomInset}
-          onOpenSubmenu={props.onOpenSubmenu}
-        />
-      );
     }
-
     return (
-      <Animated.View
-        key={item.key}
-        entering={animationsReady ? THREAD_SETTINGS_CATALOG_ENTER_TRANSITION : undefined}
-        exiting={animationsReady ? THREAD_SETTINGS_CATALOG_EXIT_TRANSITION : undefined}
-      >
-        {content}
-      </Animated.View>
+      <ThreadSettingsOptionsItem
+        animationsReady={animationsReady}
+        bottomInset={props.bottomInset}
+        onOpenSubmenu={props.onOpenSubmenu}
+      />
     );
   };
 
