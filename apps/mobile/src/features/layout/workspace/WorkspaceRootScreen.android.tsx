@@ -4,7 +4,7 @@ import { WorkspaceNoTabs } from "./WorkspaceNoTabs";
 import { useEnabledNavigationTabs } from "./navigation-tabs";
 import { NAVIGATION_TAB_ORDER } from "./navigation-tab-order";
 import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { View } from "react-native";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
@@ -20,7 +20,11 @@ import { useAdaptiveWorkspaceLayout } from "../AdaptiveWorkspaceLayout";
 import { WorkspaceSettledContentWidthContext } from "../workspace-content-width";
 import { AndroidWorkspaceNavigation, FloatingWorkspaceTabs } from "./AndroidWorkspaceNavigation";
 import { FLOATING_TABS } from "./floating-workspace-tabs";
-import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
+import {
+  WorkspaceTabsContext,
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "./WorkspaceTabsContext";
 import { WorkspaceTabPanes } from "./WorkspaceTabPanes";
 import { WorkspaceAppBarScope } from "../../../components/ui/WorkspaceAppBar.android";
 import { usePaneRole } from "../../../components/ui/Pane";
@@ -39,106 +43,117 @@ function WorkspaceRoot() {
   const gt = useGT();
   const floatingTabsEnabled = useAndroidFloatingTabs();
   const { layout, startNewTask, workspacePageWidth } = useAdaptiveWorkspaceLayout();
-  const workspace = useWorkspaceTabs()!;
+  const controls = useWorkspaceTabControls()!;
+  const tab = useWorkspaceTabsSelector((state) => state.selectedTab)!;
+  const searchResting = useWorkspaceTabsSelector(
+    (state) => state.tabs[state.selectedTab].searchMode === "resting",
+  );
   const enabled = useEnabledNavigationTabs();
   const insets = useSafeAreaInsets();
   const { fabClearance, fabSize } = useAndroidControlSizing();
-  const context = {
-    ...workspace,
-    bottomClearance: layout.usesSplitView
-      ? workspace.bottomClearance
-      : floatingTabsEnabled
-        ? insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
-        : workspace.state.selectedTab === "threads"
-          ? fabClearance + 16
-          : 16,
-  };
-  const tab = workspace.state.selectedTab;
+  // Each pane gets values for its own tab, so switching tabs leaves every pane's context alone
+  // and hidden panes do not re-render.
+  const panes = useMemo(() => {
+    const paneFor = (paneTab: WorkspaceTab) => {
+      const bottomClearance = layout.usesSplitView
+        ? controls.bottomClearance
+        : floatingTabsEnabled
+          ? insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + fabSize
+          : paneTab === "threads"
+            ? fabClearance + 16
+            : 16;
+      return {
+        context: { ...controls, bottomClearance },
+        insets: layout.usesSplitView
+          ? insets
+          : floatingTabsEnabled
+            ? !workspaceUsesColumns(paneTab)
+              ? { ...insets, bottom: bottomClearance }
+              : insets
+            : { ...insets, bottom: 0 },
+      };
+    };
+    return Object.fromEntries(TABS.map((paneTab) => [paneTab, paneFor(paneTab)])) as Record<
+      WorkspaceTab,
+      ReturnType<typeof paneFor>
+    >;
+  }, [controls, layout.usesSplitView, floatingTabsEnabled, insets, fabClearance, fabSize]);
   const selectTab = useSelectWorkspaceTab();
   // Tabs are panes of Home, not routes, so Back has nothing to pop and would leave the app.
   // An open search keeps Back for itself.
   useHardwareBack(
-    tab !== "threads" &&
-      enabled.includes("threads") &&
-      workspace.state.tabs[tab].searchMode === "resting",
+    tab !== "threads" && enabled.includes("threads") && searchResting === true,
     () => {
       selectTab("threads");
       return true;
     },
   );
 
+  const renderPane = (tab: WorkspaceTab) =>
+    tab === "threads" ? (
+      <HomeRouteScreen />
+    ) : tab === "usage" || tab === "workflows" ? (
+      <WorkspacePageFrame width={workspacePageWidth ?? null}>
+        <WorkspaceExtraTab tab={tab} />
+      </WorkspacePageFrame>
+    ) : layout.usesSplitView ? (
+      <>
+        <NativeStackScreenOptions options={{ headerShown: false }} />
+        <AppBar
+          embedded
+          title={
+            tab === "issues"
+              ? gt("Issues", { $context: "screen title, list of issues" })
+              : gt("Pull requests")
+          }
+        />
+        <WorkspaceEmptyDetail tab={tab} />
+      </>
+    ) : tab === "issues" ? (
+      <IssuesScreen
+        renderFrame={(filters, list) => (
+          <>
+            <ListSearchToolbar tab="issues" filters={filters} />
+            <ScreenContent>{list}</ScreenContent>
+          </>
+        )}
+      />
+    ) : (
+      <PullRequestsScreen
+        renderFrame={(filters, list) => (
+          <>
+            <ListSearchToolbar tab="pullRequests" filters={filters} />
+            <ScreenContent>{list}</ScreenContent>
+          </>
+        )}
+      />
+    );
+
   return (
-    <WorkspaceTabsContext value={context}>
+    <WorkspaceTabsContext value={panes[tab].context}>
       <View className={layout.usesSplitView ? "flex-1 bg-screen" : "flex-1 bg-header"}>
         {!layout.usesSplitView ? (
           <NativeStackScreenOptions options={{ headerShown: false }} />
         ) : null}
-        <SafeAreaInsetsContext
-          value={
-            layout.usesSplitView
-              ? insets
-              : floatingTabsEnabled
-                ? !workspaceUsesColumns(tab)
-                  ? { ...insets, bottom: context.bottomClearance }
-                  : insets
-                : { ...insets, bottom: 0 }
-          }
-        >
-          {enabled.length === 0 ? (
-            layout.usesSplitView ? (
-              <View className="flex-1 bg-screen" />
-            ) : (
-              <WorkspaceNoTabs />
-            )
-          ) : (
-            <WorkspaceAppBarScope enabled={!layout.usesSplitView}>
-              <WorkspaceTabPanes
-                tabs={TABS}
-                selected={tab}
-                renderTab={(tab) =>
-                  tab === "threads" ? (
-                    <HomeRouteScreen />
-                  ) : tab === "usage" || tab === "workflows" ? (
-                    <WorkspacePageFrame width={workspacePageWidth ?? null}>
-                      <WorkspaceExtraTab tab={tab} />
-                    </WorkspacePageFrame>
-                  ) : layout.usesSplitView ? (
-                    <>
-                      <NativeStackScreenOptions options={{ headerShown: false }} />
-                      <AppBar
-                        embedded
-                        title={
-                          tab === "issues"
-                            ? gt("Issues", { $context: "screen title, list of issues" })
-                            : gt("Pull requests")
-                        }
-                      />
-                      <WorkspaceEmptyDetail tab={tab} />
-                    </>
-                  ) : tab === "issues" ? (
-                    <IssuesScreen
-                      renderFrame={(filters, list) => (
-                        <>
-                          <ListSearchToolbar tab="issues" filters={filters} />
-                          <ScreenContent>{list}</ScreenContent>
-                        </>
-                      )}
-                    />
-                  ) : (
-                    <PullRequestsScreen
-                      renderFrame={(filters, list) => (
-                        <>
-                          <ListSearchToolbar tab="pullRequests" filters={filters} />
-                          <ScreenContent>{list}</ScreenContent>
-                        </>
-                      )}
-                    />
-                  )
-                }
-              />
-            </WorkspaceAppBarScope>
-          )}
-        </SafeAreaInsetsContext>
+        {enabled.length === 0 ? (
+          <SafeAreaInsetsContext value={panes[tab].insets}>
+            {layout.usesSplitView ? <View className="flex-1 bg-screen" /> : <WorkspaceNoTabs />}
+          </SafeAreaInsetsContext>
+        ) : (
+          <WorkspaceAppBarScope enabled={!layout.usesSplitView}>
+            <WorkspaceTabPanes
+              tabs={TABS}
+              selected={tab}
+              renderTab={(tab) => (
+                <WorkspaceTabsContext value={panes[tab].context}>
+                  <SafeAreaInsetsContext value={panes[tab].insets}>
+                    {renderPane(tab)}
+                  </SafeAreaInsetsContext>
+                </WorkspaceTabsContext>
+              )}
+            />
+          </WorkspaceAppBarScope>
+        )}
         {layout.usesSplitView ? null : floatingTabsEnabled ? (
           <FloatingWorkspaceTabs fillWidth onNewThread={startNewTask} />
         ) : (

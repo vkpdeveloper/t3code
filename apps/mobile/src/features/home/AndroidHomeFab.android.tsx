@@ -15,7 +15,10 @@ import { useWorkspaceState } from "../../state/workspace";
 import { FabScrollContext } from "./FabScrollContext";
 import { updateFabScroll } from "./fab-scroll";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
-import { WorkspaceTabsContext, useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  WorkspaceTabsContext,
+  useWorkspaceTabControls,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { FLOATING_TABS, floatingTabsMetrics } from "../layout/workspace/floating-workspace-tabs";
 import { useEnabledNavigationTabs } from "../layout/workspace/navigation-tabs";
 import {
@@ -40,7 +43,7 @@ export function AndroidHomeFabLayout(props: ComponentProps<typeof SharedAndroidH
   const size = floatingTabsEnabled
     ? floatingTabsMetrics(enabledTabs.length + 1, scale, fabSize, barWidth).height
     : fabSize;
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
   const bottomClearance = insets.bottom + FLOATING_TABS.bottom + FLOATING_TABS.edge + size;
   const context = floatingTabsEnabled && workspace ? { ...workspace, bottomClearance } : workspace;
   const scrollState = useRef({ anchor: 0, expanded: true });

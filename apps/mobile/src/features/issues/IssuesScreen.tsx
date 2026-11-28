@@ -46,7 +46,10 @@ import { useWorkspaceState } from "../../state/workspace";
 import { ListFilterMenu } from "../layout/workspace/ListFilterMenu";
 import { useSearchScrollRestoration } from "../layout/workspace/useSearchScrollRestoration";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { issueParamsKey } from "./issueParams";
 import { IssueListRow } from "./IssueListRow";
 import type { PullRequestFilterMenu } from "../pull-requests/PullRequestListFilters";
@@ -111,7 +114,8 @@ export function IssuesScreen(
   const gt = useGT();
   const messages = useMessages();
   const primaryColumn = use(NativePrimaryColumnContext);
-  const workspace = useWorkspaceTabs()!;
+  const workspace = useWorkspaceTabControls()!;
+  const tab = useWorkspaceTabsSelector((state) => state.tabs.issues)!;
   const { environments } = useWorkspaceState();
   const configs = useAtomValue(environmentServerConfigsAtom);
   const projects = useProjects();
@@ -122,7 +126,6 @@ export function IssuesScreen(
   const bottomSafeArea =
     Platform.OS === "ios" ? (columnSafeBottom ?? insets.bottom) : insets.bottom;
   const listRef = useRef<LegendListRef>(null);
-  const tab = workspace.state.tabs.issues;
   const [initialScrollOffset] = useState(() => workspace.getScrollOffset("issues"));
   useSearchScrollRestoration(tab.searchMode, () => {
     void listRef.current?.scrollToOffset({

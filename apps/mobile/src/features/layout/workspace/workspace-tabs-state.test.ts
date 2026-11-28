@@ -244,6 +244,9 @@ vi.mock("./navigation-tabs", () => ({
 vi.mock("./WorkspaceTabsContext", () => ({
   WorkspaceTabsContext: createContext(null),
   useWorkspaceTabs: () => ({ state: mocks.state, dispatch: () => undefined }),
+  useWorkspaceTabControls: () => ({ dispatch: () => undefined }),
+  useWorkspaceTabsSelector: <A>(select: (state: WorkspaceTabsState) => A) =>
+    mocks.state ? select(mocks.state) : undefined,
 }));
 vi.mock("./WorkspaceExtraTab", () => ({
   WorkspaceExtraTab: function UsageProbe() {

@@ -1,3 +1,4 @@
+import { Atom } from "effect/reactivity";
 import { useGT, useMessages } from "gt-react-native";
 import {
   WORKSPACE_TAB_LABELS,
@@ -74,6 +75,7 @@ function RetainedWorkspaceTab(props: {
         ...workspace,
         settingsOpen: props.slot === "settings",
         state: { ...workspace.state, selectedTab: props.tab },
+        stateAtom: Atom.make((get) => ({ ...get(workspace.stateAtom), selectedTab: props.tab })),
       },
       children: props.children,
       headerOnly: true,

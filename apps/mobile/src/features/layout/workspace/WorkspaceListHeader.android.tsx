@@ -7,7 +7,7 @@ import { AppBar } from "../../../components/ui/AppBar";
 import { useWorkspaceConnectionState } from "../../../state/workspace";
 import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardCommands";
 import { WorkspaceBrandTitle } from "./WorkspaceBrandTitle";
-import { useWorkspaceTabs } from "./WorkspaceTabsContext";
+import { useWorkspaceTabControls, useWorkspaceTabsSelector } from "./WorkspaceTabsContext";
 import {
   workspaceListFilterIcon,
   type WorkspaceListHeaderProps,
@@ -16,11 +16,11 @@ import {
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
   const gt = useGT();
   const navigation = useNavigation();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const threadsSelected = useWorkspaceTabsSelector((state) => state.selectedTab === "threads");
   const isTabActive = workspace?.isTabActive;
   const homeFocused = useNavigationState((state) => state.routes[state.index]?.name === "Home");
-  const listFocused =
-    homeFocused && (workspace === null || workspace.state.selectedTab === "threads");
+  const listFocused = homeFocused && (workspace === null || threadsSelected === true);
   const connectionState = useWorkspaceConnectionState();
   const { search, sidebar } = props;
   const onSearchQueryChange = search.onChangeText;

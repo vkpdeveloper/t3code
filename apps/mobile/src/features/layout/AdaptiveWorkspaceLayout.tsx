@@ -91,7 +91,10 @@ import {
   type WorkspaceDetailSheet,
 } from "./workspace/workspace-detail-selection";
 import { startOpeningDetail } from "./workspace/useSelectWorkspaceDetail";
-import { useWorkspaceTabs } from "./workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "./workspace/WorkspaceTabsContext";
 import { HomeListOptionsProvider } from "../home/home-list-options";
 import { buildHomeProjectScopes, resolveHomeProjectFilterScope } from "../home/homeThreadList";
 import { newTaskDestination, newTaskFilteredProject } from "../threads/new-task-project-selection";
@@ -282,16 +285,15 @@ function AdaptiveWorkspaceLayoutContent(
   const nativeMetrics = useNativeLayoutMetrics();
   const { width: viewportWidth, height } = nativeMetrics ?? windowDimensions;
   const pathname = props.pathname;
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const selectedTabUsesColumns = useWorkspaceTabsSelector((state) =>
+    workspaceUsesColumns(state.selectedTab),
+  );
   // Settings and Usage occupy the workspace rather than a list/detail pair.
   const androidSettingsOpen = useAndroidWorkspaceRoot()?.settingsOpen ?? false;
   const safeAreaInsets = useSafeAreaInsets();
   const workspacePage =
-    Platform.OS === "android" &&
-    (androidSettingsOpen ||
-      (workspace !== null &&
-        workspace !== undefined &&
-        !workspaceUsesColumns(workspace.state.selectedTab)));
+    Platform.OS === "android" && (androidSettingsOpen || selectedTabUsesColumns === false);
   const navigation = useNavigation();
   const [primarySidebarPreferredVisible, setPrimarySidebarPreferredVisible] = useState(true);
   const [fileInspectorPreferredVisible, setFileInspectorPreferredVisible] = useState(true);

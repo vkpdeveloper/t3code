@@ -11,7 +11,10 @@ import {
 import { currentWorkspaceSelections } from "../layout/workspace/workspace-selection-store";
 import { rememberedSettingsPage } from "../layout/workspace/workspace-tab-navigation";
 import { useSelectWorkspaceTab } from "../layout/workspace/useSelectWorkspaceTab";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useAuth, useUser } from "@clerk/expo";
@@ -75,7 +78,8 @@ export function SettingsListScreen(props: {
   readonly selected: string | null;
 }) {
   const gt = useGT();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const settingsQuery = useWorkspaceTabsSelector((state) => state.tabs.settings.query);
   const environmentMenu = useSettingsEnvironmentMenu();
   return (
     <SettingsSidebarContext value={props.sidebar ? { selected: props.selected } : null}>
@@ -87,7 +91,7 @@ export function SettingsListScreen(props: {
           search={
             workspace
               ? {
-                  value: workspace.state.tabs.settings.query,
+                  value: settingsQuery ?? "",
                   onChangeText: (query) =>
                     workspace.dispatch({ type: "query", tab: "settings", query }),
                   placeholder: gt("Search settings"),
@@ -175,8 +179,8 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
   const insets = useSafeAreaInsets();
   // UIKit insets the scroll view by its column's safe area, which this context can report as 0.
   const bottomSafeArea = useNativeColumnLayoutMetrics()?.safeArea.bottom ?? insets.bottom;
-  const workspace = useWorkspaceTabs();
-  const query = workspace?.state.tabs.settings.query ?? "";
+  const workspace = useWorkspaceTabControls();
+  const query = useWorkspaceTabsSelector((state) => state.tabs.settings.query) ?? "";
   const overflowRows = useOverflowRows();
   const indexSections = useSettingsIndexSections();
   const sections = filterSettingsSections(

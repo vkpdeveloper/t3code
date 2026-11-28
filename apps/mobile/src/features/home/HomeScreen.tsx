@@ -101,7 +101,10 @@ import { createSwipeRowActivation } from "./swipe-row-activation";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { useFabScroll } from "./FabScrollContext";
 import { holdLaunchSplashForHomeRows, settleLaunchSplashHomeRows } from "./home-launch-splash";
-import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
+import {
+  useWorkspaceTabControls,
+  useWorkspaceTabsSelector,
+} from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
 import { deriveHomeEmptyState } from "./home-empty-state";
 
@@ -197,7 +200,8 @@ export function HomeScreen(props: HomeScreenProps) {
   const gt = useGT();
   const m = useMessages();
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
-  const workspace = useWorkspaceTabs();
+  const workspace = useWorkspaceTabControls();
+  const threadsTab = useWorkspaceTabsSelector((state) => state.tabs.threads);
   const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
   const primaryColumn = use(NativePrimaryColumnContext);
   const sidebarSurface = usePaneRole() === "sidebar" && primaryColumn !== null;
@@ -275,8 +279,8 @@ export function HomeScreen(props: HomeScreenProps) {
   };
   const onFabScroll = useFabScroll();
   const listRef = useRef<LegendListRef>(null);
-  const searchMode = workspace?.state.tabs.threads.searchMode;
-  const restoredOffset = workspace?.state.tabs.threads.scrollOffset;
+  const searchMode = threadsTab?.searchMode;
+  const restoredOffset = threadsTab?.scrollOffset;
   useSearchScrollRestoration(searchMode, () => {
     if (restoredOffset === undefined) return;
     void listRef.current?.scrollToOffset({

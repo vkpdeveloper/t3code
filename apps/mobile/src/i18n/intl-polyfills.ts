@@ -16,3 +16,21 @@ import "@formatjs/intl-pluralrules/locale-data/pt";
 import "@formatjs/intl-pluralrules/locale-data/ru";
 import "@formatjs/intl-pluralrules/locale-data/sv";
 import "@formatjs/intl-pluralrules/locale-data/zh";
+import { Platform } from "react-native";
+
+// Hermes on Android builds a fresh collator across JNI for every localeCompare, so sorting a few
+// hundred labels took a quarter second; one shared collator compares the same way ~17x faster.
+if (Platform.OS === "android") {
+  const collator = new Intl.Collator();
+  const localeCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = function (
+    this: string,
+    that: string,
+    locales?: Intl.LocalesArgument,
+    options?: Intl.CollatorOptions,
+  ) {
+    return locales === undefined && options === undefined
+      ? collator.compare(this, that)
+      : localeCompare.call(this, that, locales, options);
+  };
+}

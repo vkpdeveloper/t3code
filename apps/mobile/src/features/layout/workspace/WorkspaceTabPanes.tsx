@@ -19,8 +19,17 @@ export function WorkspaceTabPanes<Tab extends string>(props: {
   return props.tabs.map((tab) =>
     visited.includes(tab) ? (
       <Activity key={tab} mode={tab === props.selected ? "visible" : "hidden"}>
-        <View className="flex-1">{props.renderTab(tab)}</View>
+        <WorkspaceTabPane tab={tab} renderTab={props.renderTab} />
       </Activity>
     ) : null,
   );
+}
+
+// A component of its own so the compiler keeps each pane's element while its inputs hold: a
+// selection change then re-renders only what reads the selection, not every mounted tab.
+function WorkspaceTabPane<Tab extends string>(props: {
+  readonly tab: Tab;
+  readonly renderTab: (tab: Tab) => ReactNode;
+}) {
+  return <View className="flex-1">{props.renderTab(props.tab)}</View>;
 }
